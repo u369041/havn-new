@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
-import { prisma } from "./db";
+import { prisma } from "./db.js";
 
 const app = express();
 app.use(cors());
