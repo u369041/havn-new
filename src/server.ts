@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
@@ -6,7 +6,29 @@ import { prisma } from "./db.js";
 import { listings } from "./listings.js";
 
 const app = express();
-app.use(cors());
+
+// Allow only these origins (plus localhost in non-prod)
+const allowed = new Set<string>([
+  "https://havn.ie",
+  "https://www.havn.ie",
+  "https://havn-new.onrender.com", // keep for testing
+]);
+if (process.env.NODE_ENV !== "production") {
+  allowed.add("http://localhost:3000");
+  allowed.add("http://localhost:5173");
+}
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);          // curl / server-to-server
+      return cb(null, allowed.has(origin));
+    },
+    credentials: false,
+    optionsSuccessStatus: 200,
+  })
+);
+
 app.use(express.json());
 app.use(morgan("dev"));
 app.use(listings);
