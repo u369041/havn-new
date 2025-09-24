@@ -5,6 +5,7 @@ import morgan from "morgan";
 import { prisma } from "./db.js";
 import { listings } from "./listings.js";
 import uploadRoutes from "./routes/uploads.js";
+import propertyRoutes from "./routes/properties.js"; // <-- new
 
 // Whitelisted origins (plus localhost when not in production)
 const allowed = new Set<string>([
@@ -17,7 +18,7 @@ if (process.env.NODE_ENV !== "production") {
   allowed.add("http://localhost:5173");
 }
 
-// Explicit types so TS with noImplicitAny is happy
+// Explicit types for strict TS
 type OriginCallback = (err: Error | null, allow?: boolean) => void;
 type OriginFn = (origin: string | undefined, callback: OriginCallback) => void;
 
@@ -27,7 +28,7 @@ const corsOrigin: OriginFn = (origin, cb) => {
   return cb(null, allowed.has(origin));
 };
 
-// Robust CORS options (Express 5-safe). Global `app.use(cors(...))` handles preflight.
+// Global CORS (preflight handled by cors middleware)
 const corsOptions: cors.CorsOptions = {
   origin: corsOrigin,
   credentials: true,
@@ -39,7 +40,7 @@ const corsOptions: cors.CorsOptions = {
 
 const app = express();
 
-// CORS must be first (so preflight gets answered)
+// CORS must be first
 app.use(cors(corsOptions));
 
 // Body parsing & logging
@@ -49,6 +50,7 @@ app.use(morgan("dev"));
 // Routes
 app.use(listings);
 app.use("/api/uploads", uploadRoutes);
+app.use("/api/properties", propertyRoutes); // <-- new
 
 // Health/check endpoints
 const PORT = Number(process.env.PORT || 3000);
