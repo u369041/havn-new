@@ -7,7 +7,7 @@ import { listings } from "./listings.js";
 import uploadRoutes from "./routes/uploads.js";
 
 // Whitelisted origins (plus localhost when not in production)
-const allowed = new Set([
+const allowed = new Set<string>([
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com", // keep for testing
@@ -17,14 +17,18 @@ if (process.env.NODE_ENV !== "production") {
   allowed.add("http://localhost:5173");
 }
 
-// CORS origin function (no TypeScript annotations to avoid build issues)
-const corsOrigin = (origin, cb) => {
-  if (!origin) return cb(null, true);           // server-to-server/tools
+// Explicit types so TS with noImplicitAny is happy
+type OriginCallback = (err: Error | null, allow?: boolean) => void;
+type OriginFn = (origin: string | undefined, callback: OriginCallback) => void;
+
+// CORS origin function
+const corsOrigin: OriginFn = (origin, cb) => {
+  if (!origin) return cb(null, true);          // server-to-server/tools
   return cb(null, allowed.has(origin));
 };
 
 // Robust CORS options (Express 5-safe, handles preflight)
-const corsOptions = {
+const corsOptions: cors.CorsOptions = {
   origin: corsOrigin,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
