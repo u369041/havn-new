@@ -4,7 +4,7 @@ import cors from "cors";
 import morgan from "morgan";
 import { prisma } from "./db.js";
 import { listings } from "./listings.js";
-import uploadRoutes from "./routes/uploads";
+import uploadRoutes from "./routes/uploads.js";
 
 
 const app = express();
