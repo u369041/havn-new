@@ -27,7 +27,7 @@ const corsOrigin: OriginFn = (origin, cb) => {
   return cb(null, allowed.has(origin));
 };
 
-// Robust CORS options (Express 5-safe, handles preflight)
+// Robust CORS options (Express 5-safe). Global `app.use(cors(...))` handles preflight.
 const corsOptions: cors.CorsOptions = {
   origin: corsOrigin,
   credentials: true,
@@ -41,8 +41,6 @@ const app = express();
 
 // CORS must be first (so preflight gets answered)
 app.use(cors(corsOptions));
-// Express 5: use a path/regex-style wildcard for OPTIONS
-app.options("/(.*)", cors(corsOptions));
 
 // Body parsing & logging
 app.use(express.json({ limit: "5mb" }));
