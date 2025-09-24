@@ -31,9 +31,11 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 app.use(morgan("dev"));
 app.use(listings);
+app.use("/api/uploads", uploadRoutes);
+
 
 const PORT = Number(process.env.PORT || 3000);
 
