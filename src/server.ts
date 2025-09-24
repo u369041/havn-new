@@ -6,8 +6,8 @@ import { prisma } from "./db.js";
 import { listings } from "./listings.js";
 import uploadRoutes from "./routes/uploads.js";
 
-// Allow only these origins (plus localhost in non-prod)
-const allowed = new Set<string>([
+// Whitelisted origins (plus localhost when not in production)
+const allowed = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com", // keep for testing
@@ -17,13 +17,15 @@ if (process.env.NODE_ENV !== "production") {
   allowed.add("http://localhost:5173");
 }
 
-// Robust CORS options (works with Express 5, handles preflight)
+// CORS origin function (no TypeScript annotations to avoid build issues)
+const corsOrigin = (origin, cb) => {
+  if (!origin) return cb(null, true);           // server-to-server/tools
+  return cb(null, allowed.has(origin));
+};
+
+// Robust CORS options (Express 5-safe, handles preflight)
 const corsOptions = {
-  origin: (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
-    if (!origin) return cb(null, true);            // server-to-server/tools
-    if (allowed.has(origin)) return cb(null, true);
-    return cb(null, false);                        // block everything else
-  },
+  origin: corsOrigin,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -35,7 +37,7 @@ const app = express();
 
 // CORS must be first (so preflight gets answered)
 app.use(cors(corsOptions));
-// Express 5 doesn't accept "*" here; use a path/regex-style wildcard:
+// Express 5: use a path/regex-style wildcard for OPTIONS
 app.options("/(.*)", cors(corsOptions));
 
 // Body parsing & logging
@@ -59,4 +61,9 @@ app.get("/api/properties/ping", (_req, res) => {
 
 app.get("/api/db/ping", async (_req, res) => {
   const listingCount = await prisma.listing.count();
-  res.json(
+  res.json({ ok: true, listingCount });
+});
+
+app.listen(PORT, () => {
+  console.log(`havn-new listening on http://localhost:${PORT}`);
+});
