@@ -17,7 +17,7 @@ if (process.env.NODE_ENV !== "production") {
   allowed.add("http://localhost:5173");
 }
 
-// Robust CORS options (handles preflight)
+// Robust CORS options (works with Express 5, handles preflight)
 const corsOptions = {
   origin: (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
     if (!origin) return cb(null, true);            // server-to-server/tools
@@ -25,8 +25,8 @@ const corsOptions = {
     return cb(null, false);                        // block everything else
   },
   credentials: true,
-  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","X-Requested-With"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   optionsSuccessStatus: 204,
   maxAge: 86400,
 };
@@ -35,7 +35,8 @@ const app = express();
 
 // CORS must be first (so preflight gets answered)
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+// Express 5 doesn't accept "*" here; use a path/regex-style wildcard:
+app.options("/(.*)", cors(corsOptions));
 
 // Body parsing & logging
 app.use(express.json({ limit: "5mb" }));
@@ -58,9 +59,4 @@ app.get("/api/properties/ping", (_req, res) => {
 
 app.get("/api/db/ping", async (_req, res) => {
   const listingCount = await prisma.listing.count();
-  res.json({ ok: true, listingCount });
-});
-
-app.listen(PORT, () => {
-  console.log(`havn-new listening on http://localhost:${PORT}`);
-});
+  res.json(
