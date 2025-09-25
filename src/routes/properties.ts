@@ -1,10 +1,11 @@
+// src/routes/properties.ts
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 
-// ----- config -----
+// --- config ---
 const SITEMAP_PING_URL = process.env.SITEMAP_PING_URL || "";
 
-// ----- types -----
+// --- types from frontend payload ---
 interface ImageIn {
   url: string;
   width?: number;
@@ -15,7 +16,7 @@ interface ImageIn {
 
 const router = Router();
 
-// ----- helpers -----
+// --- helpers ---
 function toSlug(input: string): string {
   return (
     (input || "")
@@ -26,7 +27,6 @@ function toSlug(input: string): string {
       .replace(/(^-|-$)+/g, "") || "listing"
   );
 }
-
 function randId(len = 6): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   let s = "";
@@ -36,12 +36,15 @@ function randId(len = 6): string {
 
 const ALLOWED_TYPES = new Set(["HOUSE","APARTMENT","DUPLEX","TOWNHOUSE","LAND","OTHER"]);
 const ALLOWED_STATUS = new Set(["ACTIVE","SOLD","LET","DRAFT"]);
+const ALLOWED_CATEGORY = new Set(["BUY","RENT","SHARE"]);
 
+// Build a unique slug (retry if collision)
 async function buildUniqueSlug(base: string): Promise<string> {
   let candidate = toSlug(base);
   if (!candidate) candidate = "listing";
   const existing = await prisma.property.findUnique({ where: { slug: candidate } });
   if (!existing) return candidate;
+
   for (let i = 0; i < 5; i++) {
     const cand = `${candidate}-${randId(6)}`;
     const ex = await prisma.property.findUnique({ where: { slug: cand } });
@@ -50,11 +53,15 @@ async function buildUniqueSlug(base: string): Promise<string> {
   return `${candidate}-${Date.now().toString(36)}`;
 }
 
-/** POST /api/properties */
+/** POST /api/properties
+ * Creates a property with up to 70 images.
+ * Accepts: title, description, price, [type,status,category,address,city,county,eircode,beds,baths,areaSqm,images[]]
+ */
 router.post("/", async (req: Request, res: Response) => {
   try {
     const b = (req.body ?? {}) as any;
 
+    // required
     const title = (b.title ?? "").toString().trim();
     const description = (b.description ?? "").toString().trim();
     const price = Number(b.price ?? 0);
@@ -62,6 +69,7 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: "title, description, and a positive price are required" });
     }
 
+    // optional strings/enums
     const city = (b.city ?? "").toString().trim() || undefined;
     const county = (b.county ?? "").toString().trim() || undefined;
     const address = (b.address ?? "").toString().trim() || undefined;
@@ -73,10 +81,15 @@ router.post("/", async (req: Request, res: Response) => {
     let status = (b.status ?? "ACTIVE").toString().trim().toUpperCase();
     if (!ALLOWED_STATUS.has(status)) status = "ACTIVE";
 
+    let category = (b.category ?? "BUY").toString().trim().toUpperCase();
+    if (!ALLOWED_CATEGORY.has(category)) category = "BUY";
+
+    // numbers
     const beds = b.beds != null && b.beds !== "" ? Number(b.beds) : undefined;
     const baths = b.baths != null && b.baths !== "" ? Number(b.baths) : undefined;
     const areaSqm = b.areaSqm != null && b.areaSqm !== "" ? Number(b.areaSqm) : undefined;
 
+    // images (cap at 70)
     const MAX = 70;
     const imagesRaw: ImageIn[] = Array.isArray(b.images) ? (b.images as ImageIn[]) : [];
     const images = imagesRaw
@@ -94,9 +107,11 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: "at least one image is required" });
     }
 
+    // slug
     const base = `${title} ${city || county || ""}`.trim();
     const slug = await buildUniqueSlug(base);
 
+    // create
     const created = await prisma.property.create({
       data: {
         slug,
@@ -105,6 +120,7 @@ router.post("/", async (req: Request, res: Response) => {
         price,
         type: type as any,
         status: status as any,
+        category: category as any, // <-- NEW
         address,
         city,
         county,
@@ -125,23 +141,17 @@ router.post("/", async (req: Request, res: Response) => {
       include: { images: { orderBy: { sort: "asc" } } },
     });
 
-    // --- Fire & forget sitemap ping (do not await) ---
-    if (SITEMAP_PING_URL) {
-      void fetch(SITEMAP_PING_URL).catch(() => {});
-    }
+    // ping sitemap (fire & forget)
+    if (SITEMAP_PING_URL) void fetch(SITEMAP_PING_URL).catch(() => {});
 
     return res.json({ ok: true, property: created, imageCount: created.images.length });
   } catch (err: any) {
     console.error("POST /api/properties error", err);
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "internal_error",
-      code: err?.code || undefined
-    });
+    return res.status(500).json({ ok: false, error: err?.message || "internal_error", code: err?.code });
   }
 });
 
-/** GET /api/properties/:slug */
+/** GET /api/properties/:slug - fetch by slug */
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
     const slug = String(req.params.slug || "");
@@ -157,13 +167,26 @@ router.get("/:slug", async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/properties */
-router.get("/", async (_req: Request, res: Response) => {
+/** GET /api/properties
+ * Filters:
+ *   ?category=BUY|RENT|SHARE
+ *   ?limit=1..100   (default 60)
+ */
+router.get("/", async (req: Request, res: Response) => {
   try {
+    let where: any = {};
+    const qcat = String(req.query.category ?? "").trim().toUpperCase();
+    if (qcat && ALLOWED_CATEGORY.has(qcat)) where.category = qcat as any;
+
+    let limit = Number(req.query.limit ?? 60);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 60;
+    if (limit > 100) limit = 100;
+
     const props = await prisma.property.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       include: { images: { orderBy: { sort: "asc" } } },
-      take: 60,
+      take: limit,
     });
     return res.json({ ok: true, count: props.length, properties: props });
   } catch (err: any) {
