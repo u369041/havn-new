@@ -1,14 +1,16 @@
-// src/routes/properties.ts
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 
-// ----- types (for clarity only) -----
+// ----- config -----
+const SITEMAP_PING_URL = process.env.SITEMAP_PING_URL || "";
+
+// ----- types -----
 interface ImageIn {
   url: string;
   width?: number;
   height?: number;
   alt?: string;
-  order: number; // from frontend
+  order: number;
 }
 
 const router = Router();
@@ -35,7 +37,6 @@ function randId(len = 6): string {
 const ALLOWED_TYPES = new Set(["HOUSE","APARTMENT","DUPLEX","TOWNHOUSE","LAND","OTHER"]);
 const ALLOWED_STATUS = new Set(["ACTIVE","SOLD","LET","DRAFT"]);
 
-// Build a unique slug (retry if collision)
 async function buildUniqueSlug(base: string): Promise<string> {
   let candidate = toSlug(base);
   if (!candidate) candidate = "listing";
@@ -49,9 +50,7 @@ async function buildUniqueSlug(base: string): Promise<string> {
   return `${candidate}-${Date.now().toString(36)}`;
 }
 
-/**
- * POST /api/properties
- */
+/** POST /api/properties */
 router.post("/", async (req: Request, res: Response) => {
   try {
     const b = (req.body ?? {}) as any;
@@ -126,10 +125,14 @@ router.post("/", async (req: Request, res: Response) => {
       include: { images: { orderBy: { sort: "asc" } } },
     });
 
+    // --- Fire & forget sitemap ping (do not await) ---
+    if (SITEMAP_PING_URL) {
+      void fetch(SITEMAP_PING_URL).catch(() => {});
+    }
+
     return res.json({ ok: true, property: created, imageCount: created.images.length });
   } catch (err: any) {
     console.error("POST /api/properties error", err);
-    // TEMP: surface the true error so we can fix quickly
     return res.status(500).json({
       ok: false,
       error: err?.message || "internal_error",
@@ -138,9 +141,7 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/:slug
- */
+/** GET /api/properties/:slug */
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
     const slug = String(req.params.slug || "");
@@ -156,9 +157,7 @@ router.get("/:slug", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties
- */
+/** GET /api/properties */
 router.get("/", async (_req: Request, res: Response) => {
   try {
     const props = await prisma.property.findMany({
