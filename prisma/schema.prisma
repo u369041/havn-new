@@ -77,3 +77,64 @@ model Order {
   listing         Listing  @relation(fields: [listingId], references: [id])
   user            User     @relation(fields: [userId], references: [id])
 }
+// ==== HAVN: additional enums & models for properties (persistent) ====
+
+// Enums
+enum PropertyStatus {
+  ACTIVE
+  SOLD
+  LET
+  DRAFT
+}
+
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  DUPLEX
+  TOWNHOUSE
+  LAND
+  OTHER
+}
+
+// Models
+model Property {
+  id          Int             @id @default(autoincrement())
+  slug        String          @unique
+  title       String
+  description String
+  price       Int
+  type        PropertyType?
+  status      PropertyStatus  @default(ACTIVE)
+  address     String?
+  city        String?
+  county      String?
+  eircode     String?
+  beds        Int?
+  baths       Int?
+  areaSqm     Int?
+
+  images      PropertyImage[]
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([city])
+  @@index([county])
+  @@index([status])
+}
+
+model PropertyImage {
+  id         Int      @id @default(autoincrement())
+  propertyId Int
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  url        String
+  width      Int?
+  height     Int?
+  alt        String?
+  sort       Int      @default(0)   // aligned with your existing Image.sort
+
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, sort])
+}
