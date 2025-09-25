@@ -1,3 +1,4 @@
+// src/routes/properties.ts
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 
@@ -38,41 +39,30 @@ const ALLOWED_STATUS = new Set(["ACTIVE","SOLD","LET","DRAFT"]);
 async function buildUniqueSlug(base: string): Promise<string> {
   let candidate = toSlug(base);
   if (!candidate) candidate = "listing";
-  // check once
   const existing = await prisma.property.findUnique({ where: { slug: candidate } });
   if (!existing) return candidate;
-
-  // retry with suffix
   for (let i = 0; i < 5; i++) {
     const cand = `${candidate}-${randId(6)}`;
     const ex = await prisma.property.findUnique({ where: { slug: cand } });
     if (!ex) return cand;
   }
-  // final fallback
   return `${candidate}-${Date.now().toString(36)}`;
 }
 
 /**
  * POST /api/properties
- * Creates a persistent Property with up to 70 images.
- * Body shape matches your upload page.
  */
 router.post("/", async (req: Request, res: Response) => {
   try {
     const b = (req.body ?? {}) as any;
 
-    // required
     const title = (b.title ?? "").toString().trim();
     const description = (b.description ?? "").toString().trim();
     const price = Number(b.price ?? 0);
-
     if (!title || !description || !Number.isFinite(price) || price <= 0) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "title, description, and a positive price are required" });
+      return res.status(400).json({ ok: false, error: "title, description, and a positive price are required" });
     }
 
-    // optional strings/enums
     const city = (b.city ?? "").toString().trim() || undefined;
     const county = (b.county ?? "").toString().trim() || undefined;
     const address = (b.address ?? "").toString().trim() || undefined;
@@ -84,12 +74,10 @@ router.post("/", async (req: Request, res: Response) => {
     let status = (b.status ?? "ACTIVE").toString().trim().toUpperCase();
     if (!ALLOWED_STATUS.has(status)) status = "ACTIVE";
 
-    // numbers
     const beds = b.beds != null && b.beds !== "" ? Number(b.beds) : undefined;
     const baths = b.baths != null && b.baths !== "" ? Number(b.baths) : undefined;
     const areaSqm = b.areaSqm != null && b.areaSqm !== "" ? Number(b.areaSqm) : undefined;
 
-    // images (cap at 70)
     const MAX = 70;
     const imagesRaw: ImageIn[] = Array.isArray(b.images) ? (b.images as ImageIn[]) : [];
     const images = imagesRaw
@@ -99,7 +87,7 @@ router.post("/", async (req: Request, res: Response) => {
         width: img?.width != null ? Number(img.width) : undefined,
         height: img?.height != null ? Number(img.height) : undefined,
         alt: (img?.alt ?? title).toString(),
-        sort: Number(img?.order ?? i), // map order -> sort (schema uses sort)
+        sort: Number(img?.order ?? i), // schema uses "sort"
       }))
       .filter((x) => x.url);
 
@@ -107,19 +95,17 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: "at least one image is required" });
     }
 
-    // slug
     const base = `${title} ${city || county || ""}`.trim();
     const slug = await buildUniqueSlug(base);
 
-    // create property + images
     const created = await prisma.property.create({
       data: {
         slug,
         title,
         description,
         price,
-        type: type as any,       // Prisma enum accepts string tag value
-        status: status as any,   // Prisma enum accepts string tag value
+        type: type as any,
+        status: status as any,
         address,
         city,
         county,
@@ -143,13 +129,17 @@ router.post("/", async (req: Request, res: Response) => {
     return res.json({ ok: true, property: created, imageCount: created.images.length });
   } catch (err: any) {
     console.error("POST /api/properties error", err);
-    return res.status(500).json({ ok: false, error: "internal_error" });
+    // TEMP: surface the true error so we can fix quickly
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "internal_error",
+      code: err?.code || undefined
+    });
   }
 });
 
 /**
  * GET /api/properties/:slug
- * Fetch a property by slug (with ordered images)
  */
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
@@ -162,13 +152,12 @@ router.get("/:slug", async (req: Request, res: Response) => {
     return res.json({ ok: true, property });
   } catch (err: any) {
     console.error("GET /api/properties/:slug error", err);
-    return res.status(500).json({ ok: false, error: "internal_error" });
+    return res.status(500).json({ ok: false, error: err?.message || "internal_error", code: err?.code });
   }
 });
 
 /**
  * GET /api/properties
- * List recent properties (with cover image first)
  */
 router.get("/", async (_req: Request, res: Response) => {
   try {
@@ -180,7 +169,7 @@ router.get("/", async (_req: Request, res: Response) => {
     return res.json({ ok: true, count: props.length, properties: props });
   } catch (err: any) {
     console.error("GET /api/properties error", err);
-    return res.status(500).json({ ok: false, error: "internal_error" });
+    return res.status(500).json({ ok: false, error: err?.message || "internal_error", code: err?.code });
   }
 });
 
