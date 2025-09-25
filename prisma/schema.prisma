@@ -77,6 +77,7 @@ model Order {
   listing         Listing  @relation(fields: [listingId], references: [id])
   user            User     @relation(fields: [userId], references: [id])
 }
+
 // ==== HAVN: additional enums & models for properties (persistent) ====
 
 // Enums
@@ -96,15 +97,23 @@ enum PropertyType {
   OTHER
 }
 
+enum PropertyCategory {
+  BUY
+  RENT
+  SHARE
+}
+
 // Models
 model Property {
-  id          Int             @id @default(autoincrement())
-  slug        String          @unique
+  id          Int               @id @default(autoincrement())
+  slug        String            @unique
   title       String
   description String
   price       Int
   type        PropertyType?
-  status      PropertyStatus  @default(ACTIVE)
+  status      PropertyStatus    @default(ACTIVE)
+  category    PropertyCategory  @default(BUY)   // NEW
+
   address     String?
   city        String?
   county      String?
@@ -115,26 +124,27 @@ model Property {
 
   images      PropertyImage[]
 
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@index([city])
   @@index([county])
   @@index([status])
+  @@index([category]) // NEW
 }
 
 model PropertyImage {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   propertyId Int
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   url        String
   width      Int?
   height     Int?
   alt        String?
-  sort       Int      @default(0)   // aligned with your existing Image.sort
+  sort       Int       @default(0)   // aligned with your existing Image.sort
 
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([propertyId, sort])
 }
