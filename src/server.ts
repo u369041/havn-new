@@ -1,3 +1,4 @@
+// src/server.ts
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -6,15 +7,16 @@ import morgan from "morgan";
 import { prisma } from "./db.js";
 import { listings } from "./listings.js";
 import uploadRoutes from "./routes/uploads.js";
-import propertiesRoutes from "./routes/properties.js"; // <-- ensure this path & .js ext
+import propertiesRoutes from "./routes/properties.js";
+import diagRoutes from "./routes/diag.js";
 
 const app = express();
 
-/* ---------- CORS (only your domains + localhost in dev) ---------- */
+/* ---------- CORS ---------- */
 const allowed = new Set<string>([
   "https://havn.ie",
   "https://www.havn.ie",
-  "https://havn-new.onrender.com", // keep for testing if needed
+  "https://havn-new.onrender.com",
 ]);
 if (process.env.NODE_ENV !== "production") {
   allowed.add("http://localhost:3000");
@@ -22,28 +24,29 @@ if (process.env.NODE_ENV !== "production") {
 }
 const corsOptions: cors.CorsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);        // server-to-server/tools
+    if (!origin) return cb(null, true);
     return cb(null, allowed.has(origin));
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization","X-Requested-With"],
   optionsSuccessStatus: 204,
   maxAge: 86400,
 };
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-/* ---------- Common middleware ---------- */
+/* ---------- Middlewares ---------- */
 app.use(express.json({ limit: "5mb" }));
 app.use(morgan("dev"));
 
 /* ---------- Routes ---------- */
-app.use(listings);                           // legacy
-app.use("/api/uploads", uploadRoutes);       // /api/uploads/cloudinary-signature
-app.use("/api/properties", propertiesRoutes); // <-- MOUNTED HERE
+app.use(listings);
+app.use("/api/uploads", uploadRoutes);
+app.use("/api/properties", propertiesRoutes);
+app.use("/api/diag", diagRoutes);
 
-/* ---------- Health & diagnostics ---------- */
+/* ---------- Health ---------- */
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "api", ts: new Date().toISOString() });
 });
