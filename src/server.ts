@@ -9,6 +9,7 @@ import { listings } from "./listings.js";
 import uploadRoutes from "./routes/uploads.js";
 import propertiesRoutes from "./routes/properties.js";
 import diagRoutes from "./routes/diag.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = express();
 
@@ -29,7 +30,7 @@ const corsOptions: cors.CorsOptions = {
   },
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","X-Requested-With"],
+  allowedHeaders: ["Content-Type","Authorization","X-Requested-With","X-Admin-Key"],
   optionsSuccessStatus: 204,
   maxAge: 86400,
 };
@@ -45,6 +46,7 @@ app.use(listings);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/diag", diagRoutes);
+app.use("/api/admin", adminRoutes); // <-- protected ping lives here
 
 /* ---------- Health ---------- */
 app.get("/api/health", (_req, res) => {
