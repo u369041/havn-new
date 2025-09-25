@@ -2,7 +2,33 @@ import { Router, type Request, type Response } from "express";
 
 const router = Router();
 
-// helpers
+// ----- types -----
+interface Image {
+  url: string;
+  width?: number;
+  height?: number;
+  alt?: string;
+  order: number;
+}
+interface Property {
+  slug: string;
+  title: string;
+  description: string;
+  price: number;
+  type?: string;
+  status: string;
+  address?: string;
+  city?: string;
+  county?: string;
+  eircode?: string;
+  beds?: number;
+  baths?: number;
+  areaSqm?: number;
+  images: Image[];
+  createdAt: string; // ISO
+}
+
+// ----- helpers -----
 function toSlug(input: string): string {
   return (
     (input || "")
@@ -13,7 +39,6 @@ function toSlug(input: string): string {
       .replace(/(^-|-$)+/g, "") || "listing"
   );
 }
-
 function randId(len = 6): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   let s = "";
@@ -21,10 +46,12 @@ function randId(len = 6): string {
   return s;
 }
 
+// ----- in-memory store (temporary, resets on restart) -----
+const store = new Map<string, Property>();
+
 /**
  * POST /api/properties
- * Mock create: validates payload shape, caps images to 70,
- * returns a slug and echoes back a normalized property.
+ * Mock create: validates payload, caps images to 70, stores in memory, returns the property.
  */
 router.post("/", (req: Request, res: Response) => {
   const b = (req.body ?? {}) as any;
@@ -55,7 +82,7 @@ router.post("/", (req: Request, res: Response) => {
   // images (cap at 70)
   const MAX = 70;
   const imagesRaw: any[] = Array.isArray(b.images) ? (b.images as any[]) : [];
-  const images = imagesRaw
+  const images: Image[] = imagesRaw
     .slice(0, MAX)
     .map((img: any, i: number) => ({
       url: String(img?.url || ""),
@@ -64,7 +91,7 @@ router.post("/", (req: Request, res: Response) => {
       alt: (img?.alt ?? title).toString(),
       order: Number(img?.order ?? i),
     }))
-    .filter((x: any) => x.url);
+    .filter((x: Image) => x.url);
 
   if (images.length === 0) {
     return res.status(400).json({ ok: false, error: "at least one image is required" });
@@ -73,8 +100,7 @@ router.post("/", (req: Request, res: Response) => {
   const base = `${title} ${city || county}`;
   const slug = `${toSlug(base)}-${randId(6)}`;
 
-  // Mock response (no DB yet)
-  const property = {
+  const property: Property = {
     slug,
     title,
     description,
@@ -92,7 +118,32 @@ router.post("/", (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
 
+  // store in-memory
+  store.set(slug, property);
+
   return res.json({ ok: true, property, imageCount: images.length });
+});
+
+/**
+ * GET /api/properties/:slug
+ * Retrieve a stored property by slug.
+ */
+router.get("/:slug", (req: Request, res: Response) => {
+  const slug = String(req.params.slug || "");
+  const property = store.get(slug);
+  if (!property) return res.status(404).json({ ok: false, error: "not found" });
+  return res.json({ ok: true, property });
+});
+
+/**
+ * GET /api/properties
+ * List recent properties (in-memory).
+ */
+router.get("/", (_req: Request, res: Response) => {
+  const all = Array.from(store.values()).sort(
+    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+  );
+  return res.json({ ok: true, count: all.length, properties: all });
 });
 
 export default router;
