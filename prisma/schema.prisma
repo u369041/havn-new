@@ -10,12 +10,15 @@ datasource db {
 }
 
 /**
- * App-level enum. We store it in Postgres as an enum named "PropertyStatus".
+ * App-level enum mapped to the Postgres enum **PropertyStatus**.
+ * This removes the "PropertyStatus = Status" mismatch.
  */
 enum Status {
   DRAFT
   PUBLISHED
   ARCHIVED
+
+  @@map("PropertyStatus")
 }
 
 model User {
@@ -34,10 +37,7 @@ model Property {
   id          String    @id @default(cuid())
   slug        String    @unique
   title       String
-
-  // Map Prisma enum to DB enum "PropertyStatus"
-  status      Status    @default(DRAFT) @db.Enum("PropertyStatus")
-
+  status      Status    @default(DRAFT)
   price       Int
   type        String
   bedrooms    Int?
