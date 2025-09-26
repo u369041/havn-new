@@ -1,19 +1,15 @@
 // prisma/schema.prisma
 
-// ---- Prisma Client generator ----
 generator client {
   provider = "prisma-client-js"
 }
 
-// ---- Database connection ----
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 // ---- Enums ----
-// Keep only Status as an enum we actively use.
-// (Role stays a plain String on the User model to avoid a destructive type change.)
 enum Status {
   DRAFT
   PUBLISHED
@@ -25,13 +21,12 @@ model User {
   id         String     @id @default(cuid())
   email      String     @unique
   name       String?
-  // Use String instead of enum here to avoid Prisma wanting to drop/recreate the column.
+  // Keep a simple string here to avoid destructive enum churn:
   role       String     @default("USER")
 
   properties Property[]
 
   createdAt  DateTime   @default(now())
-  // Add default so adding this column to existing rows is safe.
   updatedAt  DateTime   @default(now()) @updatedAt
 }
 
@@ -41,10 +36,7 @@ model Property {
   title       String
   status      Status    @default(DRAFT)
   price       Int
-
-  // TEMP: optional to allow schema push on existing data
-  type        String?
-
+  type        String
   bedrooms    Int?
   bathrooms   Int?
   address     String?
@@ -57,7 +49,6 @@ model Property {
   ownerId     String?
 
   createdAt   DateTime  @default(now())
-  // Safe default for existing rows
   updatedAt   DateTime  @default(now()) @updatedAt
 
   @@index([status])
@@ -67,37 +58,13 @@ model Property {
 
 model Image {
   id         String    @id @default(cuid())
-
-  // TEMP: make relation optional so db push can add the column when rows already exist
-  property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String?
-
-  // TEMP: make Cloudinary fields optional for existing rows
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
   publicId   String?
   url        String?
-
   sortOrder  Int       @default(0)
   createdAt  DateTime  @default(now())
 
   @@index([propertyId])
-  // NOTE: We intentionally do NOT add a @@unique([propertyId, sortOrder]) yet,
-  // to avoid failing if legacy rows contain duplicates. We can add it later after backfilling.
-}
-
-/* -----------------------------
-   Legacy tables (keep, don't touch)
-   By declaring them with @@ignore and mapping to their real table names,
-   Prisma will STOP proposing to DROP them, and db push can proceed with no data loss.
--------------------------------- */
-
-model LegacyListing {
-  @@map("Listing")
-  @@ignore
-  id String @id
-}
-
-model LegacyPropertyImage {
-  @@map("PropertyImage")
-  @@ignore
-  id String @id
+  @@unique([propertyId, sortOrder])
 }
