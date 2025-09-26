@@ -1,13 +1,9 @@
-// src/routes/uploads.ts
 import { Router, Request, Response } from "express";
 import { createHash } from "crypto";
 
 const router = Router();
 
-/**
- * POST /api/uploads/cloudinary-signature
- * Returns { ok, timestamp, signature, apiKey, cloudName, folder }
- */
+/** POST /api/uploads/cloudinary-signature */
 router.post("/cloudinary-signature", (_req: Request, res: Response) => {
   const {
     CLOUDINARY_API_SECRET,
