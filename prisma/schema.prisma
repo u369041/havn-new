@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,10 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * App-level enum mapped to the Postgres enum **PropertyStatus**.
- * This removes the "PropertyStatus = Status" mismatch.
- */
 enum Status {
   DRAFT
   PUBLISHED
