@@ -1,150 +1,75 @@
+// prisma/schema.prisma
+
+// ---- Prisma Client generator ----
 generator client {
   provider = "prisma-client-js"
 }
 
+// ---- Database connection ----
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  role      String   @default("user")
-  createdAt DateTime @default(now())
-  listings  Listing[]
-  orders    Order[]
+// ---- Enums ----
+enum Role {
+  USER
+  ADMIN
 }
 
-model Listing {
-  id          String   @id @default(cuid())
-  title       String
-  slug        String   @unique
-  price       Int
-  currency    String   @default("EUR")
-  type        String   // rent | sale
-  address     String
-  city        String
-  county      String
-  eircode     String?
-  ber         String?
-  beds        Int
-  baths       Int
-  area        Int?
-  description String
-  features    String[]     // Postgres array
-  status      String   @default("draft") // draft|published|archived
-  ownerId     String   @map("owner_id")
-  owner       User     @relation(fields: [ownerId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum Status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
 
-  images     Image[]
-  enquiries  Enquiry[]
-  orders     Order[]
+// ---- Models ----
+model User {
+  id         String     @id @default(cuid())
+  email      String     @unique
+  name       String?
+  role       Role       @default(USER)
+  properties Property[]
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Property {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  title       String
+  status      Status    @default(DRAFT) // DRAFT | PUBLISHED | ARCHIVED
+  price       Int
+  type        String    // e.g., "SALE/HOUSE" or "RENT/APARTMENT"
+  bedrooms    Int?
+  bathrooms   Int?
+  address     String?
+  latitude    Float?
+  longitude   Float?
+  description String?
+
+  images      Image[]
+  owner       User?     @relation(fields: [ownerId], references: [id])
+  ownerId     String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([type])
+  @@index([price])
 }
 
 model Image {
-  id        String  @id @default(cuid())
-  url       String
-  alt       String?
-  listingId String  @map("listing_id")
-  listing   Listing @relation(fields: [listingId], references: [id])
-  sort      Int     @default(0)
-}
-
-model Enquiry {
-  id        String   @id @default(cuid())
-  listingId String
-  name      String
-  email     String
-  phone     String?
-  message   String
-  createdAt DateTime @default(now())
-  listing   Listing  @relation(fields: [listingId], references: [id])
-}
-
-model Order {
-  id              String   @id @default(cuid())
-  listingId       String
-  userId          String
-  amount          Int
-  currency        String   @default("EUR")
-  plan            String
-  status          String   @default("paid")
-  stripeSessionId String   @unique
-  createdAt       DateTime @default(now())
-  listing         Listing  @relation(fields: [listingId], references: [id])
-  user            User     @relation(fields: [userId], references: [id])
-}
-
-// ==== HAVN: additional enums & models for properties (persistent) ====
-
-// Enums
-enum PropertyStatus {
-  ACTIVE
-  SOLD
-  LET
-  DRAFT
-}
-
-enum PropertyType {
-  HOUSE
-  APARTMENT
-  DUPLEX
-  TOWNHOUSE
-  LAND
-  OTHER
-}
-
-enum PropertyCategory {
-  BUY
-  RENT
-  SHARE
-}
-
-// Models
-model Property {
-  id          Int               @id @default(autoincrement())
-  slug        String            @unique
-  title       String
-  description String
-  price       Int
-  type        PropertyType?
-  status      PropertyStatus    @default(ACTIVE)
-  category    PropertyCategory  @default(BUY)   // NEW
-
-  address     String?
-  city        String?
-  county      String?
-  eircode     String?
-  beds        Int?
-  baths       Int?
-  areaSqm     Int?
-
-  images      PropertyImage[]
-
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-
-  @@index([city])
-  @@index([county])
-  @@index([status])
-  @@index([category]) // NEW
-}
-
-model PropertyImage {
-  id         Int       @id @default(autoincrement())
-  propertyId Int
+  id         String    @id @default(cuid())
   property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
+  propertyId String
+  publicId   String
   url        String
-  width      Int?
-  height     Int?
-  alt        String?
-  sort       Int       @default(0)   // aligned with your existing Image.sort
-
+  sortOrder  Int       @default(0)
   createdAt  DateTime  @default(now())
 
-  @@index([propertyId, sort])
+  @@index([propertyId])
+  @@unique([propertyId, sortOrder])
 }
