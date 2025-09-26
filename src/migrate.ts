@@ -1,5 +1,5 @@
 // src/migrate.ts
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -64,19 +64,18 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 3) Indexes (no-ops if already present)
+  // 3) Indexes
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 4) One-time backfill from legacy tables if they exist
+  // 4) Backfill from legacy tables if they exist
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
   if (hasListing) {
-    // Insert properties not already present
     await prisma.$executeRawUnsafe(`
     INSERT INTO "Property"(id, slug, title, status, price, type, bedrooms, bathrooms, address, description, "createdAt", "updatedAt")
     SELECT
@@ -93,53 +92,4 @@ async function run() {
       l.baths,
       l.address,
       l.description,
-      COALESCE(l."createdAt", now()),
-      COALESCE(l."updatedAt", now())
-    FROM "Listing" l
-    WHERE NOT EXISTS (SELECT 1 FROM "Property" p WHERE p.id = l.id OR p.slug = l.slug);
-    `);
-  }
-
-  if (hasPropImg) {
-    // Clean potential duplicates of (propertyId, sort) in legacy before moving
-    await prisma.$executeRawUnsafe(`
-    DELETE FROM "PropertyImage" a
-    USING "PropertyImage" b
-    WHERE a.id < b.id
-      AND a."propertyId" = b."propertyId"
-      AND COALESCE(a.sort,0) = COALESCE(b.sort,0);
-    `);
-
-    // Insert images not already present
-    await prisma.$executeRawUnsafe(`
-    INSERT INTO "Image"(id, "propertyId", "publicId", url, "sortOrder", "createdAt")
-    SELECT
-      i.id,
-      i."propertyId",
-      i."publicId",
-      i.url,
-      COALESCE(i.sort, 0),
-      COALESCE(i."createdAt", now())
-    FROM "PropertyImage" i
-    WHERE EXISTS (SELECT 1 FROM "Property" p WHERE p.id = i."propertyId")
-      AND NOT EXISTS (SELECT 1 FROM "Image" x WHERE x.id = i.id);
-    `);
-  }
-
-  // 5) Final guards: ensure 'type' is filled so NOT NULL holds
-  await prisma.$executeRawUnsafe(`
-    UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';
-  `);
-
-  // Done
-  console.log("[migrate] Schema ensured, legacy backfill complete.");
-}
-
-run()
-  .catch((e) => {
-    console.error("[migrate] ERROR", e);
-    process.exit(0); // don't crash the dyno; app can still serve health to let you inspect
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+      COA
