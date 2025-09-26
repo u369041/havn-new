@@ -17,9 +17,15 @@ function slugify(input: string) {
 
 /**
  * List properties with optional filters & sorting.
+ * Supports:
+ *  - category: "SALE" | "RENT" | "SHARE"  (maps to type prefix)
+ *  - subtype:  "HOUSE" | "APARTMENT" | "SITE" (maps to type suffix)
+ *  - type:     exact string match, e.g., "SALE/HOUSE" (legacy)
  * sort: "price_asc" | "price_desc" | "date_desc" (default)
  */
 export async function listProperties(opts: {
+  category?: string;
+  subtype?: string;
   type?: string;
   status?: keyof typeof Status | Status | string;
   minPrice?: number;
@@ -32,8 +38,24 @@ export async function listProperties(opts: {
   const o = opts || {};
   const where: any = {};
 
-  if (o.type) where.type = o.type;
+  // ----- Type filtering (category/subtype) -----
+  const category = typeof o.category === "string" ? o.category.toUpperCase() : "";
+  const subtype  = typeof o.subtype === "string"  ? o.subtype.toUpperCase()  : "";
+  const exactType = typeof o.type === "string" ? o.type : "";
 
+  if (exactType) {
+    where.type = exactType;
+  } else if (category && subtype) {
+    where.type = `${category}/${subtype}`;
+  } else if (category) {
+    // e.g., "SALE/*"
+    where.type = { startsWith: `${category}/` };
+  } else if (subtype) {
+    // e.g., "*/HOUSE"
+    where.type = { endsWith: `/${subtype}` };
+  }
+
+  // ----- Other filters -----
   if (typeof o.beds === "number") {
     where.bedrooms = { gte: o.beds };
   }
@@ -45,11 +67,11 @@ export async function listProperties(opts: {
   }
 
   if (o.status) {
-    // Accept "DRAFT" | "PUBLISHED" | "ARCHIVED" or enum values; coerce to string key if possible
     const s = String(o.status).toUpperCase();
     if (s in Status) where.status = s;
   }
 
+  // ----- Sorting & pagination -----
   let orderBy: any = [{ createdAt: "desc" }]; // default date_desc
   if (o.sort === "price_asc") orderBy = [{ price: "asc" }];
   if (o.sort === "price_desc") orderBy = [{ price: "desc" }];
@@ -85,8 +107,7 @@ export async function getPropertyBySlug(slug: string) {
 
 /**
  * Create a property from a mixed/legacy payload.
- * Accepts legacy keys: city, county, eircode, beds, baths, areaSqm (ignored except beds/baths mapping)
- * Accepts images: [{ publicId|public_id, url|secure_url }]
+ * Accepts legacy keys: beds, baths and images: [{ publicId|public_id, url|secure_url }]
  */
 export async function createProperty(payload: any) {
   const p = payload || {};
