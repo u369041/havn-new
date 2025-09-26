@@ -1,33 +1,37 @@
-import { Router } from "express";
-import crypto from "crypto";
+// src/routes/uploads.ts
+import { Router, Request, Response } from "express";
+import { createHash } from "node:crypto";
 
 const router = Router();
 
-const cloudName = process.env.CLOUDINARY_CLOUD_NAME || "";
-const apiKey = process.env.CLOUDINARY_API_KEY || "";
-const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
-const defaultFolder = process.env.CLOUDINARY_FOLDER || "havn/properties";
+/**
+ * POST /api/uploads/cloudinary-signature
+ * Returns { ok, timestamp, signature, apiKey, cloudName, folder }
+ */
+router.post("/cloudinary-signature", (_req: Request, res: Response) => {
+  const {
+    CLOUDINARY_API_SECRET,
+    CLOUDINARY_API_KEY,
+    CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_FOLDER
+  } = process.env;
 
-// POST /api/uploads/cloudinary-signature
-router.post("/cloudinary-signature", (req, res) => {
+  if (!CLOUDINARY_API_SECRET || !CLOUDINARY_API_KEY || !CLOUDINARY_CLOUD_NAME) {
+    return res.status(500).json({ ok: false, error: "missing_cloudinary_env" });
+  }
+
   const timestamp = Math.floor(Date.now() / 1000);
-
-  // Optional per-request folder (works if express.json is enabled; otherwise defaults)
-  const folder =
-    (req.body && typeof req.body.folder === "string" && req.body.folder.trim()) ||
-    defaultFolder;
-
-  // Sign folder + timestamp with your API secret
-  const toSign = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
-  const signature = crypto.createHash("sha1").update(toSign).digest("hex");
+  const signature = createHash("sha1")
+    .update(`timestamp=${timestamp}${CLOUDINARY_API_SECRET}`)
+    .digest("hex");
 
   res.json({
     ok: true,
-    cloudName,
-    apiKey,
     timestamp,
     signature,
-    folder
+    apiKey: CLOUDINARY_API_KEY,
+    cloudName: CLOUDINARY_CLOUD_NAME,
+    folder: CLOUDINARY_FOLDER || "havn/properties"
   });
 });
 
