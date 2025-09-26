@@ -9,16 +9,14 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "typeRoots": ["./node_modules/@types"]
+    "resolveJsonModule": true
   },
   "include": [
     "src/server.ts",
     "src/migrate.ts",
     "src/listings.ts",
     "src/routes/properties.ts",
-    "src/routes/uploads.ts",
-    "src/types/**/*.d.ts"
+    "src/routes/uploads.ts"
   ],
   "exclude": ["node_modules"]
 }
