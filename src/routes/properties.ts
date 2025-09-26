@@ -1,4 +1,3 @@
-// src/routes/properties.ts
 import { Router, Request, Response } from "express";
 import {
   listProperties,
@@ -31,7 +30,6 @@ router.get("/", async (req: Request, res: Response) => {
       skip: typeof q.skip === "string" ? Number(q.skip) : undefined,
       sort: (q.sort as any) || "date_desc"
     });
-
     res.json({ ok: true, ...out });
   } catch (err: any) {
     res.status(400).json({ ok: false, error: err?.message || "failed" });
