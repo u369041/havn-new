@@ -14,7 +14,6 @@ async function tableExists(name: string) {
 }
 
 async function run() {
-  // 1) Ensure enum exists
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
@@ -23,7 +22,6 @@ async function run() {
     END IF;
   END $$;`);
 
-  // 2) Ensure tables exist (no drops)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -63,14 +61,12 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 3) Indexes
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 4) Backfill from legacy tables if they exist
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
