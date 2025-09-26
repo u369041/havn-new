@@ -9,6 +9,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * App-level enum. We store it in Postgres as an enum named "PropertyStatus".
+ */
 enum Status {
   DRAFT
   PUBLISHED
@@ -32,7 +35,7 @@ model Property {
   slug        String    @unique
   title       String
 
-  /// IMPORTANT: map Prisma enum to the DB enum name we’ll enforce ("PropertyStatus")
+  // Map Prisma enum to DB enum "PropertyStatus"
   status      Status    @default(DRAFT) @db.Enum("PropertyStatus")
 
   price       Int
