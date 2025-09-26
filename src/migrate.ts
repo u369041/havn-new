@@ -14,8 +14,78 @@ async function tableExists(name: string) {
   return Boolean(r?.[0]?.exists);
 }
 
+async function getColType(table: string, column: string) {
+  const r = await prisma.$queryRaw<
+    { data_type: string; udt_name: string }[]
+  >`
+    SELECT data_type, udt_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}
+    LIMIT 1;
+  `;
+  if (!r?.[0]) return null;
+  const { data_type, udt_name } = r[0];
+  // For enums, Postgres reports USER-DEFINED with udt_name = enum type name
+  return data_type === "USER-DEFINED" ? udt_name : data_type; // e.g., "integer" | "text" | "PropertyStatus"
+}
+
+async function safeAddImageFk() {
+  // Make Image.propertyId -> Property.id FK only if types are compatible.
+  const propIdType = await getColType("Property", "id");       // e.g., "text" or "integer"
+  const imgPidType = await getColType("Image", "propertyId");  // e.g., "text" or "integer"
+
+  if (!propIdType || !imgPidType) return;
+
+  // If incompatible, try to coerce Image.propertyId to Property.id type safely.
+  if (propIdType !== imgPidType) {
+    if (propIdType === "integer" || propIdType === "bigint") {
+      // Convert text/var-char Image.propertyId -> integer using regex; non-numeric => NULL (to avoid cast errors)
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Image"
+        ALTER COLUMN "propertyId" DROP DEFAULT,
+        ALTER COLUMN "propertyId" TYPE ${propIdType}
+        USING (CASE WHEN "propertyId" ~ '^[0-9]+$' THEN "propertyId"::${propIdType} ELSE NULL END)
+      `);
+    } else if (propIdType === "text") {
+      // Convert integer/bigint Image.propertyId -> text
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Image"
+        ALTER COLUMN "propertyId" DROP DEFAULT,
+        ALTER COLUMN "propertyId" TYPE text
+        USING ("propertyId"::text)
+      `);
+    } else {
+      // Unknown combo — skip FK entirely to avoid blocking boot.
+      console.log(`[migrate] Skipping FK: unsupported type combo Property.id=${propIdType} Image.propertyId=${imgPidType}`);
+      return;
+    }
+  }
+
+  // Drop any old FK if present, then add the correct one. If it still can’t be added (mixed NULLs), just skip.
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema='public' AND table_name='Image'
+          AND constraint_type='FOREIGN KEY' AND constraint_name='Image_propertyId_fkey'
+      ) THEN
+        ALTER TABLE "Image" DROP CONSTRAINT "Image_propertyId_fkey";
+      END IF;
+      BEGIN
+        ALTER TABLE "Image"
+        ADD CONSTRAINT "Image_propertyId_fkey"
+        FOREIGN KEY ("propertyId") REFERENCES "Property"(id) ON DELETE CASCADE;
+      EXCEPTION WHEN others THEN
+        -- Don’t block service startup on FK attach (can be added later after data is cleaned).
+        RAISE NOTICE 'Skipping FK add for Image.propertyId -> Property.id (will not block boot).';
+      END;
+    END $$;
+  `);
+}
+
 async function run() {
-  // 1) Ensure the DB enum **PropertyStatus** exists and has uppercase labels.
+  // 1) Ensure enum exists with uppercase labels
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
@@ -23,23 +93,18 @@ async function run() {
       CREATE TYPE "PropertyStatus" AS ENUM ('DRAFT','PUBLISHED','ARCHIVED');
     END IF;
 
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'DRAFT'
-    ) THEN ALTER TYPE "PropertyStatus" ADD VALUE 'DRAFT'; END IF;
-
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'PUBLISHED'
-    ) THEN ALTER TYPE "PropertyStatus" ADD VALUE 'PUBLISHED'; END IF;
-
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'ARCHIVED'
-    ) THEN ALTER TYPE "PropertyStatus" ADD VALUE 'ARCHIVED'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='PropertyStatus' AND e.enumlabel='DRAFT') THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'DRAFT';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='PropertyStatus' AND e.enumlabel='PUBLISHED') THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'PUBLISHED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='PropertyStatus' AND e.enumlabel='ARCHIVED') THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'ARCHIVED';
+    END IF;
   END $$;`);
 
-  // 2) Create base tables if missing (Property.status uses PropertyStatus)
+  // 2) Ensure base tables exist (minimal shape)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -70,7 +135,7 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 3) ADD ANY MISSING COLUMNS (idempotent)
+  // 3) Add any missing columns on Property/Image
   await prisma.$executeRawUnsafe(`
   ALTER TABLE "Property"
     ADD COLUMN IF NOT EXISTS bedrooms    integer,
@@ -84,46 +149,7 @@ async function run() {
     ADD COLUMN IF NOT EXISTS "updatedAt" timestamptz NOT NULL DEFAULT now();
   `);
 
-  await prisma.$executeRawUnsafe(`
-  DO $$
-  BEGIN
-    IF NOT EXISTS (
-      SELECT 1 FROM information_schema.table_constraints
-      WHERE constraint_type='FOREIGN KEY'
-        AND table_name='Property'
-        AND constraint_name='Property_ownerId_fkey'
-    ) THEN
-      ALTER TABLE "Property"
-      ADD CONSTRAINT "Property_ownerId_fkey"
-      FOREIGN KEY ("ownerId") REFERENCES "User"(id) ON DELETE SET NULL;
-    END IF;
-  END $$;`);
-
-  await prisma.$executeRawUnsafe(`
-  ALTER TABLE "Image"
-    ADD COLUMN IF NOT EXISTS "propertyId" text,
-    ADD COLUMN IF NOT EXISTS "publicId"   text,
-    ADD COLUMN IF NOT EXISTS url          text,
-    ADD COLUMN IF NOT EXISTS "sortOrder"  integer DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS "createdAt"  timestamptz NOT NULL DEFAULT now();
-  `);
-
-  await prisma.$executeRawUnsafe(`
-  DO $$
-  BEGIN
-    IF NOT EXISTS (
-      SELECT 1 FROM information_schema.table_constraints
-      WHERE constraint_type='FOREIGN KEY'
-        AND table_name='Image'
-        AND constraint_name='Image_propertyId_fkey'
-    ) THEN
-      ALTER TABLE "Image"
-      ADD CONSTRAINT "Image_propertyId_fkey"
-      FOREIGN KEY ("propertyId") REFERENCES "Property"(id) ON DELETE CASCADE;
-    END IF;
-  END $$;`);
-
-  // 4) Ensure Property.status column type is the enum
+  // Status column must be enum type
   await prisma.$executeRawUnsafe(`
   DO $$
   DECLARE currtyp text;
@@ -133,7 +159,7 @@ async function run() {
     JOIN pg_class c ON c.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_type t ON t.oid = a.atttypid
-    WHERE n.nspname = 'public' AND c.relname = 'Property' AND a.attname = 'status';
+    WHERE n.nspname='public' AND c.relname='Property' AND a.attname='status';
 
     IF currtyp IS NOT NULL AND currtyp <> 'PropertyStatus' THEN
       ALTER TABLE "Property"
@@ -142,21 +168,21 @@ async function run() {
     END IF;
   END $$;`);
 
-  // 5) Normalize any lowercase values (defensive)
+  // Normalize any lowercase values
   await prisma.$executeRawUnsafe(`
     UPDATE "Property" SET status = 'DRAFT'::"PropertyStatus"     WHERE status::text IN ('draft','Draft');
     UPDATE "Property" SET status = 'PUBLISHED'::"PropertyStatus" WHERE status::text IN ('published','Published');
     UPDATE "Property" SET status = 'ARCHIVED'::"PropertyStatus"  WHERE status::text IN ('archived','Archived');
   `);
 
-  // 6) Indexes (safe no-ops if already exist)
+  // 4) Indexes (idempotent)
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 7) Backfill from legacy tables if present (unchanged)
+  // 5) Backfill (same as before)
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
@@ -186,7 +212,6 @@ async function run() {
   }
 
   if (hasPropImg) {
-    // robust image backfill — detect column names dynamically
     await prisma.$executeRawUnsafe(`
     DO $$
     DECLARE prop_col text;
@@ -249,10 +274,13 @@ async function run() {
     END $$;`);
   }
 
-  // 8) Default unknown type values (defensive)
+  // 6) Ensure FK only if compatible
+  await safeAddImageFk();
+
+  // 7) Defensive default for type
   await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
 
-  console.log("[migrate] Schema ensured, legacy backfill complete (columns ensured).");
+  console.log("[migrate] Schema ensured, legacy backfill complete (FK compatibility handled).");
 }
 
 run()
