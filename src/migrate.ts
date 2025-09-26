@@ -15,7 +15,7 @@ async function tableExists(name: string) {
 }
 
 async function run() {
-  // 1) Ensure the DB enum **PropertyStatus** exists (we standardize on this).
+  // 1) Ensure the DB enum **PropertyStatus** exists.
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
@@ -24,7 +24,34 @@ async function run() {
     END IF;
   END $$;`);
 
-  // 2) Create tables if missing (Property.status uses PropertyStatus)
+  // 2) Ensure the enum has the **UPPERCASE** labels we use in Prisma.
+  // (If your enum was created earlier with lowercase labels, we add the uppercase ones.)
+  await prisma.$executeRawUnsafe(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'DRAFT'
+    ) THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'DRAFT';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'PUBLISHED'
+    ) THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'PUBLISHED';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+      WHERE t.typname = 'PropertyStatus' AND e.enumlabel = 'ARCHIVED'
+    ) THEN
+      ALTER TYPE "PropertyStatus" ADD VALUE 'ARCHIVED';
+    END IF;
+  END $$;`);
+
+  // 3) Create tables if missing (Property.status uses PropertyStatus)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -64,7 +91,7 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 3) If Property.status is not using PropertyStatus yet, convert it in-place.
+  // 4) If Property.status is not using PropertyStatus yet, convert it in-place.
   await prisma.$executeRawUnsafe(`
   DO $$
   DECLARE currtyp text;
@@ -83,14 +110,21 @@ async function run() {
     END IF;
   END $$;`);
 
-  // 4) Indexes (no-ops if they already exist)
+  // 5) **Normalize any lowercase status values** to uppercase ones now that they exist.
+  await prisma.$executeRawUnsafe(`
+    UPDATE "Property" SET status = 'DRAFT'::"PropertyStatus"     WHERE status::text IN ('draft', 'Draft');
+    UPDATE "Property" SET status = 'PUBLISHED'::"PropertyStatus" WHERE status::text IN ('published', 'Published');
+    UPDATE "Property" SET status = 'ARCHIVED'::"PropertyStatus"  WHERE status::text IN ('archived', 'Archived');
+  `);
+
+  // 6) Indexes (no-ops if they already exist)
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 5) Backfill from legacy tables if present
+  // 7) Backfill from legacy tables if present
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
@@ -103,6 +137,7 @@ async function run() {
       COALESCE(l.title, 'Untitled'),
       CASE
         WHEN l.status IN ('DRAFT','PUBLISHED','ARCHIVED') THEN l.status::"PropertyStatus"
+        WHEN l.status IN ('draft','published','archived') THEN upper(l.status)::"PropertyStatus"
         ELSE 'DRAFT'::"PropertyStatus"
       END,
       COALESCE(l.price, 0),
@@ -119,7 +154,7 @@ async function run() {
   }
 
   if (hasPropImg) {
-    // Detect actual column names in PropertyImage and insert dynamically (no hard-coded names).
+    // robust image backfill — detect column names dynamically
     await prisma.$executeRawUnsafe(`
     DO $$
     DECLARE prop_col text;
@@ -155,7 +190,6 @@ async function run() {
       ORDER BY column_name LIMIT 1;
 
       IF prop_col IS NOT NULL THEN
-        -- Remove dupes only if we know the sort column
         IF sort_col IS NOT NULL THEN
           EXECUTE format(
             'DELETE FROM "PropertyImage" a
@@ -183,10 +217,10 @@ async function run() {
     END $$;`);
   }
 
-  // 6) Default unknown type values
+  // 8) Default unknown type values
   await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
 
-  console.log("[migrate] Schema ensured, legacy backfill complete (enum normalized; robust image backfill).");
+  console.log("[migrate] Schema ensured, legacy backfill complete (enum labels normalized).");
 }
 
 run()
