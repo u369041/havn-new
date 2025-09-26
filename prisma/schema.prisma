@@ -32,16 +32,20 @@ model User {
   properties Property[]
 
   createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  // IMPORTANT: add default to allow adding this column when rows exist
+  updatedAt  DateTime   @default(now()) @updatedAt
 }
 
 model Property {
   id          String    @id @default(cuid())
   slug        String    @unique
   title       String
-  status      Status    @default(DRAFT) // DRAFT | PUBLISHED | ARCHIVED
+  status      Status    @default(DRAFT)
   price       Int
-  type        String    // e.g., "SALE/HOUSE" or "RENT/APARTMENT"
+
+  // TEMP: make optional so db push can succeed on existing rows
+  type        String?
+
   bedrooms    Int?
   bathrooms   Int?
   address     String?
@@ -54,7 +58,8 @@ model Property {
   ownerId     String?
 
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  // add default so adding this column is safe with existing data
+  updatedAt   DateTime  @default(now()) @updatedAt
 
   @@index([status])
   @@index([type])
@@ -63,10 +68,15 @@ model Property {
 
 model Image {
   id         String    @id @default(cuid())
-  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String
-  publicId   String
-  url        String
+
+  // TEMP: make relation optional so db push can add column without default
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String?
+
+  // TEMP: make Cloudinary fields optional for existing rows
+  publicId   String?
+  url        String?
+
   sortOrder  Int       @default(0)
   createdAt  DateTime  @default(now())
 
