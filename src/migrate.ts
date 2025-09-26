@@ -15,19 +15,16 @@ async function tableExists(name: string) {
 }
 
 async function run() {
-  // 0) Ensure BOTH enum types exist. We will standardize on "PropertyStatus".
+  // Ensure the DB enum **PropertyStatus** exists (we standardize on this).
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'Status') THEN
-      CREATE TYPE "Status" AS ENUM ('DRAFT','PUBLISHED','ARCHIVED');
-    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'PropertyStatus') THEN
       CREATE TYPE "PropertyStatus" AS ENUM ('DRAFT','PUBLISHED','ARCHIVED');
     END IF;
   END $$;`);
 
-  // 1) Ensure tables exist (using PropertyStatus for new creates)
+  // Create tables if missing (Property.status uses PropertyStatus)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -67,7 +64,7 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 2) If Property.status is NOT "PropertyStatus", convert it
+  // If Property.status is not using PropertyStatus yet, convert it in-place.
   await prisma.$executeRawUnsafe(`
   DO $$
   DECLARE currtyp text;
@@ -86,14 +83,14 @@ async function run() {
     END IF;
   END $$;`);
 
-  // 3) Indexes
+  // Indexes (no-ops if they already exist)
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 4) Backfill from legacy tables if they exist
+  // Backfill from legacy tables if present
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
