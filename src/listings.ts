@@ -1,5 +1,5 @@
 // src/listings.ts
-import { PrismaClient, Status } from "@prisma/client";
+import { PrismaClient, Prisma, Status } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -101,7 +101,7 @@ export async function createProperty(payload: any) {
 
   const slug = slugify(title);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const created = await tx.property.create({
       data: {
         slug,
