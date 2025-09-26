@@ -1,6 +1,11 @@
 // src/routes/properties.ts
 import { Router, Request, Response } from "express";
-import { listProperties, getPropertyBySlug, createProperty, setImageOrder } from "../listings";
+import {
+  listProperties,
+  getPropertyBySlug,
+  createProperty,
+  setImageOrder,
+} from "../listings.js";
 
 const router = Router();
 
