@@ -1,65 +1,67 @@
 // src/server.ts
-import "dotenv/config";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import cors from "cors";
-import morgan from "morgan";
-
-import { prisma } from "./db.js";
-import { listings } from "./listings.js";
-import uploadRoutes from "./routes/uploads.js";
-import propertiesRoutes from "./routes/properties.js";
-import diagRoutes from "./routes/diag.js";
-import adminRoutes from "./routes/admin.js";
+import crypto from "crypto";
+import propertiesRouter from "./routes/properties";
 
 const app = express();
 
-/* ---------- CORS ---------- */
-const allowed = new Set<string>([
+app.use(helmet());
+app.use(express.json({ limit: "5mb" }));
+
+// CORS allowlist
+const ALLOWLIST = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
 ]);
-if (process.env.NODE_ENV !== "production") {
-  allowed.add("http://localhost:3000");
-  allowed.add("http://localhost:5173");
-}
-const corsOptions: cors.CorsOptions = {
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    return cb(null, allowed.has(origin));
-  },
-  credentials: true,
-  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","X-Requested-With","X-Admin-Key"],
-  optionsSuccessStatus: 204,
-  maxAge: 86400,
-};
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      try {
+        const u = new URL(origin);
+        if (ALLOWLIST.has(`${u.protocol}//${u.host}`)) return cb(null, true);
+      } catch {}
+      return cb(new Error("CORS blocked"));
+    },
+    credentials: true,
+  })
+);
 
-/* ---------- Middlewares ---------- */
-app.use(express.json({ limit: "5mb" }));
-app.use(morgan("dev"));
+// Rate limit (60/min default)
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+});
+app.use(limiter);
 
-/* ---------- Routes ---------- */
-app.use(listings);
-app.use("/api/uploads", uploadRoutes);
-app.use("/api/properties", propertiesRoutes);
-app.use("/api/diag", diagRoutes);
-app.use("/api/admin", adminRoutes); // <-- protected ping lives here
-
-/* ---------- Health ---------- */
+// Health
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "api", ts: new Date().toISOString() });
+  res.json({ ok: true, service: "havn-new" });
 });
 
-app.get("/api/db/ping", async (_req, res) => {
-  const listingCount = await prisma.listing.count().catch(() => -1);
-  res.json({ ok: true, listingCount });
+// Cloudinary signature
+app.post("/api/uploads/cloudinary-signature", (req, res) => {
+  const { CLOUDINARY_API_SECRET } = process.env;
+  if (!CLOUDINARY_API_SECRET) {
+    return res.status(500).json({ ok: false, error: "missing_cloudinary_secret" });
+  }
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = crypto
+    .createHash("sha1")
+    .update(`timestamp=${timestamp}${CLOUDINARY_API_SECRET}`)
+    .digest("hex");
+  res.json({ ok: true, timestamp, signature });
 });
 
-/* ---------- Start ---------- */
-const PORT = Number(process.env.PORT || 3000);
+// Properties API
+app.use("/api/properties", propertiesRouter);
+
+// Boot (Render will set PORT)
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`havn-new listening on http://localhost:${PORT}`);
+  console.log(`havn-new listening on :${PORT}`);
 });
