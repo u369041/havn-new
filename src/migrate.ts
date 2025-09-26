@@ -92,4 +92,47 @@ async function run() {
       l.baths,
       l.address,
       l.description,
-      COA
+      COALESCE(l."createdAt", now()),
+      COALESCE(l."updatedAt", now())
+    FROM "Listing" l
+    WHERE NOT EXISTS (SELECT 1 FROM "Property" p WHERE p.id = l.id OR p.slug = l.slug);
+    `);
+  }
+
+  if (hasPropImg) {
+    await prisma.$executeRawUnsafe(`
+    DELETE FROM "PropertyImage" a
+    USING "PropertyImage" b
+    WHERE a.id < b.id
+      AND a."propertyId" = b."propertyId"
+      AND COALESCE(a.sort,0) = COALESCE(b.sort,0);
+    `);
+
+    await prisma.$executeRawUnsafe(`
+    INSERT INTO "Image"(id, "propertyId", "publicId", url, "sortOrder", "createdAt")
+    SELECT
+      i.id,
+      i."propertyId",
+      i."publicId",
+      i.url,
+      COALESCE(i.sort, 0),
+      COALESCE(i."createdAt", now())
+    FROM "PropertyImage" i
+    WHERE EXISTS (SELECT 1 FROM "Property" p WHERE p.id = i."propertyId")
+      AND NOT EXISTS (SELECT 1 FROM "Image" x WHERE x.id = i.id);
+    `);
+  }
+
+  await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
+
+  console.log("[migrate] Schema ensured, legacy backfill complete.");
+}
+
+run()
+  .catch((e) => {
+    console.error("[migrate] ERROR", e);
+    // don't exit hard; allow app to start so you can inspect logs
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
