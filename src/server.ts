@@ -1,14 +1,11 @@
 // src/server.ts
 import express from "express";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import cors from "cors";
-import crypto from "crypto";
-import propertiesRouter from "./routes/properties";
+import { createHash } from "node:crypto";
+import propertiesRouter from "./routes/properties.js";
 
 const app = express();
 
-app.use(helmet());
 app.use(express.json({ limit: "5mb" }));
 
 // CORS allowlist
@@ -17,6 +14,7 @@ const ALLOWLIST = new Set([
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
 ]);
+
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -31,27 +29,21 @@ app.use(
   })
 );
 
-// Rate limit (60/min default)
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-});
-app.use(limiter);
-
 // Health
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "havn-new" });
 });
 
 // Cloudinary signature
-app.post("/api/uploads/cloudinary-signature", (req, res) => {
+app.post("/api/uploads/cloudinary-signature", (_req, res) => {
   const { CLOUDINARY_API_SECRET } = process.env;
   if (!CLOUDINARY_API_SECRET) {
-    return res.status(500).json({ ok: false, error: "missing_cloudinary_secret" });
+    return res
+      .status(500)
+      .json({ ok: false, error: "missing_cloudinary_secret" });
   }
   const timestamp = Math.floor(Date.now() / 1000);
-  const signature = crypto
-    .createHash("sha1")
+  const signature = createHash("sha1")
     .update(`timestamp=${timestamp}${CLOUDINARY_API_SECRET}`)
     .digest("hex");
   res.json({ ok: true, timestamp, signature });
@@ -60,7 +52,7 @@ app.post("/api/uploads/cloudinary-signature", (req, res) => {
 // Properties API
 app.use("/api/properties", propertiesRouter);
 
-// Boot (Render will set PORT)
+// Boot (Render sets PORT)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`havn-new listening on :${PORT}`);
