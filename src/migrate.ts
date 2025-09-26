@@ -15,7 +15,7 @@ async function tableExists(name: string) {
 }
 
 async function run() {
-  // Ensure the DB enum **PropertyStatus** exists (we standardize on this).
+  // 1) Ensure the DB enum **PropertyStatus** exists (we standardize on this).
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
@@ -24,7 +24,7 @@ async function run() {
     END IF;
   END $$;`);
 
-  // Create tables if missing (Property.status uses PropertyStatus)
+  // 2) Create tables if missing (Property.status uses PropertyStatus)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -64,7 +64,7 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // If Property.status is not using PropertyStatus yet, convert it in-place.
+  // 3) If Property.status is not using PropertyStatus yet, convert it in-place.
   await prisma.$executeRawUnsafe(`
   DO $$
   DECLARE currtyp text;
@@ -83,14 +83,14 @@ async function run() {
     END IF;
   END $$;`);
 
-  // Indexes (no-ops if they already exist)
+  // 4) Indexes (no-ops if they already exist)
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // Backfill from legacy tables if present
+  // 5) Backfill from legacy tables if present
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
@@ -119,32 +119,74 @@ async function run() {
   }
 
   if (hasPropImg) {
+    // Detect actual column names in PropertyImage and insert dynamically (no hard-coded names).
     await prisma.$executeRawUnsafe(`
-    DELETE FROM "PropertyImage" a
-    USING "PropertyImage" b
-    WHERE a.id < b.id
-      AND a."propertyId" = b."propertyId"
-      AND COALESCE(a.sort,0) = COALESCE(b.sort,0);
-    `);
+    DO $$
+    DECLARE prop_col text;
+    DECLARE sort_col text;
+    DECLARE pub_col  text;
+    DECLARE created_col text;
+    DECLARE pub_expr text;
+    DECLARE sort_expr text;
+    DECLARE created_expr text;
+    BEGIN
+      SELECT column_name INTO prop_col
+      FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='PropertyImage'
+        AND column_name IN ('propertyId','property_id','propertyid')
+      ORDER BY column_name LIMIT 1;
 
-    await prisma.$executeRawUnsafe(`
-    INSERT INTO "Image"(id, "propertyId", "publicId", url, "sortOrder", "createdAt")
-    SELECT
-      i.id,
-      i."propertyId",
-      i."publicId",
-      i.url,
-      COALESCE(i.sort, 0),
-      COALESCE(i."createdAt", now())
-    FROM "PropertyImage" i
-    WHERE EXISTS (SELECT 1 FROM "Property" p WHERE p.id = i."propertyId")
-      AND NOT EXISTS (SELECT 1 FROM "Image" x WHERE x.id = i.id);
-    `);
+      SELECT column_name INTO sort_col
+      FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='PropertyImage'
+        AND column_name IN ('sort','sortOrder','order','position')
+      ORDER BY column_name LIMIT 1;
+
+      SELECT column_name INTO pub_col
+      FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='PropertyImage'
+        AND column_name IN ('publicId','public_id')
+      ORDER BY column_name LIMIT 1;
+
+      SELECT column_name INTO created_col
+      FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='PropertyImage'
+        AND column_name IN ('createdAt','created_at')
+      ORDER BY column_name LIMIT 1;
+
+      IF prop_col IS NOT NULL THEN
+        -- Remove dupes only if we know the sort column
+        IF sort_col IS NOT NULL THEN
+          EXECUTE format(
+            'DELETE FROM "PropertyImage" a
+               USING "PropertyImage" b
+             WHERE a.id < b.id
+               AND a.%1$I = b.%1$I
+               AND COALESCE(a.%2$I,0) = COALESCE(b.%2$I,0);',
+            prop_col, sort_col
+          );
+        END IF;
+
+        pub_expr := CASE WHEN pub_col IS NULL THEN 'NULL' ELSE format('i.%I', pub_col) END;
+        sort_expr := CASE WHEN sort_col IS NULL THEN '0' ELSE format('COALESCE(i.%I,0)', sort_col) END;
+        created_expr := CASE WHEN created_col IS NULL THEN 'now()' ELSE format('COALESCE(i.%I, now())', created_col) END;
+
+        EXECUTE format(
+          'INSERT INTO "Image"(id, "propertyId", "publicId", url, "sortOrder", "createdAt")
+             SELECT i.id, i.%1$I, %2$s, i.url, %3$s, %4$s
+               FROM "PropertyImage" i
+              WHERE EXISTS (SELECT 1 FROM "Property" p WHERE p.id = i.%1$I)
+                AND NOT EXISTS (SELECT 1 FROM "Image" x WHERE x.id = i.id);',
+          prop_col, pub_expr, sort_expr, created_expr
+        );
+      END IF;
+    END $$;`);
   }
 
+  // 6) Default unknown type values
   await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
 
-  console.log("[migrate] Schema ensured, legacy backfill complete (enum normalized).");
+  console.log("[migrate] Schema ensured, legacy backfill complete (enum normalized; robust image backfill).");
 }
 
 run()
