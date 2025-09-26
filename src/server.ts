@@ -12,22 +12,28 @@ app.use(express.json({ limit: "5mb" }));
 const ALLOWLIST = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
-  "https://havn-new.onrender.com",
+  "https://havn-new.onrender.com"
 ]);
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      try {
-        const u = new URL(origin);
-        if (ALLOWLIST.has(`${u.protocol}//${u.host}`)) return cb(null, true);
-      } catch {}
-      return cb(new Error("CORS blocked"));
-    },
-    credentials: true,
-  })
-);
+type OriginCallback = (err: Error | null, allow?: boolean) => void;
+
+const corsOptions = {
+  origin(origin: string | undefined, callback: OriginCallback) {
+    // allow same-origin / server-to-server
+    if (!origin) return callback(null, true);
+    try {
+      const u = new URL(origin);
+      const normalized = `${u.protocol}//${u.host}`;
+      if (ALLOWLIST.has(normalized)) return callback(null, true);
+    } catch {
+      // fall through to block
+    }
+    return callback(null, false);
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions as any));
 
 // Health
 app.get("/api/health", (_req, res) => {
