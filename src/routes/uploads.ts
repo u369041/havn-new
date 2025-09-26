@@ -1,6 +1,6 @@
 // src/routes/uploads.ts
 import { Router, Request, Response } from "express";
-import { createHash } from "node:crypto";
+import { createHash } from "crypto";
 
 const router = Router();
 
