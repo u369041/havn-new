@@ -131,7 +131,6 @@ async function run() {
 run()
   .catch((e) => {
     console.error("[migrate] ERROR", e);
-    // don't exit hard; allow app to start so you can inspect logs
   })
   .finally(async () => {
     await prisma.$disconnect();
