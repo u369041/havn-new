@@ -1,4 +1,3 @@
-// src/listings.ts
 import { PrismaClient, Prisma, Status } from "@prisma/client";
 
 const prisma = new PrismaClient();
