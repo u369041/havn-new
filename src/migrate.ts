@@ -25,9 +25,10 @@ async function getColType(table: string, column: string) {
   `;
   if (!r?.[0]) return null;
   const { data_type, udt_name } = r[0];
-  return data_type === "USER-DEFINED" ? udt_name : data_type; // e.g. "text" | "integer" | "PropertyStatus"
+  return data_type === "USER-DEFINED" ? udt_name : data_type; // "text" | "integer" | "PropertyStatus"
 }
 
+/** Drop FK on Image.propertyId if present (so we can change column types safely). */
 async function dropImageFkIfExists() {
   await prisma.$executeRawUnsafe(`
     DO $$
@@ -43,6 +44,25 @@ async function dropImageFkIfExists() {
   `);
 }
 
+/** Some DBs still have an old FK on PropertyImage(propertyid) -> Property(id) with the wrong type. Drop ALL FKs on PropertyImage. */
+async function dropAllPropertyImageFks() {
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    DECLARE c record;
+    BEGIN
+      FOR c IN
+        SELECT conname
+        FROM   pg_constraint
+        WHERE  conrelid = 'public."PropertyImage"'::regclass
+        AND    contype = 'f'
+      LOOP
+        EXECUTE format('ALTER TABLE "PropertyImage" DROP CONSTRAINT %I;', c.conname);
+      END LOOP;
+    END $$;
+  `);
+}
+
+/** After normalization, re-add Image.propertyId -> Property.id FK if types are compatible. */
 async function safeAddImageFk() {
   const propIdType = await getColType("Property", "id");
   const imgPidType = await getColType("Image", "propertyId");
@@ -64,7 +84,7 @@ async function safeAddImageFk() {
         USING ("propertyId"::text)
       `);
     } else {
-      console.log(`[migrate] Skipping FK: unsupported type combo Property.id=${propIdType} Image.propertyId=${imgPidType}`);
+      console.log(\`[migrate] Skipping FK: unsupported type combo Property.id=\${propIdType} Image.propertyId=\${imgPidType}\`);
       return;
     }
   }
@@ -83,14 +103,12 @@ async function safeAddImageFk() {
   `);
 }
 
+/** Ensure Property.id and Image.propertyId are TEXT (fixes numeric id rows). */
 async function ensurePropertyIdIsText() {
-  // If Property.id is not text, convert it (and Image.propertyId) to text.
   const propIdType = await getColType("Property", "id");
   if (propIdType && propIdType !== "text") {
-    // Drop FK if present, convert both columns to text, re-add FK later
     await dropImageFkIfExists();
 
-    // Make Image.propertyId text first (so cast works)
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "Image"
       ALTER COLUMN "propertyId" DROP DEFAULT,
@@ -98,14 +116,12 @@ async function ensurePropertyIdIsText() {
       USING ("propertyId"::text)
     `);
 
-    // Convert Property.id to text
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "Property"
       ALTER COLUMN id TYPE text
       USING (id::text)
     `);
   } else {
-    // Property.id is already text; ensure Image.propertyId is text too
     const imgPidType = await getColType("Image", "propertyId");
     if (imgPidType && imgPidType !== "text") {
       await dropImageFkIfExists();
@@ -120,6 +136,9 @@ async function ensurePropertyIdIsText() {
 }
 
 async function run() {
+  // 0) Drop any legacy FK on PropertyImage that can conflict with our new types.
+  await dropAllPropertyImageFks();
+
   // 1) Ensure enum exists with uppercase labels
   await prisma.$executeRawUnsafe(`
   DO $$
@@ -170,7 +189,7 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
-  // 3) Ensure Property.id and Image.propertyId are TEXT (fixes your "id" numeric row error)
+  // 3) Ensure Property.id and Image.propertyId are TEXT
   await ensurePropertyIdIsText();
 
   // 4) Add any missing columns on Property/Image
@@ -187,7 +206,7 @@ async function run() {
     ADD COLUMN IF NOT EXISTS "updatedAt" timestamptz NOT NULL DEFAULT now();
   `);
 
-  // Ensure status column is the enum type
+  // Ensure status column is enum type
   await prisma.$executeRawUnsafe(`
   DO $$
   DECLARE currtyp text;
@@ -206,7 +225,7 @@ async function run() {
     END IF;
   END $$;`);
 
-  // Normalize any lowercase values
+  // Normalize lowercase values
   await prisma.$executeRawUnsafe(`
     UPDATE "Property" SET status = 'DRAFT'::"PropertyStatus"     WHERE status::text IN ('draft','Draft');
     UPDATE "Property" SET status = 'PUBLISHED'::"PropertyStatus" WHERE status::text IN ('published','Published');
@@ -220,7 +239,7 @@ async function run() {
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
-  // 6) Backfill (same as before)
+  // 6) Backfill (read from legacy, write to normalized)
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
@@ -300,7 +319,6 @@ async function run() {
         sort_expr := CASE WHEN sort_col IS NULL THEN '0' ELSE format('COALESCE(i.%I,0)', sort_col) END;
         created_expr := CASE WHEN created_col IS NULL THEN 'now()' ELSE format('COALESCE(i.%I, now())', created_col) END;
 
-        -- Property.id is TEXT, so cast source to text for join/exists checks:
         EXECUTE format(
           'INSERT INTO "Image"(id, "propertyId", "publicId", url, "sortOrder", "createdAt")
              SELECT i.id::text, (i.%1$I)::text, %2$s, i.url, %3$s, %4$s
@@ -313,13 +331,13 @@ async function run() {
     END $$;`);
   }
 
-  // 7) Re-attach FK safely (now both sides are text)
+  // 7) Re-attach FK on Image if possible
   await safeAddImageFk();
 
-  // 8) Defensive default
+  // 8) Defensive default for type
   await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
 
-  console.log("[migrate] Schema ensured, legacy backfill complete (id/text normalization).");
+  console.log("[migrate] Schema ensured, legacy backfill complete (legacy PropertyImage FKs dropped).");
 }
 
 run()
