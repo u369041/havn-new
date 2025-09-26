@@ -11,30 +11,23 @@ const router = Router();
 
 /**
  * GET /api/properties
- * Query: type, status, minPrice, maxPrice, beds, take, skip, sort
+ * Query: category, subtype, status, minPrice, maxPrice, beds, take, skip, sort
+ * (also supports legacy: type)
  */
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const {
-      type,
-      status,
-      minPrice,
-      maxPrice,
-      beds,
-      take,
-      skip,
-      sort,
-    } = req.query as Record<string, string | undefined>;
-
+    const q = req.query as Record<string, string | undefined>;
     const out = await listProperties({
-      type: type || undefined,
-      status: (status as any) || undefined,
-      minPrice: typeof minPrice === "string" ? Number(minPrice) : undefined,
-      maxPrice: typeof maxPrice === "string" ? Number(maxPrice) : undefined,
-      beds: typeof beds === "string" ? Number(beds) : undefined,
-      take: typeof take === "string" ? Number(take) : undefined,
-      skip: typeof skip === "string" ? Number(skip) : undefined,
-      sort: (sort as any) || undefined,
+      category: q.category,
+      subtype: q.subtype,
+      type: q.type, // legacy exact match support
+      status: q.status as any,
+      minPrice: typeof q.minPrice === "string" ? Number(q.minPrice) : undefined,
+      maxPrice: typeof q.maxPrice === "string" ? Number(q.maxPrice) : undefined,
+      beds: typeof q.beds === "string" ? Number(q.beds) : undefined,
+      take: typeof q.take === "string" ? Number(q.take) : undefined,
+      skip: typeof q.skip === "string" ? Number(q.skip) : undefined,
+      sort: q.sort as any,
     });
 
     res.json({ ok: true, ...out });
@@ -58,7 +51,6 @@ router.get("/:slug", async (req: Request, res: Response) => {
 
 /**
  * POST /api/properties
- * Body accepts legacy keys; mapped internally.
  */
 router.post("/", async (req: Request, res: Response) => {
   try {
