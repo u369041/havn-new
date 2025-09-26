@@ -1,3 +1,4 @@
+// src/migrate.ts
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -14,14 +15,19 @@ async function tableExists(name: string) {
 }
 
 async function run() {
+  // 0) Ensure BOTH enum types exist. We will standardize on "PropertyStatus".
   await prisma.$executeRawUnsafe(`
   DO $$
   BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'Status') THEN
       CREATE TYPE "Status" AS ENUM ('DRAFT','PUBLISHED','ARCHIVED');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'PropertyStatus') THEN
+      CREATE TYPE "PropertyStatus" AS ENUM ('DRAFT','PUBLISHED','ARCHIVED');
+    END IF;
   END $$;`);
 
+  // 1) Ensure tables exist (using PropertyStatus for new creates)
   await prisma.$executeRawUnsafe(`
   CREATE TABLE IF NOT EXISTS "User" (
     id          text PRIMARY KEY,
@@ -37,7 +43,7 @@ async function run() {
     id          text PRIMARY KEY,
     slug        text UNIQUE NOT NULL,
     title       text NOT NULL,
-    status      "Status" NOT NULL DEFAULT 'DRAFT',
+    status      "PropertyStatus" NOT NULL DEFAULT 'DRAFT',
     price       integer NOT NULL,
     type        text NOT NULL,
     bedrooms    integer,
@@ -61,12 +67,33 @@ async function run() {
     "createdAt" timestamptz NOT NULL DEFAULT now()
   );`);
 
+  // 2) If Property.status is NOT "PropertyStatus", convert it
+  await prisma.$executeRawUnsafe(`
+  DO $$
+  DECLARE currtyp text;
+  BEGIN
+    SELECT t.typname INTO currtyp
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_type t ON t.oid = a.atttypid
+    WHERE n.nspname = 'public' AND c.relname = 'Property' AND a.attname = 'status';
+
+    IF currtyp IS NOT NULL AND currtyp <> 'PropertyStatus' THEN
+      ALTER TABLE "Property"
+      ALTER COLUMN status TYPE "PropertyStatus"
+      USING status::text::"PropertyStatus";
+    END IF;
+  END $$;`);
+
+  // 3) Indexes
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_status" ON "Property"(status);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_type"   ON "Property"(type);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_property_price"  ON "Property"(price);`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_image_property"  ON "Image"("propertyId");`);
   await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "uidx_image_property_sort" ON "Image"("propertyId","sortOrder");`);
 
+  // 4) Backfill from legacy tables if they exist
   const hasListing = await tableExists("Listing");
   const hasPropImg = await tableExists("PropertyImage");
 
@@ -78,8 +105,8 @@ async function run() {
       l.slug,
       COALESCE(l.title, 'Untitled'),
       CASE
-        WHEN l.status IN ('DRAFT','PUBLISHED','ARCHIVED') THEN l.status::"Status"
-        ELSE 'DRAFT'::"Status"
+        WHEN l.status IN ('DRAFT','PUBLISHED','ARCHIVED') THEN l.status::"PropertyStatus"
+        ELSE 'DRAFT'::"PropertyStatus"
       END,
       COALESCE(l.price, 0),
       COALESCE(NULLIF(l.type, ''), 'SALE/HOUSE'),
@@ -120,7 +147,7 @@ async function run() {
 
   await prisma.$executeRawUnsafe(`UPDATE "Property" SET type = 'SALE/HOUSE' WHERE type IS NULL OR type = '';`);
 
-  console.log("[migrate] Schema ensured, legacy backfill complete.");
+  console.log("[migrate] Schema ensured, legacy backfill complete (enum normalized).");
 }
 
 run()
