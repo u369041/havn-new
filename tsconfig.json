@@ -9,8 +9,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "types": ["node"]
+    "resolveJsonModule": true
   },
   "include": [
     "src/server.ts",
@@ -20,11 +19,5 @@
     "src/routes/uploads.ts",
     "src/types/**/*.d.ts"
   ],
-  "exclude": [
-    "node_modules",
-    "src/middleware/**",
-    "src/routes/admin.ts",
-    "src/routes/diag.ts",
-    "src/db.ts"
-  ]
+  "exclude": ["node_modules"]
 }
