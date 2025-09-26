@@ -12,11 +12,8 @@ datasource db {
 }
 
 // ---- Enums ----
-enum Role {
-  USER
-  ADMIN
-}
-
+// Keep only Status as an enum we actively use.
+// (Role stays a plain String on the User model to avoid a destructive type change.)
 enum Status {
   DRAFT
   PUBLISHED
@@ -28,11 +25,13 @@ model User {
   id         String     @id @default(cuid())
   email      String     @unique
   name       String?
-  role       Role       @default(USER)
+  // Use String instead of enum here to avoid Prisma wanting to drop/recreate the column.
+  role       String     @default("USER")
+
   properties Property[]
 
   createdAt  DateTime   @default(now())
-  // IMPORTANT: add default to allow adding this column when rows exist
+  // Add default so adding this column to existing rows is safe.
   updatedAt  DateTime   @default(now()) @updatedAt
 }
 
@@ -43,7 +42,7 @@ model Property {
   status      Status    @default(DRAFT)
   price       Int
 
-  // TEMP: make optional so db push can succeed on existing rows
+  // TEMP: optional to allow schema push on existing data
   type        String?
 
   bedrooms    Int?
@@ -58,7 +57,7 @@ model Property {
   ownerId     String?
 
   createdAt   DateTime  @default(now())
-  // add default so adding this column is safe with existing data
+  // Safe default for existing rows
   updatedAt   DateTime  @default(now()) @updatedAt
 
   @@index([status])
@@ -69,7 +68,7 @@ model Property {
 model Image {
   id         String    @id @default(cuid())
 
-  // TEMP: make relation optional so db push can add column without default
+  // TEMP: make relation optional so db push can add the column when rows already exist
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   propertyId String?
 
@@ -81,5 +80,24 @@ model Image {
   createdAt  DateTime  @default(now())
 
   @@index([propertyId])
-  @@unique([propertyId, sortOrder])
+  // NOTE: We intentionally do NOT add a @@unique([propertyId, sortOrder]) yet,
+  // to avoid failing if legacy rows contain duplicates. We can add it later after backfilling.
+}
+
+/* -----------------------------
+   Legacy tables (keep, don't touch)
+   By declaring them with @@ignore and mapping to their real table names,
+   Prisma will STOP proposing to DROP them, and db push can proceed with no data loss.
+-------------------------------- */
+
+model LegacyListing {
+  @@map("Listing")
+  @@ignore
+  id String @id
+}
+
+model LegacyPropertyImage {
+  @@map("PropertyImage")
+  @@ignore
+  id String @id
 }
