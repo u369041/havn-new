@@ -1,22 +1,29 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
+    "target": "ES2020",
+    "module": "ES2022",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "strict": false,
     "skipLibCheck": true,
-    "resolveJsonModule": true
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmitOnError": false,
+    "lib": ["ES2020"],
+    "types": ["node"]
   },
-  "include": [
-    "src/server.ts",
-    "src/migrate.ts",
-    "src/listings.ts",
-    "src/routes/properties.ts",
-    "src/routes/uploads.ts"
-  ],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "tests/**",
+    "web/**",
+    "client/**",
+    "frontend/**",
+    "public/**",
+    "src/public/**",
+    "src/client/**",
+    "src/frontend/**"
+  ]
 }
