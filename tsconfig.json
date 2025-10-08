@@ -1,13 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020", "DOM"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "CommonJS",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": false,
-    "outDir": "dist",
     "resolveJsonModule": true
   },
   "include": ["src/**/*"]
