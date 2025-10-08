@@ -7,61 +7,66 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Status {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-
-  @@map("PropertyStatus")
+generator client {
+  provider = "prisma-client-js"
 }
 
-model User {
-  id         String     @id @default(cuid())
-  email      String     @unique
-  name       String?
-  role       String     @default("USER")
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-  properties Property[]
+enum ListingType {
+  RENT
+  SALE
+  SHARE
+}
 
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @default(now()) @updatedAt
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
 }
 
 model Property {
-  id          String    @id @default(cuid())
-  slug        String    @unique
-  title       String
-  status      Status    @default(DRAFT)
-  price       Int
-  type        String
-  bedrooms    Int?
-  bathrooms   Int?
-  address     String?
-  latitude    Float?
-  longitude   Float?
-  description String?
+  id            String          @id @default(cuid())
+  title         String
+  description   String
+  price         Int
+  listingType   ListingType
+  status        ListingStatus    @default(ACTIVE)
 
-  images      Image[]
-  owner       User?     @relation(fields: [ownerId], references: [id])
-  ownerId     String?
+  bedrooms      Int?
+  bathrooms     Int?
+  areaSqFt      Int?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  county        String?
+  eircode       String?
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @default(now()) @updatedAt
+  latitude      Float?
+  longitude     Float?
 
-  @@index([status])
-  @@index([type])
-  @@index([price])
+  images        PropertyImage[]
+
+  slug          String           @unique
+
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 }
 
-model Image {
-  id         String    @id @default(cuid())
-  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String
-  publicId   String?
-  url        String?
-  sortOrder  Int       @default(0)
-  createdAt  DateTime  @default(now())
+model PropertyImage {
+  id           String   @id @default(cuid())
+  propertyId   String
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
-  @@index([propertyId])
-  @@unique([propertyId, sortOrder])
+  publicId     String
+  url          String
+  width        Int?
+  height       Int?
+  format       String?
+
+  position     Int       @default(0)
+  createdAt    DateTime  @default(now())
 }
