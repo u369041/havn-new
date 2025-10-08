@@ -1,30 +1,14 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": false,
-    "skipLibCheck": true,
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "noEmitOnError": false,
-    "lib": ["ES2022"],
-    "types": ["node"]
+    "skipLibCheck": true,
+    "strict": false,
+    "outDir": "dist",
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": [
-    "src/migrate.ts",
-    "node_modules",
-    "**/*.test.ts",
-    "tests/**",
-    "web/**",
-    "client/**",
-    "frontend/**",
-    "public/**",
-    "src/public/**",
-    "src/client/**",
-    "src/frontend/**"
-  ]
+  "include": ["src/**/*"]
 }
