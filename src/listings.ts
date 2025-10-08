@@ -90,7 +90,7 @@ export async function listProperties(query: ListQuery) {
       where,
       include: {
         images: {
-          orderBy: { position: "asc" }, // position replaces sortOrder
+          orderBy: { position: "asc" }, // ✅ use position not sortOrder
         },
       },
       orderBy: [{ createdAt: "desc" }],
@@ -134,6 +134,7 @@ export async function createProperty(input: CreatePropertyInput) {
     images = [],
     listingType,
     status = ListingStatus.ACTIVE,
+    description = "",   // ✅ always provide description
     ...rest
   } = input;
 
@@ -150,8 +151,9 @@ export async function createProperty(input: CreatePropertyInput) {
   return prisma.property.create({
     data: {
       ...rest,
-      listingType, // NOTE: 'listingType' replaces old 'type'
+      listingType,
       status,
+      description,
       images: preparedImages.length
         ? { create: preparedImages }
         : undefined,
@@ -163,7 +165,7 @@ export async function createProperty(input: CreatePropertyInput) {
 export async function updatePropertyStatus(id: string, newStatus: ListingStatus) {
   return prisma.property.update({
     where: { id },
-    data: { status: newStatus }, // correct enum type
+    data: { status: newStatus },
   });
 }
 
@@ -173,7 +175,6 @@ export async function updatePropertyCore(
     slug?: string;
   }
 ) {
-  // Prevent accidental wrong keys from old schema
   const { listingType, ...rest } = data as any;
   const updateData: any = { ...rest };
   if (listingType) updateData.listingType = listingType;
@@ -188,7 +189,6 @@ export async function updatePropertyCore(
 /* ---------------------------- Images API ---------------------------- */
 
 export async function addPropertyImage(propertyId: string, image: CreateImageInput) {
-  // create image and return ordered list
   await prisma.propertyImage.create({
     data: {
       propertyId,
@@ -212,7 +212,6 @@ export async function deletePropertyImage(imageId: string) {
 }
 
 export async function reorderImages(propertyId: string, orderedImageIds: string[]) {
-  // Assign positions 0..n based on given order
   await prisma.$transaction(
     orderedImageIds.map((id, idx) =>
       prisma.propertyImage.update({
