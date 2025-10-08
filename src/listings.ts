@@ -1,156 +1,229 @@
-import { PrismaClient, Prisma, Status } from "@prisma/client";
+// src/listings.ts
+import { PrismaClient, ListingStatus, ListingType } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-/** Simple slugger */
-function slugify(input: string) {
-  const base = String(input || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-  const suffix = Math.random().toString(36).slice(2, 7);
-  return `${base}-${suffix}`;
-}
+/* ----------------------------- Types ----------------------------- */
 
-export async function listProperties(opts: {
-  category?: string;
-  subtype?: string;
-  status?: keyof typeof Status | string;
+export type ListQuery = {
+  q?: string;
+  city?: string;
+  county?: string;
+  status?: ListingStatus | "ALL";
+  type?: ListingType;
   minPrice?: number;
   maxPrice?: number;
-  beds?: number;
-  take?: number;
-  skip?: number;
-  sort?: "price_asc" | "price_desc" | "date_desc";
-}) {
-  const o = opts || {};
+  page?: number; // 1-based
+  pageSize?: number; // default 20
+};
 
-  // Build where
+export type CreateImageInput = {
+  url: string;
+  publicId: string;
+  width?: number;
+  height?: number;
+  format?: string;
+  position?: number; // default 0..n
+};
+
+export type CreatePropertyInput = {
+  title: string;
+  description?: string;
+  price: number;
+  listingType: ListingType;
+  status?: ListingStatus;
+  bedrooms?: number;
+  bathrooms?: number;
+  areaSqFt?: number;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  county?: string;
+  eircode?: string;
+  latitude?: number;
+  longitude?: number;
+  slug: string;
+  images?: CreateImageInput[];
+};
+
+/* --------------------------- Read/List --------------------------- */
+
+export async function listProperties(query: ListQuery) {
+  const {
+    q,
+    city,
+    county,
+    status = ListingStatus.ACTIVE,
+    type,
+    minPrice,
+    maxPrice,
+    page = 1,
+    pageSize = 20,
+  } = query;
+
   const where: any = {};
-  if (o.status) {
-    const s = String(o.status).toUpperCase();
-    if (s in Status) where.status = s;
+
+  if (q) {
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { description: { contains: q, mode: "insensitive" } },
+      { city: { contains: q, mode: "insensitive" } },
+      { county: { contains: q, mode: "insensitive" } },
+      { eircode: { contains: q, mode: "insensitive" } },
+    ];
   }
-
-  const cat = String(o.category || "").toUpperCase();
-  const sub = String(o.subtype || "").toUpperCase();
-  if (cat && sub) where.type = `${cat}/${sub}`;
-  else if (cat) where.type = { startsWith: `${cat}/` };
-  else if (sub) where.type = { endsWith: `/${sub}` };
-
-  if (typeof o.beds === "number") where.bedrooms = { gte: o.beds };
-  if (typeof o.minPrice === "number" || typeof o.maxPrice === "number") {
+  if (city) where.city = { equals: city, mode: "insensitive" };
+  if (county) where.county = { equals: county, mode: "insensitive" };
+  if (type) where.listingType = type;
+  if (status && status !== "ALL") where.status = status;
+  if (minPrice != null || maxPrice != null) {
     where.price = {};
-    if (typeof o.minPrice === "number") where.price.gte = o.minPrice;
-    if (typeof o.maxPrice === "number") where.price.lte = o.maxPrice;
+    if (minPrice != null) where.price.gte = Number(minPrice);
+    if (maxPrice != null) where.price.lte = Number(maxPrice);
   }
 
-  // Sorting & pagination
-  let orderBy: any = [{ createdAt: "desc" }];
-  if (o.sort === "price_asc") orderBy = [{ price: "asc" }];
-  if (o.sort === "price_desc") orderBy = [{ price: "desc" }];
+  const skip = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+  const take = Math.max(1, Math.min(100, pageSize));
 
-  const take = typeof o.take === "number" ? Math.max(1, Math.min(100, o.take)) : 24;
-  const skip = typeof o.skip === "number" ? Math.max(0, o.skip) : 0;
-
-  const [count, properties] = await Promise.all([
-    prisma.property.count({ where }),
+  const [items, total] = await Promise.all([
     prisma.property.findMany({
       where,
-      take,
+      include: {
+        images: {
+          orderBy: { position: "asc" }, // position replaces sortOrder
+        },
+      },
+      orderBy: [{ createdAt: "desc" }],
       skip,
-      orderBy,
-      include: { images: { orderBy: { sortOrder: "asc" } } }
-    })
+      take,
+    }),
+    prisma.property.count({ where }),
   ]);
 
-  return { count, properties };
+  return {
+    items,
+    total,
+    page,
+    pageSize: take,
+    totalPages: Math.max(1, Math.ceil(total / take)),
+  };
 }
 
 export async function getPropertyBySlug(slug: string) {
   return prisma.property.findUnique({
     where: { slug },
-    include: { images: { orderBy: { sortOrder: "asc" } } }
+    include: {
+      images: { orderBy: { position: "asc" } },
+    },
   });
 }
 
-export async function createProperty(payload: any) {
-  const p = payload || {};
-  const title = typeof p.title === "string" ? p.title.trim() : "";
-  const price =
-    typeof p.price === "number" ? p.price :
-    typeof p.price === "string" ? Number(p.price) : NaN;
-  const type = typeof p.type === "string" ? p.type.trim() : "";
-
-  if (!title) throw new Error("title is required");
-  if (!Number.isFinite(price)) throw new Error("price must be a number");
-  if (!type) throw new Error("type is required");
-
-  const beds =
-    typeof p.beds === "number" ? p.beds :
-    typeof p.beds === "string" && p.beds.trim() ? Number(p.beds) : null;
-
-  const baths =
-    typeof p.baths === "number" ? p.baths :
-    typeof p.baths === "string" && p.baths.trim() ? Number(p.baths) : null;
-
-  const images: any[] = Array.isArray(p.images) ? p.images : [];
-
-  const slug = slugify(title);
-
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    const created = await tx.property.create({
-      data: {
-        slug,
-        title,
-        status: "DRAFT",
-        price,
-        type,
-        address: typeof p.address === "string" ? p.address : null,
-        bedrooms: beds,
-        bathrooms: baths,
-        description: typeof p.description === "string" ? p.description : null,
-        images: {
-          create: images.map((im: any, idx: number) => ({
-            publicId: String(im?.publicId || im?.public_id || ""),
-            url: String(im?.url || im?.secure_url || ""),
-            sortOrder: idx
-          }))
-        }
-      },
-      include: { images: { orderBy: { sortOrder: "asc" } } }
-    });
-
-    return created;
+export async function getPropertyById(id: string) {
+  return prisma.property.findUnique({
+    where: { id },
+    include: {
+      images: { orderBy: { position: "asc" } },
+    },
   });
 }
 
-export async function setImageOrder(propertyId: string, imageIds: string[]) {
-  if (!propertyId) throw new Error("propertyId is required");
-  if (!Array.isArray(imageIds)) throw new Error("imageIds must be an array");
+/* --------------------------- Create/Update --------------------------- */
 
+export async function createProperty(input: CreatePropertyInput) {
+  const {
+    images = [],
+    listingType,
+    status = ListingStatus.ACTIVE,
+    ...rest
+  } = input;
+
+  // Ensure image positions are sequential
+  const preparedImages = images.map((img, i) => ({
+    url: img.url,
+    publicId: img.publicId,
+    width: img.width,
+    height: img.height,
+    format: img.format,
+    position: img.position ?? i,
+  }));
+
+  return prisma.property.create({
+    data: {
+      ...rest,
+      listingType, // NOTE: 'listingType' replaces old 'type'
+      status,
+      images: preparedImages.length
+        ? { create: preparedImages }
+        : undefined,
+    },
+    include: { images: { orderBy: { position: "asc" } } },
+  });
+}
+
+export async function updatePropertyStatus(id: string, newStatus: ListingStatus) {
+  return prisma.property.update({
+    where: { id },
+    data: { status: newStatus }, // correct enum type
+  });
+}
+
+export async function updatePropertyCore(
+  id: string,
+  data: Partial<Omit<CreatePropertyInput, "images" | "slug">> & {
+    slug?: string;
+  }
+) {
+  // Prevent accidental wrong keys from old schema
+  const { listingType, ...rest } = data as any;
+  const updateData: any = { ...rest };
+  if (listingType) updateData.listingType = listingType;
+
+  return prisma.property.update({
+    where: { id },
+    data: updateData,
+    include: { images: { orderBy: { position: "asc" } } },
+  });
+}
+
+/* ---------------------------- Images API ---------------------------- */
+
+export async function addPropertyImage(propertyId: string, image: CreateImageInput) {
+  // create image and return ordered list
+  await prisma.propertyImage.create({
+    data: {
+      propertyId,
+      url: image.url,
+      publicId: image.publicId,
+      width: image.width,
+      height: image.height,
+      format: image.format,
+      position: image.position ?? 0,
+    },
+  });
+
+  return prisma.property.findUnique({
+    where: { id: propertyId },
+    include: { images: { orderBy: { position: "asc" } } },
+  });
+}
+
+export async function deletePropertyImage(imageId: string) {
+  return prisma.propertyImage.delete({ where: { id: imageId } });
+}
+
+export async function reorderImages(propertyId: string, orderedImageIds: string[]) {
+  // Assign positions 0..n based on given order
   await prisma.$transaction(
-    imageIds.map((id, idx) =>
-      prisma.image.update({
+    orderedImageIds.map((id, idx) =>
+      prisma.propertyImage.update({
         where: { id },
-        data: { sortOrder: idx }
+        data: { position: idx },
       })
     )
   );
 
-  return prisma.image.findMany({
-    where: { propertyId },
-    orderBy: { sortOrder: "asc" }
-  });
-}
-
-export async function setStatus(id: string, status: keyof typeof Status | string) {
-  const s = String(status || "").toUpperCase();
-  if (!(s in Status)) throw new Error("invalid_status");
-  return prisma.property.update({
-    where: { id },
-    data: { status: s as keyof typeof Status }
+  return prisma.property.findUnique({
+    where: { id: propertyId },
+    include: { images: { orderBy: { position: "asc" } } },
   });
 }
