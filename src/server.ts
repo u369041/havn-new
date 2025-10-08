@@ -1,91 +1,102 @@
-// src/server.ts
-
-import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
-import propertiesRouter from "./routes/properties";
+import dotenv from "dotenv";
+import { PrismaClient } from "@prisma/client";
+import path from "path";
+import fs from "fs";
 
-// import package.json to expose app version
-// (tsconfig has "resolveJsonModule": true)
-import pkg from "../package.json" assert { type: "json" };
+dotenv.config();
 
 const app = express();
+const prisma = new PrismaClient();
 
-/* -------- Build/commit metadata -------- */
-const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
-const GIT_SHA =
-  process.env.RENDER_GIT_COMMIT || process.env.GIT_SHA || "local-dev";
-const GIT_BRANCH =
-  process.env.RENDER_GIT_BRANCH || process.env.GIT_BRANCH || "local";
-const APP_VERSION = (pkg as any).version || "0.0.0";
+// ✅ safely load package.json without "assert { type: 'json' }"
+const pkg = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf-8")
+);
 
-/* ---------------- Security & basics ---------------- */
+// Middleware
 app.use(helmet());
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-);
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json());
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://havn.ie",
+    "https://www.havn.ie",
+    "https://havn-new.onrender.com"
+  ],
+  credentials: true,
+}));
 
-/* ---------------- CORS ---------------- */
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "https://havn.ie",
-  "https://www.havn.ie",
-  "https://havn-new.onrender.com",
-];
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    credentials: true,
-  })
-);
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // limit each IP to 60 requests/min
+});
+app.use(limiter);
 
-/* ---------------- Health & Version ---------------- */
+// Health check
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    status: "healthy",
-    time: new Date().toISOString(),
+    service: "havn-api",
+    version: pkg.version,
+    timestamp: new Date().toISOString(),
   });
 });
 
-/** Prove what’s deployed */
-app.get("/api/version", (_req, res) => {
-  res.json({
-    ok: true,
-    appVersion: APP_VERSION,
-    git: { sha: GIT_SHA, branch: GIT_BRANCH },
-    buildTime: BUILD_TIME,
-    node: process.version,
-    env: process.env.NODE_ENV || "development",
-  });
-});
-
-/* ---------------- Routes ---------------- */
-app.use("/api/properties", propertiesRouter);
-
-/* ---------------- Start server ---------------- */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`HAVN API running on port ${PORT}`);
-  if (!process.env.DATABASE_URL) {
-    console.warn(
-      "Warning: DATABASE_URL is not set. Prisma will fail to connect until you set it in .env"
-    );
+// Example: fetch properties
+app.get("/api/properties", async (_req, res) => {
+  try {
+    const properties = await prisma.property.findMany({
+      include: { images: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ ok: true, count: properties.length, properties });
+  } catch (err) {
+    console.error("Error fetching properties:", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-export default app;
+// Example: create property
+app.post("/api/properties", async (req, res) => {
+  try {
+    const { title, price, description, images } = req.body;
+
+    if (!title || !price) {
+      return res.status(400).json({ ok: false, error: "Missing required fields" });
+    }
+
+    const property = await prisma.property.create({
+      data: {
+        title,
+        price,
+        description: description || "",
+        images: images?.length
+          ? { create: images.map((img: any, i: number) => ({
+              url: img.url,
+              publicId: img.publicId,
+              width: img.width,
+              height: img.height,
+              format: img.format,
+              position: img.position ?? i,
+            })) }
+          : undefined,
+      },
+      include: { images: { orderBy: { position: "asc" } } },
+    });
+
+    res.json({ ok: true, property });
+  } catch (err) {
+    console.error("Error creating property:", err);
+    res.status(500).json({ ok: false, error: "Failed to create property" });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 havn API running on http://localhost:${PORT}`);
+});
