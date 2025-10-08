@@ -11,8 +11,7 @@
     "start:prod": "prisma migrate deploy && node dist/server.js",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
-    "prisma:deploy": "prisma migrate deploy",
-    "smoke": "node -e \"console.log('SMOKE OK')\""
+    "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "5.18.0",
