@@ -1,84 +1,115 @@
+// src/routes/properties.ts
+
 import { Router, Request, Response } from "express";
-import {
-  listProperties,
-  getPropertyBySlug,
-  createProperty,
-  setImageOrder,
-  setStatus
-} from "../listings.js";
+import { PrismaClient } from "@prisma/client";
+import slugify from "slugify";
 
 const router = Router();
+const prisma = new PrismaClient();
 
-function isAdmin(req: Request) {
-  const hdr = req.header("x-admin-key") || "";
-  const key = process.env.ADMIN_KEY || "";
-  return key && hdr === key;
-}
-
-/** GET /api/properties */
+// GET /api/properties -> list all (with optional filters)
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const q = req.query as Record<string, string | undefined>;
-    const out = await listProperties({
-      category: q.category,
-      subtype: q.subtype,
-      status: q.status,
-      minPrice: typeof q.minPrice === "string" ? Number(q.minPrice) : undefined,
-      maxPrice: typeof q.maxPrice === "string" ? Number(q.maxPrice) : undefined,
-      beds: typeof q.beds === "string" ? Number(q.beds) : undefined,
-      take: typeof q.take === "string" ? Number(q.take) : undefined,
-      skip: typeof q.skip === "string" ? Number(q.skip) : undefined,
-      sort: (q.sort as any) || "date_desc"
+    const { city, county, listingType, status, take = "20", skip = "0" } = req.query;
+
+    const properties = await prisma.property.findMany({
+      where: {
+        city: city ? String(city) : undefined,
+        county: county ? String(county) : undefined,
+        listingType: listingType ? String(listingType).toUpperCase() as any : undefined,
+        status: status ? String(status).toUpperCase() as any : "ACTIVE",
+      },
+      include: { images: true },
+      take: parseInt(String(take)),
+      skip: parseInt(String(skip)),
+      orderBy: { createdAt: "desc" },
     });
-    res.json({ ok: true, ...out });
-  } catch (err: any) {
-    res.status(400).json({ ok: false, error: err?.message || "failed" });
+
+    res.json({ ok: true, count: properties.length, properties });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-/** GET /api/properties/:slug */
-router.get("/:slug", async (req: Request, res: Response) => {
+// GET /api/properties/:id -> single property
+router.get("/:id", async (req: Request, res: Response) => {
   try {
-    const prop = await getPropertyBySlug(req.params.slug);
-    if (!prop) return res.status(404).json({ ok: false, error: "not_found" });
-    res.json({ ok: true, property: prop });
-  } catch (err: any) {
-    res.status(400).json({ ok: false, error: err?.message || "failed" });
+    const property = await prisma.property.findUnique({
+      where: { id: req.params.id },
+      include: { images: true },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Property not found" });
+    }
+
+    res.json({ ok: true, property });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
-/** POST /api/properties */
+// POST /api/properties -> create new listing
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const prop = await createProperty(req.body);
-    res.status(201).json({ ok: true, property: prop });
-  } catch (err: any) {
-    res.status(400).json({ ok: false, error: err?.message || "failed" });
-  }
-});
+    const {
+      title,
+      description,
+      price,
+      listingType,
+      bedrooms,
+      bathrooms,
+      areaSqFt,
+      addressLine1,
+      addressLine2,
+      city,
+      county,
+      eircode,
+      latitude,
+      longitude,
+      images,
+    } = req.body;
 
-/** PUT /api/properties/:id/images/order */
-router.put("/:id/images/order", async (req: Request, res: Response) => {
-  try {
-    const propertyId = req.params.id;
-    const imageIds: string[] = Array.isArray(req.body?.imageIds)
-      ? req.body.imageIds
-      : [];
-    const images = await setImageOrder(propertyId, imageIds);
-    res.json({ ok: true, images });
-  } catch (err: any) {
-    res.status(400).json({ ok: false, error: err?.message || "failed" });
-  }
-});
+    // Create slug from title
+    const slug = slugify(title, { lower: true, strict: true });
 
-/** PATCH /api/properties/:id/status (admin only) */
-router.patch("/:id/status", async (req: Request, res: Response) => {
-  try {
-    if (!isAdmin(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
-    const updated = await setStatus(req.params.id, String(req.body?.status || ""));
-    res.json({ ok: true, property: updated });
-  } catch (err: any) {
-    res.status(400).json({ ok: false, error: err?.message || "failed" });
+    const property = await prisma.property.create({
+      data: {
+        title,
+        description,
+        price: Number(price),
+        listingType,
+        bedrooms,
+        bathrooms,
+        areaSqFt,
+        addressLine1,
+        addressLine2,
+        city,
+        county,
+        eircode,
+        latitude,
+        longitude,
+        slug,
+        images: {
+          create: images?.map((img: any, index: number) => ({
+            publicId: img.publicId,
+            url: img.url,
+            width: img.width,
+            height: img.height,
+            format: img.format,
+            position: index,
+          })),
+        },
+      },
+      include: { images: true },
+    });
+
+    res.status(201).json({ ok: true, property });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Failed to create property" });
   }
 });
 
