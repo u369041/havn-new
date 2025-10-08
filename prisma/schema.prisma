@@ -9,12 +9,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/*
- If you already have other models (e.g., User), paste them
- below as additional model blocks.
-*/
-
-// ---------- Enums ----------
 enum ListingType {
   RENT
   SALE
@@ -27,37 +21,33 @@ enum ListingStatus {
   ARCHIVED
 }
 
-// ---------- Models ----------
 model Property {
-  id            String          @id @default(cuid())
-  title         String
-  description   String
-  price         Int
-  listingType   ListingType
-  status        ListingStatus    @default(ACTIVE)
+  id           String         @id @default(cuid())
+  title        String
+  description  String
+  price        Int
+  listingType  ListingType
+  status       ListingStatus  @default(ACTIVE)
 
-  bedrooms      Int?
-  bathrooms     Int?
-  areaSqFt      Int?
-  // Location
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  county        String?
-  eircode       String?
+  bedrooms     Int?
+  bathrooms    Int?
+  areaSqFt     Int?
 
-  // Optional geo
-  latitude      Float?
-  longitude     Float?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  county       String?
+  eircode      String?
 
-  // Media
-  images        PropertyImage[]
+  latitude     Float?
+  longitude    Float?
 
-  // For clean URLs
-  slug          String           @unique
+  images       PropertyImage[]
 
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  slug         String         @unique
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   @@index([city])
   @@index([county])
@@ -66,20 +56,18 @@ model Property {
 }
 
 model PropertyImage {
-  id           String   @id @default(cuid())
-  propertyId   String
-  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
-  // Cloudinary references
-  publicId     String
-  url          String
-  width        Int?
-  height       Int?
-  format       String?
+  publicId   String
+  url        String
+  width      Int?
+  height     Int?
+  format     String?
 
-  // For gallery ordering
-  position     Int       @default(0)
-  createdAt    DateTime  @default(now())
+  position   Int       @default(0)
+  createdAt  DateTime  @default(now())
 
   @@index([propertyId, position])
 }
