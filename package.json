@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
-    "start:prod": "prisma migrate deploy && node dist/server.js",
+    "start": "node dist/src/server.js",
+    "start:prod": "prisma migrate deploy && node dist/src/server.js",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy"
