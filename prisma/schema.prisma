@@ -1,11 +1,4 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -16,6 +9,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/*
+ If you already have other models (e.g., User), paste them
+ below as additional model blocks.
+*/
+
+// ---------- Enums ----------
 enum ListingType {
   RENT
   SALE
@@ -28,6 +27,7 @@ enum ListingStatus {
   ARCHIVED
 }
 
+// ---------- Models ----------
 model Property {
   id            String          @id @default(cuid())
   title         String
@@ -39,21 +39,30 @@ model Property {
   bedrooms      Int?
   bathrooms     Int?
   areaSqFt      Int?
+  // Location
   addressLine1  String?
   addressLine2  String?
   city          String?
   county        String?
   eircode       String?
 
+  // Optional geo
   latitude      Float?
   longitude     Float?
 
+  // Media
   images        PropertyImage[]
 
+  // For clean URLs
   slug          String           @unique
 
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+
+  @@index([city])
+  @@index([county])
+  @@index([status])
+  @@index([listingType])
 }
 
 model PropertyImage {
@@ -61,12 +70,16 @@ model PropertyImage {
   propertyId   String
   property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
+  // Cloudinary references
   publicId     String
   url          String
   width        Int?
   height       Int?
   format       String?
 
+  // For gallery ordering
   position     Int       @default(0)
   createdAt    DateTime  @default(now())
+
+  @@index([propertyId, position])
 }
