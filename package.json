@@ -2,13 +2,12 @@
   "name": "havn-new",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "engines": { "node": ">=18.18" },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/src/server.js",
-    "start:prod": "prisma migrate deploy && node dist/src/server.js",
+    "start": "node dist/server.js",
+    "start:prod": "prisma migrate deploy && node dist/server.js",
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy"
