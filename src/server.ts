@@ -1,98 +1,29 @@
 // src/server.ts
+import path from "path";
 import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import { PrismaClient } from "@prisma/client";
+import listingsRouter from "./listings";
 
 const app = express();
-const prisma = new PrismaClient();
+const PORT = process.env.PORT || 3000;
 
-app.use(helmet());
-app.use(cors({
-  origin: [
-    "https://havn.ie",
-    "https://www.havn.ie",
-    "https://havn-new.onrender.com"
-  ],
-  credentials: true,
-}));
+// Parse JSON bodies if you ever POST/PUT later
 app.use(express.json());
 
-// --- Routes ---
+// API routes
+app.use("/api", listingsRouter);
 
-// Health check
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, message: "HAVN API is running" });
-});
+// Serve static site (public/)
+const publicDir = path.join(process.cwd(), "public");
+app.use(express.static(publicDir));
 
-// Get all properties
-app.get("/api/properties", async (_req, res) => {
-  try {
-    const properties = await prisma.property.findMany({
-      include: { images: true },
-      orderBy: { createdAt: "desc" }
-    });
-    res.json({ ok: true, count: properties.length, properties });
-  } catch (err) {
-    console.error("Failed to fetch properties", err);
-    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
-  }
-});
+// Convenience routes (optional)
+app.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+app.get("/properties.html", (_req, res) => res.sendFile(path.join(publicDir, "properties.html")));
+app.get("/property.html", (_req, res) => res.sendFile(path.join(publicDir, "property.html")));
 
-// Get property by slug
-app.get("/api/properties/:slug", async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const property = await prisma.property.findUnique({
-      where: { slug },
-      include: { images: true }
-    });
-    if (!property) {
-      return res.status(404).json({ ok: false, error: "Property not found" });
-    }
-    res.json({ ok: true, property });
-  } catch (err) {
-    console.error("Failed to fetch property", err);
-    res.status(500).json({ ok: false, error: "Failed to fetch property" });
-  }
-});
+// Health
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// Create new property
-app.post("/api/properties", async (req, res) => {
-  try {
-    const { title, description, price, slug, images } = req.body;
-
-    const property = await prisma.property.create({
-      data: {
-        title,
-        description,
-        price,
-        slug,
-        listingType: "SALE",
-        status: "ACTIVE",
-        city: "Dublin",
-        county: "Dublin",
-        images: {
-          create: (images || []).map((img: any, idx: number) => ({
-            url: img.url,
-            publicId: img.publicId || `manual-${idx}`,
-            format: img.format || "jpg",
-            position: idx
-          }))
-        }
-      },
-      include: { images: true }
-    });
-
-    res.json({ ok: true, property });
-  } catch (err: any) {
-    console.error("Failed to create property", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// --- Start server ---
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`HAVN API running on http://localhost:${PORT}`);
+  console.log(`Server listening on :${PORT}`);
 });
