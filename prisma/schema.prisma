@@ -9,72 +9,55 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * Enums
- */
 enum ListingType {
   SALE
   RENT
+  OTHER
 }
 
 enum ListingStatus {
   ACTIVE
-  SOLD
-  RENTED
-  WITHDRAWN
-  // kept for backward compatibility so db push will not block:
   DRAFT
   ARCHIVED
 }
 
-/**
- * Models
- */
 model Property {
   id           String         @id @default(cuid())
   title        String
   description  String?
-  price        Int?
-
+  price        Int
   listingType  ListingType
   status       ListingStatus  @default(ACTIVE)
 
   bedrooms     Int?
   bathrooms    Int?
+  sizeSqM      Int?
 
-  // optional address info
-  areaSqFt     Int?
   addressLine1 String?
   addressLine2 String?
   city         String?
   county       String?
-  eircode      String?
+  eircode      String?        @db.VarChar(10)
   latitude     Float?
   longitude    Float?
 
-  // routing
   slug         String         @unique
 
-  // relations
-  images       PropertyImage[]
-
-  // timestamps
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+
+  images       PropertyImage[]
 }
 
 model PropertyImage {
-  id         String   @id @default(cuid())
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   propertyId String
-
-  // Cloudinary-ish info (all optional except url)
-  publicId   String?
+  publicId   String
   url        String
   width      Int?
   height     Int?
   format     String?
-  position   Int?     @default(0)
-
-  createdAt  DateTime @default(now())
+  position   Int       @default(0)
+  createdAt  DateTime  @default(now())
 }
