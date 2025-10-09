@@ -1,105 +1,98 @@
-import express from 'express';
-import cors from 'cors';
-import morgan from 'morgan';
-import bodyParser from 'body-parser';
-import { PrismaClient } from '@prisma/client';
+// src/server.ts
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import { PrismaClient } from "@prisma/client";
 
 const app = express();
 const prisma = new PrismaClient();
 
-// ----- CORS -----
-const allowedOrigins = [
-  'https://www.havn.ie',
-  'https://havn.ie',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500',
-];
-
+app.use(helmet());
 app.use(cors({
-  origin(origin, cb) {
-    // allow same-origin / server-to-server (no Origin header)
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(null, false);
-  },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400,
+  origin: [
+    "https://havn.ie",
+    "https://www.havn.ie",
+    "https://havn-new.onrender.com"
+  ],
+  credentials: true,
 }));
-app.options('*', cors());
+app.use(express.json());
 
-// ----- Common middleware -----
-app.use(morgan('tiny'));
-app.use(bodyParser.json());
+// --- Routes ---
 
-// ----- Health check -----
-app.get('/health', (_req, res) => res.json({ ok: true }));
+// Health check
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, message: "HAVN API is running" });
+});
 
-// ----- API routes -----
-// GET /api/properties
-app.get('/api/properties', async (_req, res) => {
+// Get all properties
+app.get("/api/properties", async (_req, res) => {
   try {
     const properties = await prisma.property.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: { images: { orderBy: { position: 'asc' } } },
+      include: { images: true },
+      orderBy: { createdAt: "desc" }
     });
     res.json({ ok: true, count: properties.length, properties });
-  } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err?.message || 'Server error' });
+  } catch (err) {
+    console.error("Failed to fetch properties", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-// GET /api/properties/:slug
-app.get('/api/properties/:slug', async (req, res) => {
+// Get property by slug
+app.get("/api/properties/:slug", async (req, res) => {
   try {
+    const { slug } = req.params;
     const property = await prisma.property.findUnique({
-      where: { slug: req.params.slug },
-      include: { images: { orderBy: { position: 'asc' } } },
+      where: { slug },
+      include: { images: true }
     });
-    if (!property) return res.status(404).json({ ok: false, error: 'Not found' });
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Property not found" });
+    }
+    res.json({ ok: true, property });
+  } catch (err) {
+    console.error("Failed to fetch property", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch property" });
+  }
+});
+
+// Create new property
+app.post("/api/properties", async (req, res) => {
+  try {
+    const { title, description, price, slug, images } = req.body;
+
+    const property = await prisma.property.create({
+      data: {
+        title,
+        description,
+        price,
+        slug,
+        listingType: "SALE",
+        status: "ACTIVE",
+        city: "Dublin",
+        county: "Dublin",
+        images: {
+          create: (images || []).map((img: any, idx: number) => ({
+            url: img.url,
+            publicId: img.publicId || `manual-${idx}`,
+            format: img.format || "jpg",
+            position: idx
+          }))
+        }
+      },
+      include: { images: true }
+    });
+
     res.json({ ok: true, property });
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err?.message || 'Server error' });
+    console.error("Failed to create property", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /api/properties  (kept here if you need it)
-app.post('/api/properties', async (req, res) => {
-  try {
-    const {
-      title, description, price, listingType, status, slug, city, county,
-      bedrooms, bathrooms, areaSqFt, images = [],
-    } = req.body;
-
-    const created = await prisma.property.create({
-      data: {
-        title, description, price, listingType, status, slug, city, county,
-        bedrooms, bathrooms, areaSqFt,
-        images: {
-          create: images.map((img: any, i: number) => ({
-            url: img.url,
-            publicId: img.publicId || null,
-            width: img.width || null,
-            height: img.height || null,
-            format: img.format || null,
-            position: typeof img.position === 'number' ? img.position : i,
-          })),
-        },
-      },
-      include: { images: { orderBy: { position: 'asc' } } },
-    });
-
-    res.status(201).json({ ok: true, property: created });
-  } catch (err: any) {
-    console.error(err);
-    res.status(400).json({ ok: false, error: err?.message || 'Bad request' });
-  }
-});
-
-// ----- Start server -----
+// --- Start server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`API listening on ${PORT}`);
+  console.log(`HAVN API running on http://localhost:${PORT}`);
 });
