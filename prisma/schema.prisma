@@ -9,57 +9,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Property {
-  id           String           @id @default(cuid())
-  title        String
-  description  String?
-  price        Int
-
-  // Size in square meters (shown on cards/detail)
-  sizeSqm      Int?
-
-  bedrooms     Int?
-  bathrooms    Int?
-
-  // Address / location
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  county       String?
-  eircode      String?          // Irish postcode for mapping
-  latitude     Float?
-  longitude    Float?
-
-  // Enums
-  listingType  ListingType      @default(SALE)
-  status       ListingStatus    @default(ACTIVE)
-  propertyType PropertyType     @default(OTHER)
-
-  // Relations
-  images       PropertyImage[]
-
-  slug         String           @unique
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-}
-
-model PropertyImage {
-  id         String   @id @default(cuid())
-  property   Property @relation(fields: [propertyId], references: [id])
-  propertyId String
-  publicId   String
-  url        String
-  width      Int?
-  height     Int?
-  format     String?
-  position   Int      @default(0)
-  createdAt  DateTime @default(now())
-}
-
+/**
+ * Enums
+ */
 enum ListingType {
   SALE
   RENT
-  SHARE
 }
 
 enum ListingStatus {
@@ -67,13 +22,59 @@ enum ListingStatus {
   SOLD
   RENTED
   WITHDRAWN
+  // kept for backward compatibility so db push will not block:
+  DRAFT
+  ARCHIVED
 }
 
-enum PropertyType {
-  DETACHED
-  SEMI_DETACHED
-  TERRACED
-  APARTMENT
-  BUNGALOW
-  OTHER
+/**
+ * Models
+ */
+model Property {
+  id           String         @id @default(cuid())
+  title        String
+  description  String?
+  price        Int?
+
+  listingType  ListingType
+  status       ListingStatus  @default(ACTIVE)
+
+  bedrooms     Int?
+  bathrooms    Int?
+
+  // optional address info
+  areaSqFt     Int?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  county       String?
+  eircode      String?
+  latitude     Float?
+  longitude    Float?
+
+  // routing
+  slug         String         @unique
+
+  // relations
+  images       PropertyImage[]
+
+  // timestamps
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+
+  // Cloudinary-ish info (all optional except url)
+  publicId   String?
+  url        String
+  width      Int?
+  height     Int?
+  format     String?
+  position   Int?     @default(0)
+
+  createdAt  DateTime @default(now())
 }
