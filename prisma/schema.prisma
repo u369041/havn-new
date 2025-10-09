@@ -10,64 +10,81 @@ datasource db {
 }
 
 enum ListingType {
-  RENT
   SALE
-  SHARE
+  RENT
 }
 
 enum ListingStatus {
-  DRAFT
   ACTIVE
+  INACTIVE
   ARCHIVED
 }
 
+/**
+ * New: finer-grained “Property Type” for cards & detail (what users see as Semi-D, Detached, etc.)
+ */
+enum PropertyType {
+  DETACHED
+  SEMI_D
+  TERRACED
+  APARTMENT
+  BUNGALOW
+  DUPLEX
+  SITE
+  OTHER
+}
+
 model Property {
-  id           String         @id @default(cuid())
-  title        String
-  description  String
-  price        Int
-  listingType  ListingType
-  status       ListingStatus  @default(ACTIVE)
+  id            String         @id @default(cuid())
+  title         String
+  description   String?
+  price         Int
+  listingType   ListingType
+  status        ListingStatus  @default(ACTIVE)
 
-  bedrooms     Int?
-  bathrooms    Int?
-  areaSqFt     Int?
+  bedrooms      Int?
+  bathrooms     Int?
 
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  county       String?
-  eircode      String?
+  // Existing address pieces
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  county        String?
+  eircode       String?        @db.VarChar(12)
 
-  latitude     Float?
-  longitude    Float?
+  latitude      Float?
+  longitude     Float?
 
-  images       PropertyImage[]
+  /**
+   * New fields:
+   *  - propertyType (enum above)
+   *  - sizeSqM (m² shown on cards/detail)
+   */
+  propertyType  PropertyType?  @default(OTHER)
+  sizeSqM       Int?           @db.Integer
 
-  slug         String         @unique
+  // Slug must be unique
+  slug          String         @unique
 
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  @@index([city])
-  @@index([county])
-  @@index([status])
-  @@index([listingType])
+  images        PropertyImage[]
 }
 
 model PropertyImage {
   id         String   @id @default(cuid())
-  propertyId String
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
 
-  publicId   String
+  publicId   String?
   url        String
   width      Int?
   height     Int?
   format     String?
-
   position   Int       @default(0)
+
   createdAt  DateTime  @default(now())
 
-  @@index([propertyId, position])
+  @@index([propertyId])
 }
