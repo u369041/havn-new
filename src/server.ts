@@ -1,7 +1,6 @@
 // src/server.ts
 import express from "express";
 import cors from "cors";
-import morgan from "morgan";
 import { PrismaClient } from "@prisma/client";
 
 const app = express();
@@ -9,14 +8,19 @@ const prisma = new PrismaClient();
 
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
-app.use(morgan("tiny"));
+
+// Tiny request logger (replaces morgan)
+app.use((req, _res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
 
 // Health check
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// List properties (with optional minPrice & maxPrice filters)
+// List properties (supports ?minPrice=&maxPrice=)
 app.get("/api/properties", async (req, res) => {
   try {
     const { minPrice, maxPrice } = req.query;
@@ -32,7 +36,8 @@ app.get("/api/properties", async (req, res) => {
       orderBy: { createdAt: "desc" },
       include: {
         images: {
-          orderBy: { position: "asc" }, // change to sortOrder if that’s your field name
+          // use { sortOrder: "asc" } if that's your column name
+          orderBy: { position: "asc" },
         },
       },
     });
@@ -53,14 +58,13 @@ app.get("/api/properties/:slug", async (req, res) => {
       where: { slug },
       include: {
         images: {
-          orderBy: { position: "asc" }, // change to sortOrder if that’s your field
+          // use { sortOrder: "asc" } if that's your column name
+          orderBy: { position: "asc" },
         },
       },
     });
 
-    if (!property) {
-      return res.status(404).json({ ok: false, error: "Not found" });
-    }
+    if (!property) return res.status(404).json({ ok: false, error: "Not found" });
 
     res.json({ ok: true, property });
   } catch (err: any) {
@@ -69,7 +73,7 @@ app.get("/api/properties/:slug", async (req, res) => {
   }
 });
 
-// Start server (Render will inject PORT)
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API listening on port ${PORT}`);
