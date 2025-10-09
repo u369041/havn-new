@@ -1,0 +1,3 @@
+-- Baseline migration (intentionally empty).
+-- We will mark this as applied using:
+--   npx prisma migrate resolve --applied 0_init
