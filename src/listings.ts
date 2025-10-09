@@ -1,228 +1,202 @@
 // src/listings.ts
-import { PrismaClient, ListingStatus, ListingType } from "@prisma/client";
+
+import { Router, Request, Response } from "express";
+import { PrismaClient, ListingType, ListingStatus, PropertyType } from "@prisma/client";
 
 const prisma = new PrismaClient();
+const router = Router();
 
-/* ----------------------------- Types ----------------------------- */
+/**
+ * Build where clause from query params
+ */
+function buildWhere(q: any) {
+  const where: any = {
+    // text search across a few columns
+    OR: [],
+  };
 
-export type ListQuery = {
-  q?: string;
-  city?: string;
-  county?: string;
-  status?: ListingStatus | "ALL";
-  type?: ListingType;
-  minPrice?: number;
-  maxPrice?: number;
-  page?: number; // 1-based
-  pageSize?: number; // default 20
-};
-
-export type CreateImageInput = {
-  url: string;
-  publicId: string;
-  width?: number;
-  height?: number;
-  format?: string;
-  position?: number; // default 0..n
-};
-
-export type CreatePropertyInput = {
-  title: string;
-  description?: string;
-  price: number;
-  listingType: ListingType;
-  status?: ListingStatus;
-  bedrooms?: number;
-  bathrooms?: number;
-  areaSqFt?: number;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  county?: string;
-  eircode?: string;
-  latitude?: number;
-  longitude?: number;
-  slug: string;
-  images?: CreateImageInput[];
-};
-
-/* --------------------------- Read/List --------------------------- */
-
-export async function listProperties(query: ListQuery) {
-  const {
-    q,
-    city,
-    county,
-    status = ListingStatus.ACTIVE,
-    type,
-    minPrice,
-    maxPrice,
-    page = 1,
-    pageSize = 20,
-  } = query;
-
-  const where: any = {};
-
-  if (q) {
-    where.OR = [
-      { title: { contains: q, mode: "insensitive" } },
-      { description: { contains: q, mode: "insensitive" } },
-      { city: { contains: q, mode: "insensitive" } },
-      { county: { contains: q, mode: "insensitive" } },
-      { eircode: { contains: q, mode: "insensitive" } },
-    ];
+  const text = (q.q || "").trim();
+  if (text) {
+    where.OR.push(
+      { title: { contains: text, mode: "insensitive" } },
+      { description: { contains: text, mode: "insensitive" } },
+      { city: { contains: text, mode: "insensitive" } },
+      { county: { contains: text, mode: "insensitive" } },
+      { eircode: { contains: text, mode: "insensitive" } },
+    );
+  } else {
+    delete where.OR; // avoid empty OR
   }
-  if (city) where.city = { equals: city, mode: "insensitive" };
-  if (county) where.county = { equals: county, mode: "insensitive" };
-  if (type) where.listingType = type;
-  if (status && status !== "ALL") where.status = status;
+
+  // listing type filter (SALE/RENT)
+  if (q.type && (q.type === "SALE" || q.type === "RENT")) {
+    where.listingType = q.type as ListingType;
+  }
+
+  // status filter
+  if (q.status && ["ACTIVE", "INACTIVE", "ARCHIVED"].includes(q.status)) {
+    where.status = q.status as ListingStatus;
+  } else {
+    where.status = "ACTIVE";
+  }
+
+  // min/max price
+  const minPrice = Number.isFinite(+q.minPrice) ? Number(q.minPrice) : undefined;
+  const maxPrice = Number.isFinite(+q.maxPrice) ? Number(q.maxPrice) : undefined;
+
   if (minPrice != null || maxPrice != null) {
     where.price = {};
-    if (minPrice != null) where.price.gte = Number(minPrice);
-    if (maxPrice != null) where.price.lte = Number(maxPrice);
+    if (minPrice != null) where.price.gte = minPrice;
+    if (maxPrice != null) where.price.lte = maxPrice;
   }
 
-  const skip = (Math.max(1, page) - 1) * Math.max(1, pageSize);
-  const take = Math.max(1, Math.min(100, pageSize));
+  return where;
+}
 
-  const [items, total] = await Promise.all([
-    prisma.property.findMany({
+/**
+ * GET /api/properties
+ * Returns list for cards (now includes propertyType and sizeSqM)
+ */
+router.get("/properties", async (req: Request, res: Response) => {
+  try {
+    const where = buildWhere(req.query);
+
+    const properties = await prisma.property.findMany({
       where,
-      include: {
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        description: true,
+        price: true,
+        listingType: true,
+        status: true,
+
+        bedrooms: true,
+        bathrooms: true,
+
+        addressLine1: true,
+        addressLine2: true,
+        city: true,
+        county: true,
+        eircode: true,
+
+        propertyType: true,   // NEW
+        sizeSqM: true,        // NEW
+
         images: {
-          orderBy: { position: "asc" }, // ✅ use position not sortOrder
+          orderBy: { position: "asc" },
+          take: 1,
+          select: { url: true, width: true, height: true, format: true, position: true },
         },
+
+        createdAt: true,
+        updatedAt: true,
       },
-      orderBy: [{ createdAt: "desc" }],
-      skip,
-      take,
-    }),
-    prisma.property.count({ where }),
-  ]);
+    });
 
-  return {
-    items,
-    total,
-    page,
-    pageSize: take,
-    totalPages: Math.max(1, Math.ceil(total / take)),
-  };
-}
+    res.json({ ok: true, count: properties.length, properties });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || "Error" });
+  }
+});
 
-export async function getPropertyBySlug(slug: string) {
-  return prisma.property.findUnique({
-    where: { slug },
-    include: {
-      images: { orderBy: { position: "asc" } },
-    },
-  });
-}
+/**
+ * GET /api/properties/:slug
+ * Full detail record (includes images)
+ */
+router.get("/properties/:slug", async (req: Request, res: Response) => {
+  try {
+    const { slug } = req.params;
 
-export async function getPropertyById(id: string) {
-  return prisma.property.findUnique({
-    where: { id },
-    include: {
-      images: { orderBy: { position: "asc" } },
-    },
-  });
-}
+    const property = await prisma.property.findUnique({
+      where: { slug },
+      include: {
+        images: { orderBy: { position: "asc" } },
+      },
+    });
 
-/* --------------------------- Create/Update --------------------------- */
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Not found" });
+    }
 
-export async function createProperty(input: CreatePropertyInput) {
-  const {
-    images = [],
-    listingType,
-    status = ListingStatus.ACTIVE,
-    description = "",   // ✅ always provide description
-    ...rest
-  } = input;
+    res.json({ ok: true, property });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || "Error" });
+  }
+});
 
-  // Ensure image positions are sequential
-  const preparedImages = images.map((img, i) => ({
-    url: img.url,
-    publicId: img.publicId,
-    width: img.width,
-    height: img.height,
-    format: img.format,
-    position: img.position ?? i,
-  }));
-
-  return prisma.property.create({
-    data: {
-      ...rest,
+/**
+ * POST /api/properties
+ * Minimal create; accepts sizeSqM & propertyType
+ */
+router.post("/properties", async (req: Request, res: Response) => {
+  try {
+    const {
+      title,
+      description,
+      price,
       listingType,
       status,
-      description,
-      images: preparedImages.length
-        ? { create: preparedImages }
-        : undefined,
-    },
-    include: { images: { orderBy: { position: "asc" } } },
-  });
-}
+      bedrooms,
+      bathrooms,
+      addressLine1,
+      addressLine2,
+      city,
+      county,
+      eircode,
+      slug,
 
-export async function updatePropertyStatus(id: string, newStatus: ListingStatus) {
-  return prisma.property.update({
-    where: { id },
-    data: { status: newStatus },
-  });
-}
+      sizeSqM,       // NEW
+      propertyType,  // NEW
 
-export async function updatePropertyCore(
-  id: string,
-  data: Partial<Omit<CreatePropertyInput, "images" | "slug">> & {
-    slug?: string;
+      images = [],
+    } = req.body || {};
+
+    if (!title || !price || !listingType || !slug) {
+      return res.status(400).json({ ok: false, error: "Missing required fields: title, price, listingType, slug" });
+    }
+
+    const create = await prisma.property.create({
+      data: {
+        title,
+        description: description ?? null,
+        price: Number(price),
+        listingType,
+        status: status ?? "ACTIVE",
+
+        bedrooms: bedrooms != null ? Number(bedrooms) : null,
+        bathrooms: bathrooms != null ? Number(bathrooms) : null,
+
+        addressLine1: addressLine1 ?? null,
+        addressLine2: addressLine2 ?? null,
+        city: city ?? null,
+        county: county ?? null,
+        eircode: eircode ?? null,
+
+        sizeSqM: sizeSqM != null ? Number(sizeSqM) : null,
+        propertyType: propertyType ?? "OTHER",
+
+        slug,
+        images: {
+          create: (Array.isArray(images) ? images : []).map((img: any, i: number) => ({
+            url: img.url,
+            publicId: img.publicId ?? null,
+            format: img.format ?? null,
+            width: img.width != null ? Number(img.width) : null,
+            height: img.height != null ? Number(img.height) : null,
+            position: img.position != null ? Number(img.position) : i,
+          })),
+        },
+      },
+      include: { images: true },
+    });
+
+    res.json({ ok: true, property: create });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || "Error" });
   }
-) {
-  const { listingType, ...rest } = data as any;
-  const updateData: any = { ...rest };
-  if (listingType) updateData.listingType = listingType;
+});
 
-  return prisma.property.update({
-    where: { id },
-    data: updateData,
-    include: { images: { orderBy: { position: "asc" } } },
-  });
-}
-
-/* ---------------------------- Images API ---------------------------- */
-
-export async function addPropertyImage(propertyId: string, image: CreateImageInput) {
-  await prisma.propertyImage.create({
-    data: {
-      propertyId,
-      url: image.url,
-      publicId: image.publicId,
-      width: image.width,
-      height: image.height,
-      format: image.format,
-      position: image.position ?? 0,
-    },
-  });
-
-  return prisma.property.findUnique({
-    where: { id: propertyId },
-    include: { images: { orderBy: { position: "asc" } } },
-  });
-}
-
-export async function deletePropertyImage(imageId: string) {
-  return prisma.propertyImage.delete({ where: { id: imageId } });
-}
-
-export async function reorderImages(propertyId: string, orderedImageIds: string[]) {
-  await prisma.$transaction(
-    orderedImageIds.map((id, idx) =>
-      prisma.propertyImage.update({
-        where: { id },
-        data: { position: idx },
-      })
-    )
-  );
-
-  return prisma.property.findUnique({
-    where: { id: propertyId },
-    include: { images: { orderBy: { position: "asc" } } },
-  });
-}
+export default router;
