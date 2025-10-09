@@ -9,82 +9,71 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ListingType {
-  SALE
-  RENT
-}
-
-enum ListingStatus {
-  ACTIVE
-  INACTIVE
-  ARCHIVED
-}
-
-/**
- * New: finer-grained “Property Type” for cards & detail (what users see as Semi-D, Detached, etc.)
- */
-enum PropertyType {
-  DETACHED
-  SEMI_D
-  TERRACED
-  APARTMENT
-  BUNGALOW
-  DUPLEX
-  SITE
-  OTHER
-}
-
 model Property {
-  id            String         @id @default(cuid())
-  title         String
-  description   String?
-  price         Int
-  listingType   ListingType
-  status        ListingStatus  @default(ACTIVE)
+  id           String           @id @default(cuid())
+  title        String
+  description  String?
+  price        Int
 
-  bedrooms      Int?
-  bathrooms     Int?
+  // Size in square meters (shown on cards/detail)
+  sizeSqm      Int?
 
-  // Existing address pieces
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  county        String?
-  eircode       String?        @db.VarChar(12)
+  bedrooms     Int?
+  bathrooms    Int?
 
-  latitude      Float?
-  longitude     Float?
+  // Address / location
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  county       String?
+  eircode      String?          // Irish postcode for mapping
+  latitude     Float?
+  longitude    Float?
 
-  /**
-   * New fields:
-   *  - propertyType (enum above)
-   *  - sizeSqM (m² shown on cards/detail)
-   */
-  propertyType  PropertyType?  @default(OTHER)
-  sizeSqM       Int?           @db.Integer
+  // Enums
+  listingType  ListingType      @default(SALE)
+  status       ListingStatus    @default(ACTIVE)
+  propertyType PropertyType     @default(OTHER)
 
-  // Slug must be unique
-  slug          String         @unique
+  // Relations
+  images       PropertyImage[]
 
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  images        PropertyImage[]
+  slug         String           @unique
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 }
 
 model PropertyImage {
   id         String   @id @default(cuid())
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id])
   propertyId String
-
-  publicId   String?
+  publicId   String
   url        String
   width      Int?
   height     Int?
   format     String?
-  position   Int       @default(0)
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+}
 
-  createdAt  DateTime  @default(now())
+enum ListingType {
+  SALE
+  RENT
+  SHARE
+}
 
-  @@index([propertyId])
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  RENTED
+  WITHDRAWN
+}
+
+enum PropertyType {
+  DETACHED
+  SEMI_DETACHED
+  TERRACED
+  APARTMENT
+  BUNGALOW
+  OTHER
 }
