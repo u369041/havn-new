@@ -87,7 +87,6 @@ router.post('/properties', async (req: Request, res: Response) => {
     // optional numbers
     const bedrooms = toNum(bedOr(b.bedrooms, b.beds));
     const bathrooms = toNum(bathOr(b.bathrooms, b.baths));
-    const areaSqM = toNum(b.areaSqM);
 
     // optional strings
     const description = b.description ?? null;
@@ -135,10 +134,9 @@ router.post('/properties', async (req: Request, res: Response) => {
         price: priceNum!,
         slug,
         listingType,
-        status, // may be undefined; Prisma will use default if your schema has one
+        status, 
         bedrooms,
         bathrooms,
-        areaSqM,
         addressLine1,
         addressLine2,
         city,
