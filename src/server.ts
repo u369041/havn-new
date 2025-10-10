@@ -1,30 +1,44 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import 'dotenv/config';
-
+import rateLimit from 'express-rate-limit';
 import { apiRouter } from './routes/properties';
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// basics
+// middleware
 app.use(helmet());
-app.use(
-  cors({
-    origin: '*',
-  })
-);
-app.use(express.json({ limit: '2mb' }));
+app.use(cors({
+  origin: [
+    'https://havn.ie',
+    'https://www.havn.ie',
+    'https://havn-new.onrender.com',
+  ],
+}));
+app.use(express.json({ limit: '10mb' }));
 
-// simple root + health
-app.get('/', (_req, res) => res.json({ ok: true, service: 'havn-api' }));
-app.get('/health', (_req, res) => res.json({ ok: true }));
+// rate limiting
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+});
+app.use(limiter);
 
-// mount API (this exposes /api/health and the properties routes)
+// mount API routes
 app.use('/api', apiRouter);
 
-// start
-const PORT = Number(process.env.PORT) || 10000;
+// health check
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, message: 'API running' });
+});
+
+// root route
+app.get('/', (_req, res) => {
+  res.send('HAVN API is live 🚀');
+});
+
+// start server
 app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
