@@ -21,20 +21,18 @@ function toListingStatus(v: any | undefined): ListingStatus | undefined {
   throw new Error('status must be ACTIVE, DRAFT or ARCHIVED');
 }
 
-function toNum(n: any): number | null {
-  if (n === null || n === undefined || n === '') return null;
+function toNum(n: any): number | undefined {
+  if (n === null || n === undefined || n === '') return undefined;
   const parsed = Number(n);
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /* ---------- routes ---------- */
 
-/** GET /api/health */
 router.get('/health', (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-/** GET /api/properties */
 router.get('/properties', async (_req: Request, res: Response) => {
   try {
     const properties = await prisma.property.findMany({
@@ -48,7 +46,6 @@ router.get('/properties', async (_req: Request, res: Response) => {
   }
 });
 
-/** GET /api/properties/:slug */
 router.get('/properties/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
@@ -64,17 +61,16 @@ router.get('/properties/:slug', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/properties */
 router.post('/properties', async (req: Request, res: Response) => {
   try {
     const b = req.body || {};
 
     // required
     const title: string = b.title;
-    const priceNum = toNum(b.price);
+    const price = toNum(b.price);
     const slug: string = b.slug;
 
-    if (!title || !slug || priceNum == null) {
+    if (!title || !slug || price === undefined) {
       return res.status(400).json({
         ok: false,
         error: 'title, price, and slug are required',
@@ -84,32 +80,29 @@ router.post('/properties', async (req: Request, res: Response) => {
     const listingType = toListingType(b.listingType);
     const status = toListingStatus(b.status);
 
-    // optional numbers
-    const bedrooms = toNum(bedOr(b.bedrooms, b.beds));
-    const bathrooms = toNum(bathOr(b.bathrooms, b.baths));
+    // optional
+    const bedrooms = toNum(b.bedrooms);
+    const bathrooms = toNum(b.bathrooms);
 
-    // optional strings
-    const description = b.description ?? null;
-    const addressLine1 = b.addressLine1 ?? null;
-    const addressLine2 = b.addressLine2 ?? null;
-    const city = b.city ?? null;
-    const county = b.county ?? null;
-    const eircode = b.eircode ?? null;
+    const description = b.description ?? undefined;
+    const addressLine1 = b.addressLine1 ?? undefined;
+    const addressLine2 = b.addressLine2 ?? undefined;
+    const city = b.city ?? undefined;
+    const county = b.county ?? undefined;
+    const eircode = b.eircode ?? undefined;
+    const latitude = toNum(b.latitude);
+    const longitude = toNum(b.longitude);
 
-    // lat/lon optional
-    const latitude = b.latitude !== undefined ? Number(b.latitude) : null;
-    const longitude = b.longitude !== undefined ? Number(b.longitude) : null;
-
-    // images (optional)
+    // images
     let imagesCreate:
       | {
           create: {
             url: string;
             publicId: string;
-            width: number | null;
-            height: number | null;
-            format: string | null;
-            position: number | null;
+            width?: number;
+            height?: number;
+            format?: string;
+            position?: number;
           }[];
         }
       | undefined;
@@ -118,11 +111,11 @@ router.post('/properties', async (req: Request, res: Response) => {
       imagesCreate = {
         create: b.images.map((img: any, idx: number) => ({
           url: String(img?.url ?? ''),
-          publicId: String(img?.publicId ?? ''), // <-- always a string
+          publicId: String(img?.publicId ?? ''), // always string
           width: toNum(img?.width),
           height: toNum(img?.height),
-          format: img?.format ?? null,
-          position: toNum(img?.position ?? idx),
+          format: img?.format ? String(img.format) : undefined,
+          position: img?.position !== undefined ? Number(img.position) : idx,
         })),
       };
     }
@@ -131,7 +124,7 @@ router.post('/properties', async (req: Request, res: Response) => {
       data: {
         title,
         description,
-        price: priceNum!,
+        price,
         slug,
         listingType,
         status,
@@ -159,13 +152,4 @@ router.post('/properties', async (req: Request, res: Response) => {
   }
 });
 
-/* ----- tiny helpers for legacy field names ----- */
-function bedOr(a: any, b: any) {
-  return a !== undefined ? a : b;
-}
-function bathOr(a: any, b: any) {
-  return a !== undefined ? a : b;
-}
-
-/* named export expected by server.ts */
 export { router as apiRouter };
