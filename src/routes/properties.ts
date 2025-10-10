@@ -22,10 +22,22 @@ apiRouter.get('/properties', async (_req, res) => {
 // POST /api/properties -> create new property
 apiRouter.post('/properties', async (req, res) => {
   try {
-    const { title, price, description } = req.body;
+    const { title, price, description, listingType, slug } = req.body;
+
+    if (!title || !price || !listingType || !slug) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields' });
+    }
+
     const property = await prisma.property.create({
-      data: { title, price, description },
+      data: {
+        title,
+        price,
+        description: description || '',
+        listingType,
+        slug,
+      },
     });
+
     res.json({ ok: true, property });
   } catch (err) {
     console.error('Error creating property:', err);
