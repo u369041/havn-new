@@ -1,0 +1,35 @@
+﻿{
+  "title": "Modern 2-bed apartment",
+  "price": 375000,
+  "description": "Bright south-facing apartment near the marina.",
+  "listingType": "SALE",
+  "slug": "modern-2-bed-apartment-marina-001",
+  "status": "ACTIVE",
+  "bedrooms": 2,
+  "bathrooms": 2,
+  "areaSqFt": 820,
+  "addressLine1": "12 Harbour View",
+  "addressLine2": "",
+  "city": "Cork",
+  "county": "Cork",
+  "eircode": "T12 ABC1",
+  "latitude": 51.8979,
+  "longitude": -8.4706,
+  "images": [
+    {
+      "url": "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+      "publicId": "sample",
+      "width": 1200,
+      "height": 800,
+      "format": "jpg"
+    },
+    {
+      "url": "https://res.cloudinary.com/demo/image/upload/park.jpg",
+      "publicId": "park",
+      "width": 1200,
+      "height": 800,
+      "format": "jpg",
+      "position": 1
+    }
+  ]
+}
