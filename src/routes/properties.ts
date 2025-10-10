@@ -1,155 +1,177 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient, ListingType, ListingStatus } from '@prisma/client';
+// src/routes/properties.ts
+import { Router, Request, Response } from "express";
+import { PrismaClient, ListingType, ListingStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const router = Router();
 
-/* ---------- helpers ---------- */
-
-function toListingType(v: any): ListingType {
-  if (typeof v !== 'string') throw new Error('listingType must be a string (SALE or RENT)');
-  const up = v.toUpperCase();
-  if (up === 'SALE' || up === 'RENT') return up as ListingType;
-  throw new Error('listingType must be SALE or RENT');
-}
-
-function toListingStatus(v: any | undefined): ListingStatus | undefined {
-  if (v == null) return undefined;
-  if (typeof v !== 'string') throw new Error('status must be a string (ACTIVE, DRAFT, ARCHIVED)');
-  const up = v.toUpperCase();
-  if (up === 'ACTIVE' || up === 'DRAFT' || up === 'ARCHIVED') return up as ListingStatus;
-  throw new Error('status must be ACTIVE, DRAFT or ARCHIVED');
-}
-
-function toNum(n: any): number | undefined {
-  if (n === null || n === undefined || n === '') return undefined;
-  const parsed = Number(n);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/* ---------- routes ---------- */
-
-router.get('/health', (_req: Request, res: Response) => {
-  res.json({ ok: true });
-});
-
-router.get('/properties', async (_req: Request, res: Response) => {
+/**
+ * GET /api/properties
+ * Basic list; no reference to sizeSqM anywhere
+ */
+router.get("/", async (_req: Request, res: Response) => {
   try {
     const properties = await prisma.property.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: { images: true },
+      orderBy: { createdAt: "desc" },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+        },
+      },
     });
     res.json({ ok: true, count: properties.length, properties });
-  } catch (err) {
-    console.error('GET /properties failed', err);
-    res.status(500).json({ ok: false, error: 'Failed to fetch properties' });
+  } catch (err: any) {
+    console.error("Error fetching properties:", err?.message || err);
+    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-router.get('/properties/:slug', async (req: Request, res: Response) => {
+/**
+ * POST /api/properties
+ * Creates a property with optional images
+ *
+ * Required minimal fields: title, price, listingType (SALE|RENT), slug (unique)
+ * Optional: status (defaults to ACTIVE), and everything else
+ *
+ * Example body:
+ * {
+ *   "title": "Test",
+ *   "price": 250000,
+ *   "listingType": "SALE",
+ *   "slug": "test-001",
+ *   "images": [
+ *     { "url": "https://...", "publicId": "demo", "position": 0 }
+ *   ]
+ * }
+ */
+router.post("/", async (req: Request, res: Response) => {
   try {
-    const { slug } = req.params;
-    const property = await prisma.property.findUnique({
-      where: { slug },
-      include: { images: true },
-    });
-    if (!property) return res.status(404).json({ ok: false, error: 'Not found' });
-    res.json({ ok: true, property });
-  } catch (err) {
-    console.error('GET /properties/:slug failed', err);
-    res.status(500).json({ ok: false, error: 'Failed to fetch property' });
-  }
-});
+    const body = req.body ?? {};
 
-router.post('/properties', async (req: Request, res: Response) => {
-  try {
-    const b = req.body || {};
-
-    // required
-    const title: string = b.title;
-    const price = toNum(b.price);
-    const slug: string = b.slug;
-
-    if (!title || !slug || price === undefined) {
-      return res.status(400).json({
-        ok: false,
-        error: 'title, price, and slug are required',
-      });
+    // --- Minimal validation / coercion ---
+    if (!body.title || typeof body.title !== "string") {
+      return res.status(400).json({ ok: false, error: "title is required" });
+    }
+    if (typeof body.price !== "number" || Number.isNaN(body.price)) {
+      return res.status(400).json({ ok: false, error: "price must be a number" });
+    }
+    if (!body.listingType || !["SALE", "RENT"].includes(body.listingType)) {
+      return res.status(400).json({ ok: false, error: "listingType must be SALE or RENT" });
+    }
+    if (!body.slug || typeof body.slug !== "string") {
+      return res.status(400).json({ ok: false, error: "slug is required" });
     }
 
-    const listingType = toListingType(b.listingType);
-    const status = toListingStatus(b.status);
+    // Ensure enums are correctly typed
+    const listingType = body.listingType as ListingType;
+    const status = (body.status as ListingStatus) ?? "ACTIVE";
 
-    // optional
-    const bedrooms = toNum(b.bedrooms);
-    const bathrooms = toNum(b.bathrooms);
-
-    const description = b.description ?? undefined;
-    const addressLine1 = b.addressLine1 ?? undefined;
-    const addressLine2 = b.addressLine2 ?? undefined;
-    const city = b.city ?? undefined;
-    const county = b.county ?? undefined;
-    const eircode = b.eircode ?? undefined;
-    const latitude = toNum(b.latitude);
-    const longitude = toNum(b.longitude);
-
-    // images
+    // Prepare nested images create inputs (IMPORTANT: use undefined for omitted optionals)
     let imagesCreate:
       | {
-          create: {
-            url: string;
-            publicId: string;
-            width?: number;
-            height?: number;
-            format?: string;
-            position?: number;
-          }[];
+          create:
+            | {
+                url: string;
+                publicId?: string;
+                width?: number;
+                height?: number;
+                format?: string;
+                position?: number;
+              }[]
+            | {
+                url: string;
+                publicId?: string;
+                width?: number;
+                height?: number;
+                format?: string;
+                position?: number;
+              };
         }
       | undefined;
 
-    if (Array.isArray(b.images) && b.images.length) {
+    if (Array.isArray(body.images) && body.images.length > 0) {
       imagesCreate = {
-        create: b.images.map((img: any, idx: number) => ({
-          url: String(img?.url ?? ''),
-          publicId: String(img?.publicId ?? ''), // always string
-          width: toNum(img?.width),
-          height: toNum(img?.height),
-          format: img?.format ? String(img.format) : undefined,
-          position: img?.position !== undefined ? Number(img.position) : idx,
-        })),
+        create: body.images.map((img: any) => {
+          return {
+            url: String(img.url),
+            // leave these as undefined if not provided (NOT null)
+            publicId:
+              img.publicId === null || typeof img.publicId === "undefined"
+                ? undefined
+                : String(img.publicId),
+            width:
+              typeof img.width === "number" && !Number.isNaN(img.width)
+                ? img.width
+                : undefined,
+            height:
+              typeof img.height === "number" && !Number.isNaN(img.height)
+                ? img.height
+                : undefined,
+            format:
+              img.format === null || typeof img.format === "undefined"
+                ? undefined
+                : String(img.format),
+            position:
+              typeof img.position === "number" && !Number.isNaN(img.position)
+                ? img.position
+                : undefined,
+          };
+        }),
       };
     }
 
-    const result = await prisma.property.create({
+    const created = await prisma.property.create({
       data: {
-        title,
-        description,
-        price,
-        slug,
+        slug: body.slug,
+        title: body.title,
+        description:
+          typeof body.description === "string" ? body.description : undefined,
+        price: body.price,
         listingType,
         status,
-        bedrooms,
-        bathrooms,
-        addressLine1,
-        addressLine2,
-        city,
-        county,
-        eircode,
-        latitude,
-        longitude,
-        ...(imagesCreate ? { images: imagesCreate } : {}),
+
+        bedrooms:
+          typeof body.bedrooms === "number" && !Number.isNaN(body.bedrooms)
+            ? body.bedrooms
+            : undefined,
+        bathrooms:
+          typeof body.bathrooms === "number" && !Number.isNaN(body.bathrooms)
+            ? body.bathrooms
+            : undefined,
+        areaSqFt:
+          typeof body.areaSqFt === "number" && !Number.isNaN(body.areaSqFt)
+            ? body.areaSqFt
+            : undefined,
+
+        addressLine1:
+          typeof body.addressLine1 === "string" ? body.addressLine1 : undefined,
+        addressLine2:
+          typeof body.addressLine2 === "string" ? body.addressLine2 : undefined,
+        city: typeof body.city === "string" ? body.city : undefined,
+        county: typeof body.county === "string" ? body.county : undefined,
+        eircode: typeof body.eircode === "string" ? body.eircode : undefined,
+
+        latitude:
+          typeof body.latitude === "number" && !Number.isNaN(body.latitude)
+            ? body.latitude
+            : undefined,
+        longitude:
+          typeof body.longitude === "number" && !Number.isNaN(body.longitude)
+            ? body.longitude
+            : undefined,
+
+        images: imagesCreate,
       },
-      include: { images: true },
+      include: {
+        images: { orderBy: { position: "asc" } },
+      },
     });
 
-    res.status(201).json({ ok: true, property: result });
+    res.status(201).json({ ok: true, property: created });
   } catch (err: any) {
-    console.error('POST /properties failed', err);
-    res.status(500).json({
-      ok: false,
-      error: err?.message || 'Failed to create property',
-    });
+    console.error("Create property error:", err);
+    res.status(500).json({ ok: false, error: "Failed to create property" });
   }
 });
 
-export { router as apiRouter };
+export default router;

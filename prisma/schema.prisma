@@ -5,13 +5,13 @@ generator client {
 }
 
 datasource db {
-  provider     = "postgresql"
-  url          = env("DATABASE_URL")
-  relationMode = "prisma"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-/* ===== Enums ===== */
-
+//
+// Enums
+//
 enum ListingType {
   SALE
   RENT
@@ -21,53 +21,55 @@ enum ListingStatus {
   ACTIVE
   DRAFT
   ARCHIVED
-  SOLD
-  LET_AGREED
 }
 
-/* ===== Models ===== */
-
+//
+// Models
+//
 model Property {
-  id           String         @id @default(cuid())
+  id           String         @id @default(uuid())
+  slug         String         @unique
   title        String
   description  String?
-  price        Int?
+  price        Int
 
+  // enums
   listingType  ListingType
-  status       ListingStatus  @default(ACTIVE)
+  status       ListingStatus   @default(ACTIVE)
 
-  slug         String         @unique
-
+  // common attributes
   bedrooms     Int?
   bathrooms    Int?
+  areaSqFt     Int?            // <- keep this optional if you use it; **NO sizeSqM anywhere**
 
+  // address-ish
   addressLine1 String?
   addressLine2 String?
   city         String?
   county       String?
-  eircode      String?        @db.VarChar(16)
+  eircode      String?
 
   latitude     Float?
   longitude    Float?
 
-  // NOTE: No sizeSqM here (removed)
-  images       PropertyImage[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  images       PropertyImage[]
 }
 
 model PropertyImage {
-  id         String    @id @default(cuid())
+  id         String   @id @default(uuid())
   url        String
-  publicId   String?         // allow null if you don’t have a Cloudinary ID yet
+  publicId   String?          // optional; must be undefined if not set in nested create
   width      Int?
   height     Int?
   format     String?
-  position   Int?            // allow null; omit if not known
+  position   Int?
 
-  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  // relation
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   propertyId String
 
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 }
