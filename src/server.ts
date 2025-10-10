@@ -1,42 +1,54 @@
 // src/server.ts
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 
-import propertiesRouter from "./routes/properties";
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { PrismaClient } from '@prisma/client';
+import { apiRouter } from './routes/properties'; // adjust if your router file is named differently
 
+// Init Prisma
+const prisma = new PrismaClient();
+
+// Init express
 const app = express();
 
-// Basic middleware
-app.use(express.json({ limit: "1mb" }));
-app.use(cors());
+// Middleware
 app.use(helmet());
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Simple global rate limit (safe defaults)
+// Rate limiting (basic: 300 requests/min per IP)
 app.use(
   rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 120,            // 120 requests/min per IP
+    windowMs: 60 * 1000,
+    max: 300,
     standardHeaders: true,
     legacyHeaders: false,
   })
 );
 
-// Health checks (Render looks for these)
-app.get("/health", (_req, res) => res.json({ ok: true }));
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+// Health checks
+app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// ⬇️ This is the “mount”: all routes from propertiesRouter live under /api/...
-app.use("/api", propertiesRouter);
+// API routes
+app.use('/api', apiRouter);
 
-// Optional: 404 for unknown /api routes
-app.use("/api/*", (_req, res) => {
-  res.status(404).json({ ok: false, error: "Not found" });
+// Example root route
+app.get('/', (_req, res) => {
+  res.json({ ok: true, message: 'Welcome to havn-new API' });
 });
 
-// Start server (Render provides PORT)
-const PORT = Number(process.env.PORT) || 10000;
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+// Global error handler (catch-all)
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unexpected error:', err);
+  res.status(500).json({ ok: false, error: 'Internal Server Error' });
+});
+
+// Start server
+const port = process.env.PORT ? Number(process.env.PORT) : 10000;
+app.listen(port, () => {
+  console.log(`🚀 Server listening on port ${port}`);
 });
