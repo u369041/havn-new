@@ -1,238 +1,173 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ListingType, ListingStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const router = Router();
 
-/* ----------------------------- helpers ---------------------------------- */
+/* ---------- helpers ---------- */
 
-const ALLOWED_TYPES = ['SALE', 'RENT']; // match your Prisma enum
-const ALLOWED_STATUS = ['ACTIVE', 'DRAFT', 'ARCHIVED']; // match your Prisma enum
-
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.trim().length > 0;
+function toListingType(v: any): ListingType {
+  if (typeof v !== 'string') throw new Error('listingType must be a string (SALE or RENT)');
+  const up = v.toUpperCase();
+  if (up === 'SALE' || up === 'RENT') return up as ListingType;
+  throw new Error('listingType must be SALE or RENT');
 }
 
-function toPositiveInt(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return v;
-  if (typeof v === 'string' && v.trim() !== '' && /^\d+$/.test(v)) return parseInt(v, 10);
-  return null;
+function toListingStatus(v: any | undefined): ListingStatus | undefined {
+  if (v == null) return undefined;
+  if (typeof v !== 'string') throw new Error('status must be a string (ACTIVE, DRAFT, ARCHIVED)');
+  const up = v.toUpperCase();
+  if (up === 'ACTIVE' || up === 'DRAFT' || up === 'ARCHIVED') return up as ListingStatus;
+  throw new Error('status must be ACTIVE, DRAFT or ARCHIVED');
 }
 
-function bad(res: Response, msg: string, status = 400) {
-  return res.status(status).json({ ok: false, error: msg });
+function toNum(n: any): number | null {
+  if (n === null || n === undefined || n === '') return null;
+  const parsed = Number(n);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-const imageSelect = {
-  id: true,
-  url: true,
-  publicId: true,
-  width: true,
-  height: true,
-  format: true,
-  position: true,
-};
+/* ---------- routes ---------- */
 
-const propertySelectList = {
-  id: true,
-  slug: true,
-  title: true,
-  price: true,
-  description: true,
-  listingType: true,
-  status: true,
-  createdAt: true,
-  updatedAt: true,
-  images: {
-    select: imageSelect,
-    orderBy: { position: 'asc' as const },
-  },
-};
+/** GET /api/health */
+router.get('/health', (_req: Request, res: Response) => {
+  res.json({ ok: true });
+});
 
-const propertySelectDetail = propertySelectList;
-
-/* ----------------------------- routes ----------------------------------- */
-
-/**
- * GET /api/properties
- * Optional query params:
- *   search: string (in title/description/slug)
- *   type: SALE|RENT
- *   status: ACTIVE|DRAFT|ARCHIVED
- *   minPrice: number
- *   maxPrice: number
- */
-router.get('/properties', async (req: Request, res: Response) => {
+/** GET /api/properties */
+router.get('/properties', async (_req: Request, res: Response) => {
   try {
-    const { search, type, status, minPrice, maxPrice } = req.query;
-
-    const where: any = {};
-
-    if (isNonEmptyString(search)) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { slug: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    if (isNonEmptyString(type) && ALLOWED_TYPES.includes(type)) {
-      where.listingType = type;
-    }
-
-    if (isNonEmptyString(status) && ALLOWED_STATUS.includes(status)) {
-      where.status = status;
-    }
-
-    const min = toPositiveInt(minPrice as any);
-    const max = toPositiveInt(maxPrice as any);
-    if (min !== null || max !== null) {
-      where.price = {};
-      if (min !== null) where.price.gte = min;
-      if (max !== null) where.price.lte = max;
-    }
-
     const properties = await prisma.property.findMany({
-      where,
-      select: propertySelectList,
-      orderBy: [{ createdAt: 'desc' }],
-      // add pagination if you want: take, skip
+      orderBy: { createdAt: 'desc' },
+      include: { images: true },
     });
-
-    return res.json({ ok: true, count: properties.length, properties });
+    res.json({ ok: true, count: properties.length, properties });
   } catch (err) {
-    console.error('GET /properties failed:', err);
-    return bad(res, 'Failed to fetch properties', 500);
+    console.error('GET /properties failed', err);
+    res.status(500).json({ ok: false, error: 'Failed to fetch properties' });
   }
 });
 
-/**
- * GET /api/properties/:slug
- */
+/** GET /api/properties/:slug */
 router.get('/properties/:slug', async (req: Request, res: Response) => {
   try {
-    const slug = req.params.slug;
-    if (!isNonEmptyString(slug)) return bad(res, 'Invalid slug');
-
+    const { slug } = req.params;
     const property = await prisma.property.findUnique({
       where: { slug },
-      select: propertySelectDetail,
+      include: { images: true },
     });
-
-    if (!property) return bad(res, 'Not found', 404);
-
-    return res.json({ ok: true, property });
+    if (!property) return res.status(404).json({ ok: false, error: 'Not found' });
+    res.json({ ok: true, property });
   } catch (err) {
-    console.error('GET /properties/:slug failed:', err);
-    return bad(res, 'Failed to fetch property', 500);
+    console.error('GET /properties/:slug failed', err);
+    res.status(500).json({ ok: false, error: 'Failed to fetch property' });
   }
 });
 
-/**
- * POST /api/properties
- * Body:
- * {
- *   title: string
- *   price: number
- *   description?: string
- *   listingType: "SALE" | "RENT"
- *   status?: "ACTIVE" | "DRAFT" | "ARCHIVED"  (default: "ACTIVE")
- *   slug: string (unique)
- *   images?: Array<{
- *     url: string
- *     publicId?: string
- *     width?: number
- *     height?: number
- *     format?: string
- *     position?: number
- *   }>
- * }
- */
+/** POST /api/properties  (JSON body) */
 router.post('/properties', async (req: Request, res: Response) => {
   try {
-    const {
-      title,
-      price,
-      description,
-      listingType,
-      status,
-      slug,
-      images,
-    } = req.body ?? {};
+    const b = req.body || {};
 
-    // Basic validation
-    if (!isNonEmptyString(title)) return bad(res, 'title is required');
-    const priceInt = toPositiveInt(price);
-    if (priceInt === null) return bad(res, 'price must be a positive integer');
-    if (!isNonEmptyString(listingType) || !ALLOWED_TYPES.includes(listingType)) {
-      return bad(res, `listingType must be one of: ${ALLOWED_TYPES.join(', ')}`);
-    }
-    if (status && (!isNonEmptyString(status) || !ALLOWED_STATUS.includes(status))) {
-      return bad(res, `status must be one of: ${ALLOWED_STATUS.join(', ')}`);
-    }
-    if (!isNonEmptyString(slug)) return bad(res, 'slug is required');
+    // required
+    const title: string = b.title;
+    const priceNum = toNum(b.price);
+    const slug: string = b.slug;
 
-    // Validate images array (optional)
-    let imagesData:
-      | Array<{
-          url: string;
-          publicId?: string;
-          width?: number;
-          height?: number;
-          format?: string;
-          position?: number;
-        }>
+    if (!title || !slug || priceNum == null) {
+      return res.status(400).json({
+        ok: false,
+        error: 'title, price, and slug are required',
+      });
+    }
+
+    const listingType = toListingType(b.listingType);
+    const status = toListingStatus(b.status);
+
+    // optional numbers
+    const bedrooms = toNum(bedOr(b.bedrooms, b.beds));
+    const bathrooms = toNum(bathOr(b.bathrooms, b.baths));
+    const areaSqM = toNum(b.areaSqM);
+
+    // optional strings
+    const description = b.description ?? null;
+    const addressLine1 = b.addressLine1 ?? null;
+    const addressLine2 = b.addressLine2 ?? null;
+    const city = b.city ?? null;
+    const county = b.county ?? null;
+    const eircode = b.eircode ?? null;
+
+    // lat/lon optional
+    const latitude = b.latitude !== undefined ? Number(b.latitude) : null;
+    const longitude = b.longitude !== undefined ? Number(b.longitude) : null;
+
+    // images (optional)
+    let imagesCreate:
+      | {
+          create: {
+            url: string;
+            publicId: string | null;
+            width: number | null;
+            height: number | null;
+            format: string | null;
+            position: number | null;
+          }[];
+        }
       | undefined;
 
-    if (Array.isArray(images)) {
-      imagesData = images
-        .filter((img) => img && typeof img === 'object' && isNonEmptyString(img.url))
-        .map((img, idx) => ({
-          url: String(img.url),
-          publicId: isNonEmptyString(img.publicId) ? String(img.publicId) : undefined,
-          width: toPositiveInt(img.width) ?? undefined,
-          height: toPositiveInt(img.height) ?? undefined,
-          format: isNonEmptyString(img.format) ? String(img.format) : undefined,
-          position:
-            img.position !== undefined && img.position !== null
-              ? toPositiveInt(img.position) ?? idx
-              : idx,
-        }));
+    if (Array.isArray(b.images) && b.images.length) {
+      imagesCreate = {
+        create: b.images.map((img: any, idx: number) => ({
+          url: String(img?.url ?? ''),
+          publicId: img?.publicId ?? null,
+          width: toNum(img?.width),
+          height: toNum(img?.height),
+          format: img?.format ?? null,
+          position: toNum(img?.position ?? idx),
+        })),
+      };
     }
 
-    // Create
-    const created = await prisma.property.create({
+    const result = await prisma.property.create({
       data: {
-        title: String(title),
-        price: priceInt,
-        description: isNonEmptyString(description) ? String(description) : null,
-        listingType: listingType, // string matches enum values
-        status: status && isNonEmptyString(status) ? status : 'ACTIVE',
-        slug: String(slug),
-        ...(imagesData && imagesData.length
-          ? {
-              images: {
-                create: imagesData,
-              },
-            }
-          : {}),
+        title,
+        description,
+        price: priceNum!,
+        slug,
+        listingType,
+        status, // may be undefined; Prisma will use default if your schema has one
+        bedrooms,
+        bathrooms,
+        areaSqM,
+        addressLine1,
+        addressLine2,
+        city,
+        county,
+        eircode,
+        latitude,
+        longitude,
+        ...(imagesCreate ? { images: imagesCreate } : {}),
       },
-      select: propertySelectDetail,
+      include: { images: true },
     });
 
-    return res.status(201).json({ ok: true, property: created });
+    res.status(201).json({ ok: true, property: result });
   } catch (err: any) {
-    console.error('POST /properties failed:', err);
-
-    // Unique slug friendly message
-    if (err?.code === 'P2002' && Array.isArray(err?.meta?.target) && err.meta.target.includes('slug')) {
-      return bad(res, 'Slug already exists', 409);
-    }
-
-    return bad(res, 'Failed to create property', 500);
+    console.error('POST /properties failed', err);
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to create property',
+    });
   }
 });
 
-/* ------------------------------------------------------------------------ */
+/* ----- tiny helpers for legacy field names ----- */
+function bedOr(a: any, b: any) {
+  return a !== undefined ? a : b;
+}
+function bathOr(a: any, b: any) {
+  return a !== undefined ? a : b;
+}
 
-export default router;
+/* named export expected by server.ts */
+export { router as apiRouter };
