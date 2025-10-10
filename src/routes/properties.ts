@@ -64,7 +64,7 @@ router.get('/properties/:slug', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/properties  (JSON body) */
+/** POST /api/properties */
 router.post('/properties', async (req: Request, res: Response) => {
   try {
     const b = req.body || {};
@@ -105,7 +105,7 @@ router.post('/properties', async (req: Request, res: Response) => {
       | {
           create: {
             url: string;
-            publicId: string | null;
+            publicId: string;
             width: number | null;
             height: number | null;
             format: string | null;
@@ -118,7 +118,7 @@ router.post('/properties', async (req: Request, res: Response) => {
       imagesCreate = {
         create: b.images.map((img: any, idx: number) => ({
           url: String(img?.url ?? ''),
-          publicId: img?.publicId ?? null,
+          publicId: String(img?.publicId ?? ''), // <-- always a string
           width: toNum(img?.width),
           height: toNum(img?.height),
           format: img?.format ?? null,
@@ -134,7 +134,7 @@ router.post('/properties', async (req: Request, res: Response) => {
         price: priceNum!,
         slug,
         listingType,
-        status, 
+        status,
         bedrooms,
         bathrooms,
         addressLine1,
