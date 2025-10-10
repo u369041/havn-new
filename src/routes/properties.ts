@@ -1,57 +1,50 @@
-// src/routes/properties.ts
-import { Router, Request, Response } from 'express';
-import { Prisma, PrismaClient } from '@prisma/client';
-import slugify from 'slugify';
+import { Router, Request, Response } from "express";
+import { Prisma, PrismaClient } from "@prisma/client";
 
-const router = Router();
 const prisma = new PrismaClient();
+const router = Router();
 
-/* --------------------------------- helpers -------------------------------- */
+/**
+ * We select only columns that we know exist in the current DB.
+ * If you later add columns in Prisma, add them here too.
+ */
+const PROPERTY_SELECT = {
+  id: true,
+  title: true,
+  description: true,
+  price: true,
+  listingType: true, // enum in DB
+  status: true,      // enum in DB
+  slug: true,
+  createdAt: true,
+  updatedAt: true,
+  // NO sizeSqM / areaSqFt here (removed)
+  images: {
+    select: {
+      id: true,
+      propertyId: true,
+      publicId: true,
+      url: true,
+      width: true,
+      height: true,
+      format: true,
+      position: true,
+      createdAt: true,
+    },
+    orderBy: { position: "asc" as const },
+  },
+} satisfies Prisma.PropertySelect;
 
-function toSlug(input: string): string {
-  return slugify(input, { lower: true, strict: true, trim: true });
-}
-
-function safeEnum<T extends string>(val: unknown, allowed: readonly T[], fallback: T): T {
-  if (typeof val === 'string') {
-    const key = val.toUpperCase() as T;
-    if ((allowed as readonly string[]).includes(key)) return key;
-  }
-  return fallback;
-}
-
-function numOrUndefined(val: unknown): number | undefined {
-  const n = Number(val);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function normaliseImageForCreate(img: any, index: number) {
-  // Prisma optional fields should be undefined (not null) when omitted
-  return {
-    url: String(img?.url ?? ''),
-    publicId: img?.publicId || undefined,
-    width: img?.width ?? undefined,
-    height: img?.height ?? undefined,
-    format: img?.format || undefined,
-    position: Number.isFinite(img?.position) ? Number(img.position) : index,
-  };
-}
-
-/** Ensure slug is unique; append -001, -002 ... if needed */
-async function ensureUniqueSlug(base: string): Promise<string> {
-  let slug = base;
-  let i = 1;
-  while (true) {
-    const exists = await prisma.property.findUnique({ where: { slug } });
-    if (!exists) return slug;
-    slug = `${base}-${String(i).padStart(3, '0')}`;
-    i += 1;
-  }
-}
-
-/* ---------------------------------- GET / --------------------------------- */
-/** List properties with filters */
-router.get('/', async (req: Request, res: Response) => {
+/**
+ * GET /api/properties
+ * Optional filters:
+ *   q: string (search title/description/slug)
+ *   type: string (e.g. SALE | RENT) – we pass through, DB will validate enum
+ *   status: string (e.g. ACTIVE | DRAFT)
+ *   minPrice, maxPrice: numbers
+ *   page, pageSize: numbers
+ */
+router.get("/", async (req: Request, res: Response) => {
   try {
     const {
       q,
@@ -59,169 +52,158 @@ router.get('/', async (req: Request, res: Response) => {
       status,
       minPrice,
       maxPrice,
-      page = '1',
-      pageSize = '20',
-      sort = 'createdAt:desc',
-    } = req.query as Record<string, string>;
+      page = "1",
+      pageSize = "24",
+    } = req.query as Record<string, string | undefined>;
+
+    const pageNum = Math.max(1, parseInt(page ?? "1", 10) || 1);
+    const perPage = Math.min(100, Math.max(1, parseInt(pageSize ?? "24", 10) || 24));
+    const skip = (pageNum - 1) * perPage;
 
     const where: Prisma.PropertyWhereInput = {};
 
-    if (q) {
+    if (q && q.trim()) {
       where.OR = [
-        { title: { contains: q, mode: 'insensitive' } },
-        { description: { contains: q, mode: 'insensitive' } },
-        { city: { contains: q, mode: 'insensitive' } },
-        { county: { contains: q, mode: 'insensitive' } },
-        { eircode: { contains: q, mode: 'insensitive' } },
+        { title: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } },
+        { slug: { contains: q, mode: "insensitive" } },
       ];
     }
 
-    if (type) {
-      const allowed = ['SALE', 'RENT', 'SHARE', 'OTHER'] as const;
-      const v = safeEnum(type, allowed, allowed[0]);
-      where.listingType = v as any;
+    if (type && type.trim()) {
+      // Let Prisma/DB validate the enum value; if invalid, it will throw
+      where.listingType = type as any;
     }
 
-    if (status) {
-      const allowed = ['ACTIVE', 'DRAFT'] as const;
-      const v = safeEnum(status, allowed, allowed[0]);
-      where.status = v as any;
+    if (status && status.trim()) {
+      where.status = status as any;
     }
 
     const priceFilter: Prisma.IntFilter = {};
-    const min = numOrUndefined(minPrice);
-    const max = numOrUndefined(maxPrice);
-    if (typeof min === 'number') priceFilter.gte = min;
-    if (typeof max === 'number') priceFilter.lte = max;
-    if (Object.keys(priceFilter).length) where.price = priceFilter;
+    const min = Number(minPrice);
+    const max = Number(maxPrice);
 
-    // pagination
-    const pageNum = Math.max(1, Number(page) || 1);
-    const take = Math.min(100, Math.max(1, Number(pageSize) || 20));
-    const skip = (pageNum - 1) * take;
+    if (!Number.isNaN(min)) priceFilter.gte = min;
+    if (!Number.isNaN(max)) priceFilter.lte = max;
 
-    // sorting
-    let orderBy: Prisma.PropertyOrderByWithRelationInput = { createdAt: 'desc' };
-    if (typeof sort === 'string' && sort.includes(':')) {
-      const [field, dir] = sort.split(':');
-      if (field && (dir === 'asc' || dir === 'desc')) {
-        orderBy = { [field]: dir } as any;
-      }
+    if (priceFilter.gte !== undefined || priceFilter.lte !== undefined) {
+      where.price = priceFilter;
     }
 
     const [count, properties] = await Promise.all([
       prisma.property.count({ where }),
       prisma.property.findMany({
         where,
-        orderBy,
+        select: PROPERTY_SELECT,
+        orderBy: { createdAt: "desc" },
         skip,
-        take,
-        include: {
-          images: { orderBy: { position: 'asc' } },
-        },
+        take: perPage,
       }),
     ]);
 
     res.json({ ok: true, count, properties });
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err?.message ?? 'Unknown error' });
+    res.status(500).json({
+      ok: false,
+      error: err?.message ?? "Unexpected error",
+    });
   }
 });
 
-/* ------------------------------ GET /:slug -------------------------------- */
-/** Single property by slug */
-router.get('/:slug', async (req: Request, res: Response) => {
+/**
+ * GET /api/properties/:slug
+ */
+router.get("/:slug", async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
+
     const property = await prisma.property.findUnique({
       where: { slug },
-      include: { images: { orderBy: { position: 'asc' } } },
+      select: PROPERTY_SELECT,
     });
+
     if (!property) {
-      return res.status(404).json({ ok: false, error: 'Not found' });
+      return res.status(404).json({ ok: false, error: "Not found" });
     }
+
     res.json({ ok: true, property });
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err?.message ?? 'Unknown error' });
+    res.status(500).json({
+      ok: false,
+      error: err?.message ?? "Unexpected error",
+    });
   }
 });
 
-/* --------------------------------- POST / --------------------------------- */
-/** Create property */
-router.post('/', async (req: Request, res: Response) => {
+/**
+ * POST /api/properties
+ * Minimal, safe create payload.
+ * (We keep it permissive to avoid enum/type friction during testing.)
+ */
+router.post("/", async (req: Request, res: Response) => {
   try {
-    const body = req.body ?? {};
+    const {
+      title,
+      description,
+      price,
+      status,      // e.g. "ACTIVE"
+      type,        // e.g. "SALE" | "RENT"
+      slug,        // optional: if not provided, server will generate if you have a hook; otherwise we’ll derive
+      images = [],
+    } = req.body ?? {};
 
-    // required
-    const title: string = String(body.title ?? '').trim();
-    const price: number = Number(body.price ?? 0);
-    if (!title) return res.status(400).json({ ok: false, error: 'title is required' });
-    if (!Number.isFinite(price)) return res.status(400).json({ ok: false, error: 'price is invalid' });
+    if (!title || typeof title !== "string") {
+      return res.status(400).json({ ok: false, error: "title is required" });
+    }
 
-    // enums
-    const typeAllowed = ['SALE', 'RENT', 'SHARE', 'OTHER'] as const;
-    const statusAllowed = ['ACTIVE', 'DRAFT'] as const;
+    const priceNum = Number(price);
+    if (Number.isNaN(priceNum)) {
+      return res.status(400).json({ ok: false, error: "price must be a number" });
+    }
 
-    const listingType = safeEnum(body.listingType, typeAllowed, 'SALE') as any;
-    const status = safeEnum(body.status, statusAllowed, 'ACTIVE') as any;
+    // Very light slug handling: if none provided, derive a simple one
+    const derivedSlug =
+      typeof slug === "string" && slug.trim()
+        ? slug.trim()
+        : title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)+/g, "") + "-" + Date.now().toString().slice(-6);
 
-    // slug
-    const baseSlug = body.slug ? toSlug(String(body.slug)) : toSlug(title);
-    const slug = await ensureUniqueSlug(baseSlug);
-
-    // optional numeric fields
-    const bedrooms = numOrUndefined(body.bedrooms);
-    const bathrooms = numOrUndefined(body.bathrooms);
-
-    // optional strings
-    const description = body.description?.trim() || undefined;
-    const addressLine1 = body.addressLine1?.trim() || undefined;
-    const addressLine2 = body.addressLine2?.trim() || undefined;
-    const city = body.city?.trim() || undefined;
-    const county = body.county?.trim() || undefined;
-    const eircode = body.eircode?.trim() || undefined;
-
-    // lat/lng
-    const latitude = typeof body.latitude === 'number' ? body.latitude : numOrUndefined(body.latitude);
-    const longitude = typeof body.longitude === 'number' ? body.longitude : numOrUndefined(body.longitude);
-
-    // images
-    const imagesInput = Array.isArray(body.images) ? body.images : [];
-    const imageCreates = imagesInput.map(normaliseImageForCreate);
+    // Prepare images -> only allowed fields
+    const imageCreates =
+      Array.isArray(images)
+        ? images.map((img: any, idx: number) => ({
+            url: String(img?.url ?? ""),
+            publicId: String(img?.publicId ?? ""),
+            width: img?.width != null ? Number(img.width) : null,
+            height: img?.height != null ? Number(img.height) : null,
+            format: img?.format != null ? String(img.format) : null,
+            position: img?.position != null ? Number(img.position) : idx,
+          }))
+        : [];
 
     const created = await prisma.property.create({
       data: {
         title,
-        description,
-        price,
-        listingType,
-        status,
-        bedrooms,
-        bathrooms,
-        addressLine1,
-        addressLine2,
-        city,
-        county,
-        eircode,
-        latitude,
-        longitude,
-        slug,
-        images: imageCreates.length ? { create: imageCreates } : undefined,
+        description: description ?? null,
+        price: priceNum,
+        listingType: (type ?? "SALE") as any,
+        status: (status ?? "ACTIVE") as any,
+        slug: derivedSlug,
+        images: imageCreates.length
+          ? { create: imageCreates }
+          : undefined,
       },
-      include: {
-        images: { orderBy: { position: 'asc' } },
-      },
+      select: PROPERTY_SELECT,
     });
 
     res.status(201).json({ ok: true, property: created });
   } catch (err: any) {
-    console.error(err);
-    if (err?.code === 'P2002' && Array.isArray(err?.meta?.target) && err.meta.target.includes('slug')) {
-      return res.status(409).json({ ok: false, error: 'Unique constraint failed on: slug' });
-    }
-    res.status(500).json({ ok: false, error: err?.message ?? 'Unknown error' });
+    res.status(500).json({
+      ok: false,
+      error: err?.message ?? "Unexpected error",
+    });
   }
 });
 
