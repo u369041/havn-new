@@ -26,8 +26,7 @@ function numOrUndefined(val: unknown): number | undefined {
 }
 
 function normaliseImageForCreate(img: any, index: number) {
-  // Prisma optional fields are `string | undefined` / `number | undefined`
-  // Passing `null` causes the TS error you saw; we map null -> undefined.
+  // Prisma optional fields should be undefined (not null) when omitted
   return {
     url: String(img?.url ?? ''),
     publicId: img?.publicId || undefined,
@@ -42,7 +41,6 @@ function normaliseImageForCreate(img: any, index: number) {
 async function ensureUniqueSlug(base: string): Promise<string> {
   let slug = base;
   let i = 1;
-  // Try up to a sensible number
   while (true) {
     const exists = await prisma.property.findUnique({ where: { slug } });
     if (!exists) return slug;
@@ -79,14 +77,13 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (type) {
-      // Allow whatever enum values are in your Prisma schema; fallback keeps it unchanged if invalid
       const allowed = ['SALE', 'RENT', 'SHARE', 'OTHER'] as const;
       const v = safeEnum(type, allowed, allowed[0]);
-      where.listingType = v as any; // cast to Prisma enum
+      where.listingType = v as any;
     }
 
     if (status) {
-      const allowed = ['ACTIVE', 'DRAFT'] as const; // adjust if you have different variants
+      const allowed = ['ACTIVE', 'DRAFT'] as const;
       const v = safeEnum(status, allowed, allowed[0]);
       where.status = v as any;
     }
@@ -152,7 +149,7 @@ router.get('/:slug', async (req: Request, res: Response) => {
 });
 
 /* --------------------------------- POST / --------------------------------- */
-/** Create property (used by your admin/test form) */
+/** Create property */
 router.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body ?? {};
@@ -165,7 +162,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     // enums
     const typeAllowed = ['SALE', 'RENT', 'SHARE', 'OTHER'] as const;
-    const statusAllowed = ['ACTIVE', 'DRAFT'] as const; // adjust if you keep ARCHIVED, etc.
+    const statusAllowed = ['ACTIVE', 'DRAFT'] as const;
 
     const listingType = safeEnum(body.listingType, typeAllowed, 'SALE') as any;
     const status = safeEnum(body.status, statusAllowed, 'ACTIVE') as any;
@@ -177,9 +174,8 @@ router.post('/', async (req: Request, res: Response) => {
     // optional numeric fields
     const bedrooms = numOrUndefined(body.bedrooms);
     const bathrooms = numOrUndefined(body.bathrooms);
-    const areaSqFt = numOrUndefined(body.areaSqFt); // keep if exists in your schema
 
-    // optional strings (null -> undefined)
+    // optional strings
     const description = body.description?.trim() || undefined;
     const addressLine1 = body.addressLine1?.trim() || undefined;
     const addressLine2 = body.addressLine2?.trim() || undefined;
@@ -187,7 +183,7 @@ router.post('/', async (req: Request, res: Response) => {
     const county = body.county?.trim() || undefined;
     const eircode = body.eircode?.trim() || undefined;
 
-    // lat/lng (optional)
+    // lat/lng
     const latitude = typeof body.latitude === 'number' ? body.latitude : numOrUndefined(body.latitude);
     const longitude = typeof body.longitude === 'number' ? body.longitude : numOrUndefined(body.longitude);
 
@@ -204,7 +200,6 @@ router.post('/', async (req: Request, res: Response) => {
         status,
         bedrooms,
         bathrooms,
-        areaSqFt,       // remove if you renamed it; or map to your current field
         addressLine1,
         addressLine2,
         city,
@@ -213,9 +208,7 @@ router.post('/', async (req: Request, res: Response) => {
         latitude,
         longitude,
         slug,
-        images: imageCreates.length
-          ? { create: imageCreates }
-          : undefined,
+        images: imageCreates.length ? { create: imageCreates } : undefined,
       },
       include: {
         images: { orderBy: { position: 'asc' } },
@@ -225,7 +218,6 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json({ ok: true, property: created });
   } catch (err: any) {
     console.error(err);
-    // Prisma unique constraint error, etc.
     if (err?.code === 'P2002' && Array.isArray(err?.meta?.target) && err.meta.target.includes('slug')) {
       return res.status(409).json({ ok: false, error: 'Unique constraint failed on: slug' });
     }
