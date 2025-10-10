@@ -5,59 +5,69 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
 }
+
+/* ===== Enums ===== */
 
 enum ListingType {
   SALE
   RENT
-  OTHER
 }
 
 enum ListingStatus {
   ACTIVE
   DRAFT
   ARCHIVED
+  SOLD
+  LET_AGREED
 }
+
+/* ===== Models ===== */
 
 model Property {
   id           String         @id @default(cuid())
   title        String
   description  String?
-  price        Int
+  price        Int?
+
   listingType  ListingType
   status       ListingStatus  @default(ACTIVE)
 
+  slug         String         @unique
+
   bedrooms     Int?
   bathrooms    Int?
-  sizeSqM      Int?
 
   addressLine1 String?
   addressLine2 String?
   city         String?
   county       String?
-  eircode      String?        @db.VarChar(10)
+  eircode      String?        @db.VarChar(16)
+
   latitude     Float?
   longitude    Float?
 
-  slug         String         @unique
+  // NOTE: No sizeSqM here (removed)
+  images       PropertyImage[]
 
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
-
-  images       PropertyImage[]
 }
 
 model PropertyImage {
   id         String    @id @default(cuid())
-  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String
-  publicId   String
   url        String
+  publicId   String?         // allow null if you don’t have a Cloudinary ID yet
   width      Int?
   height     Int?
   format     String?
-  position   Int       @default(0)
+  position   Int?            // allow null; omit if not known
+
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId String
+
   createdAt  DateTime  @default(now())
 }
