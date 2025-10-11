@@ -1,4 +1,5 @@
-﻿import { Router, Request, Response } from "express";
+$codeListings = @"
+import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -23,20 +24,12 @@ router.get("/", async (req: Request, res: Response) => {
     }
 
     const rows = await prisma.property.findMany({
-      where,
-      take,
+      where, take,
       orderBy: { createdAt: "desc" },
+      // images is String[] on Property; no include/relations needed
       select: {
-        id: true,
-        slug: true,
-        title: true,
-        status: true,
-        listingType: true,
-        price: true,
-        address: true,
-        eircode: true,
-        images: true,
-        createdAt: true
+        id: true, slug: true, title: true, status: true, listingType: true,
+        price: true, address: true, eircode: true, images: true, createdAt: true
       }
     });
 
@@ -60,3 +53,5 @@ router.get("/:slug", async (req: Request, res: Response) => {
 });
 
 export default router;
+"@
+Set-Content -Path src\routes\listings.ts -Value $codeListings -Encoding UTF8
