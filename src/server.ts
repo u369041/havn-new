@@ -3,7 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 
-// NodeNext/ESM needs .js on relative imports (the compiled output files)
+// ESM/NodeNext requires .js on relative imports (compiled output)
 import uploadsRouter from "./routes/uploads.js";
 import propertiesRouter from "./routes/properties.js";
 
@@ -14,11 +14,11 @@ app.use(helmet());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-/* CORS (no explicit CorsOptions type to avoid TS namespace issues) */
+/* CORS */
 const allowedOrigins = [
   "https://havn.ie",
   "https://www.havn.ie",
-  "https://havn-new.onrender.com",
+  "https://havn-new.onrender.com"
 ];
 
 const corsOptions = {
@@ -33,7 +33,7 @@ const corsOptions = {
   credentials: false,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  maxAge: 600,
+  maxAge: 600
 };
 
 app.use(cors(corsOptions));
@@ -44,7 +44,7 @@ app.use(
     windowMs: 60 * 1000,
     max: 60,
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
   })
 );
 
