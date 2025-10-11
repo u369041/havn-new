@@ -1,7 +1,6 @@
 {
   "name": "havn-new",
   "version": "1.0.0",
-  "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

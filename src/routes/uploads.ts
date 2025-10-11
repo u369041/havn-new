@@ -4,10 +4,10 @@ import { v2 as cloudinary } from "cloudinary";
 const router = Router();
 
 /**
- * Cloudinary credentials from env (Render → Environment):
- * - CLOUDINARY_CLOUD_NAME
- * - CLOUDINARY_API_KEY
- * - CLOUDINARY_API_SECRET
+ * Cloudinary credentials (Render → Environment):
+ * - CLOUDINARY_CLOUD_NAME = dj2j9dbxk
+ * - CLOUDINARY_API_KEY = 789531829921223
+ * - CLOUDINARY_API_SECRET = wKgoa-O_IRoG53B1lCGhmjBWRSM
  */
 const {
   CLOUDINARY_CLOUD_NAME,

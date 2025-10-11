@@ -3,9 +3,9 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 
-// ESM/NodeNext requires .js on relative imports (compiled output)
-import uploadsRouter from "./routes/uploads.js";
-import propertiesRouter from "./routes/properties.js";
+// CommonJS build → normal relative imports (no .js suffix needed)
+import uploadsRouter from "./routes/uploads";
+import propertiesRouter from "./routes/properties";
 
 const app = express();
 
