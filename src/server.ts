@@ -1,38 +1,41 @@
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
+import helmet from "helmet";
 import cors from "cors";
-import "dotenv/config";
-
-// Our API routes
 import propertiesRouter from "./routes/properties";
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// basic hardening & JSON parsing
+app.use(helmet());
+app.use(
+  cors({
+    origin: "*",
+  })
+);
 app.use(express.json({ limit: "1mb" }));
 
-// Healthcheck
-app.get("/api/health", (_req: Request, res: Response) => {
+// health
+app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// Mount routes (our routes already include the /api prefix)
-app.use(propertiesRouter);
+// mount our API routes at /api
+app.use("/api", propertiesRouter);
 
-// 404 handler
-app.use((_req: Request, res: Response) => {
+// 404 handler (after routes)
+app.use((_req, res) => {
   res.status(404).json({ ok: false, error: "Not found" });
 });
 
-// Error handler (so unexpected errors return JSON)
-app.use(
-  (err: any, _req: Request, res: Response, _next: NextFunction) => {
-    console.error("Unhandled error:", err);
-    res.status(500).json({ ok: false, error: "Internal server error" });
-  }
-);
+// generic error handler
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // Don’t leak internals to clients
+  console.error(err);
+  res.status(500).json({ ok: false, error: "Internal Server Error" });
+});
 
-const PORT = Number(process.env.PORT) || 10000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
