@@ -4,7 +4,7 @@ import { v2 as cloudinary } from "cloudinary";
 const router = Router();
 
 /**
- * Cloudinary credentials (must be set in Render → Environment):
+ * Cloudinary credentials from env (Render → Environment):
  * - CLOUDINARY_CLOUD_NAME
  * - CLOUDINARY_API_KEY
  * - CLOUDINARY_API_SECRET
@@ -29,7 +29,7 @@ cloudinary.config({
 
 /**
  * GET /api/uploads/cloudinary-signature
- * Generates and returns a Cloudinary signature payload
+ * Returns: { signature, timestamp, api_key, cloud_name, folder }
  */
 router.get("/cloudinary-signature", async (_req: Request, res: Response) => {
   try {
@@ -40,7 +40,7 @@ router.get("/cloudinary-signature", async (_req: Request, res: Response) => {
     const timestamp = Math.round(Date.now() / 1000);
     const folder = "havn/properties";
 
-    const paramsToSign = { timestamp, folder };
+    const paramsToSign: Record<string, string | number> = { timestamp, folder };
     const signature = cloudinary.utils.api_sign_request(
       paramsToSign,
       CLOUDINARY_API_SECRET
