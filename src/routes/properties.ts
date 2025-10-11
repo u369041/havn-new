@@ -1,226 +1,284 @@
 import { Router, Request, Response } from "express";
-import { PrismaClient, ListingType, ListingStatus } from "@prisma/client";
+import {
+  PrismaClient,
+  ListingType,
+  ListingStatus,
+  PropertyType,
+  Prisma,
+} from "@prisma/client";
 
+export const apiRouter = Router();
 const prisma = new PrismaClient();
-const router = Router();
 
-/* ------------------------------ Helpers ------------------------------ */
+/* ----------------------------- helpers ----------------------------- */
 
-function asNumber(val: any): number | undefined {
+function toInt(val: any): number | undefined {
+  if (val === undefined || val === null || val === "") return undefined;
   const n = Number(val);
   return Number.isFinite(n) ? n : undefined;
 }
 
-function asEnum<T extends string>(val: any, allowed: readonly T[]): T | undefined {
-  return typeof val === "string" && (allowed as readonly string[]).includes(val)
-    ? (val as T)
-    : undefined;
+function toEnum<T extends string>(val: any, allowed: readonly T[]): T | undefined {
+  if (typeof val !== "string") return undefined;
+  const upper = val.toUpperCase();
+  return allowed.includes(upper as T) ? (upper as T) : undefined;
 }
 
-function toUndefined<T>(v: T | null | undefined): T | undefined {
-  return v == null ? undefined : v;
+/** Map request body -> Prisma.PropertyCreateInput (safe & typed) */
+function mapCreateBody(
+  body: any
+): Prisma.PropertyCreateInput {
+  const listingType = toEnum<ListingType>(body.listingType, [
+    "SALE",
+    "RENT",
+  ] as const);
+
+  const status = toEnum<ListingStatus>(body.status, [
+    "ACTIVE",
+    "DRAFT",
+    "ARCHIVED",
+  ] as const) ?? "ACTIVE";
+
+  const propertyType = toEnum<PropertyType>(body.propertyType, [
+    "DETACHED",
+    "SEMI_D",
+    "TERRACED",
+    "APARTMENT",
+    "OTHER",
+  ] as const);
+
+  const imagesArray: Prisma.PropertyImageCreateWithoutPropertyInput[] =
+    Array.isArray(body.images)
+      ? body.images
+          .map((img: any) => ({
+            url: String(img.url),
+            publicId: img.publicId ? String(img.publicId) : undefined,
+            width: img.width != null ? Number(img.width) : undefined,
+            height: img.height != null ? Number(img.height) : undefined,
+            format: img.format != null ? String(img.format) : undefined,
+            position:
+              img.position != null ? Number(img.position) : undefined,
+          }))
+          // keep only those with a url
+          .filter((img) => !!img.url)
+      : [];
+
+  const data: Prisma.PropertyCreateInput = {
+    slug: String(body.slug ?? ""),
+    title: String(body.title ?? ""),
+    description: body.description != null ? String(body.description) : "",
+    price: toInt(body.price) ?? 0,
+
+    // enums (optional)
+    listingType: listingType,
+    status: status,
+    propertyType: propertyType,
+
+    // numeric/optional fields
+    bedrooms: toInt(body.bedrooms),
+    bathrooms: toInt(body.bathrooms),
+    areaSqFt: toInt(body.areaSqFt),
+    addressLine1: body.addressLine1 ?? null,
+    addressLine2: body.addressLine2 ?? null,
+    city: body.city ?? null,
+    county: body.county ?? null,
+    eircode: body.eircode ?? null,
+    latitude: body.latitude != null ? Number(body.latitude) : null,
+    longitude: body.longitude != null ? Number(body.longitude) : null,
+
+    images:
+      imagesArray.length > 0
+        ? {
+            create: imagesArray,
+          }
+        : undefined,
+  };
+
+  return data;
 }
 
-/** Build safe nested images create object for Prisma */
-function buildImagesCreate(images: any[] | undefined) {
-  if (!Array.isArray(images) || images.length === 0) return undefined;
-  const create = images
-    .map((img) => {
-      if (!img || typeof img !== "object") return undefined;
-      const url = typeof img.url === "string" ? img.url.trim() : "";
-      if (!url) return undefined; // url is required for an image
+/** Common select shape for list & detail */
+const propertySelect = {
+  id: true,
+  slug: true,
+  title: true,
+  description: true,
+  price: true,
+  listingType: true,
+  status: true,
+  bedrooms: true,
+  bathrooms: true,
+  areaSqFt: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  county: true,
+  eircode: true,
+  latitude: true,
+  longitude: true,
+  createdAt: true,
+  updatedAt: true,
+  propertyType: true,
+  images: {
+    select: {
+      id: true,
+      url: true,
+      publicId: true,
+      width: true,
+      height: true,
+      format: true,
+      position: true,
+    },
+    orderBy: { position: "asc" as const },
+  },
+} satisfies Prisma.PropertySelect;
 
-      return {
-        url,
-        publicId: toUndefined(typeof img.publicId === "string" ? img.publicId : undefined),
-        width: toUndefined(asNumber(img.width)),
-        height: toUndefined(asNumber(img.height)),
-        format: toUndefined(typeof img.format === "string" ? img.format : undefined),
-        position: toUndefined(asNumber(img.position)),
-      };
-    })
-    .filter(Boolean) as {
-      url: string;
-      publicId?: string;
-      width?: number;
-      height?: number;
-      format?: string;
-      position?: number;
-    }[];
+/* ------------------------------ routes ------------------------------ */
 
-  return create.length ? { create } : undefined;
-}
-
-/* ------------------------------ GET / ------------------------------ */
 /**
- * List properties with optional filters:
- *   /api/properties?search=&type=SALE|RENT&status=ACTIVE|DRAFT|ARCHIVED&minPrice=&maxPrice=&city=&county=
+ * GET /api/properties
+ * Query params:
+ *  - page (default 1)
+ *  - pageSize (default 20)
+ *  - q (search title/description/city/county/eircode)
+ *  - minPrice / maxPrice
+ *  - beds / baths
+ *  - status (ACTIVE/DRAFT/ARCHIVED)
+ *  - listingType (SALE/RENT)
+ *  - propertyType (DETACHED/SEMI_D/TERRACED/APARTMENT/OTHER)
  */
-router.get("/", async (req: Request, res: Response) => {
+apiRouter.get("/properties", async (req: Request, res: Response) => {
   try {
-    const { search, type, status, city, county, minPrice, maxPrice } = req.query;
+    const page = Math.max(1, toInt(req.query.page) ?? 1);
+    const pageSize = Math.min(100, Math.max(1, toInt(req.query.pageSize) ?? 20));
 
-    const where: any = {};
+    const where: Prisma.PropertyWhereInput = {};
 
-    const listingType = asEnum(type, Object.values(ListingType) as readonly ListingType[]);
-    if (listingType) where.listingType = listingType;
-
-    const listingStatus = asEnum(status, Object.values(ListingStatus) as readonly ListingStatus[]);
-    if (listingStatus) where.status = listingStatus;
-
-    const minP = asNumber(minPrice);
-    const maxP = asNumber(maxPrice);
-    if (minP != null || maxP != null) {
-      where.price = {};
-      if (minP != null) where.price.gte = minP;
-      if (maxP != null) where.price.lte = maxP;
-    }
-
-    if (typeof city === "string" && city.trim()) {
-      where.city = { contains: city.trim(), mode: "insensitive" };
-    }
-    if (typeof county === "string" && county.trim()) {
-      where.county = { contains: county.trim(), mode: "insensitive" };
-    }
-
-    if (typeof search === "string" && search.trim()) {
-      const q = search.trim();
+    const q = (req.query.q as string)?.trim();
+    if (q) {
       where.OR = [
         { title: { contains: q, mode: "insensitive" } },
         { description: { contains: q, mode: "insensitive" } },
-        { addressLine1: { contains: q, mode: "insensitive" } },
-        { addressLine2: { contains: q, mode: "insensitive" } },
         { city: { contains: q, mode: "insensitive" } },
         { county: { contains: q, mode: "insensitive" } },
         { eircode: { contains: q, mode: "insensitive" } },
-        { slug: { contains: q, mode: "insensitive" } },
       ];
     }
 
-    const properties = await prisma.property.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }],
-      include: {
-        images: { orderBy: { position: "asc" } },
-      },
-    });
+    const minPrice = toInt(req.query.minPrice);
+    const maxPrice = toInt(req.query.maxPrice);
+    if (minPrice != null || maxPrice != null) {
+      where.price = {
+        gte: minPrice ?? undefined,
+        lte: maxPrice ?? undefined,
+      };
+    }
 
-    res.json({ ok: true, count: properties.length, properties });
+    const beds = toInt(req.query.beds);
+    if (beds != null) where.bedrooms = { gte: beds };
+
+    const baths = toInt(req.query.baths);
+    if (baths != null) where.bathrooms = { gte: baths };
+
+    const status = toEnum<ListingStatus>(req.query.status, [
+      "ACTIVE",
+      "DRAFT",
+      "ARCHIVED",
+    ] as const);
+    if (status) where.status = status;
+
+    const listingType = toEnum<ListingType>(req.query.listingType, [
+      "SALE",
+      "RENT",
+    ] as const);
+    if (listingType) where.listingType = listingType;
+
+    const propertyType = toEnum<PropertyType>(req.query.propertyType, [
+      "DETACHED",
+      "SEMI_D",
+      "TERRACED",
+      "APARTMENT",
+      "OTHER",
+    ] as const);
+    if (propertyType) where.propertyType = propertyType;
+
+    const [total, items] = await prisma.$transaction([
+      prisma.property.count({ where }),
+      prisma.property.findMany({
+        where,
+        select: propertySelect,
+        orderBy: [{ createdAt: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    res.json({
+      ok: true,
+      page,
+      pageSize,
+      total,
+      items,
+    });
   } catch (err: any) {
-    console.error("Error fetching properties:", err?.message || err);
+    console.error("GET /properties failed", err);
     res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-/* ------------------------------ GET /:slug ------------------------------ */
-
-router.get("/:slug", async (req: Request, res: Response) => {
+/** GET /api/properties/:id (detail) */
+apiRouter.get("/properties/:id", async (req: Request, res: Response) => {
   try {
-    const { slug } = req.params;
-    if (!slug) return res.status(400).json({ ok: false, error: "Missing slug" });
-
+    const id = String(req.params.id);
     const property = await prisma.property.findUnique({
-      where: { slug },
-      include: { images: { orderBy: { position: "asc" } } },
+      where: { id },
+      select: propertySelect,
     });
-
     if (!property) return res.status(404).json({ ok: false, error: "Not found" });
-
     res.json({ ok: true, property });
-  } catch (err: any) {
-    console.error("Error fetching property:", err?.message || err);
+  } catch (err) {
+    console.error("GET /properties/:id failed", err);
     res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
-/* ------------------------------ POST / ------------------------------ */
-/**
- * Create property.
- * Minimal required: title, price, listingType, slug
- * Optional: description, status, addressLine1, addressLine2, city, county, eircode, bedrooms, bathrooms,
- * latitude, longitude, images[]
- */
-router.post("/", async (req: Request, res: Response) => {
+/** GET /api/properties/by-slug/:slug (detail by slug) */
+apiRouter.get("/properties/by-slug/:slug", async (req: Request, res: Response) => {
   try {
-    const b = req.body ?? {};
-
-    // Required
-    const title = typeof b.title === "string" ? b.title.trim() : "";
-    const price = asNumber(b.price);
-    const slug = typeof b.slug === "string" ? b.slug.trim() : "";
-    const listingType = asEnum(b.listingType, Object.values(ListingType) as readonly ListingType[]);
-    if (!title || !price || !slug || !listingType) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing required fields: title, price, slug, listingType",
-      });
-    }
-
-    // Optional enums / strings / numbers
-    const status = asEnum(b.status, Object.values(ListingStatus) as readonly ListingStatus[]);
-    const description = typeof b.description === "string" ? b.description : undefined;
-
-    const addressLine1 = typeof b.addressLine1 === "string" ? b.addressLine1 : undefined;
-    const addressLine2 = typeof b.addressLine2 === "string" ? b.addressLine2 : undefined;
-    const city = typeof b.city === "string" ? b.city : undefined;
-    const county = typeof b.county === "string" ? b.county : undefined;
-    const eircode = typeof b.eircode === "string" ? b.eircode : undefined;
-
-    const bedrooms = asNumber(bedroomsFrom(b));
-    const bathrooms = asNumber(b.bathrooms);
-
-    const latitude = asNumber(b.latitude);
-    const longitude = asNumber(b.longitude);
-
-    // Images nested create (omit nulls)
-    const imagesNested = buildImagesCreate(b.images);
-
-    const created = await prisma.property.create({
-      data: {
-        title,
-        price,
-        slug,
-        listingType,
-        status: status ?? ListingStatus.ACTIVE,
-
-        description,
-        addressLine1,
-        addressLine2,
-        city,
-        county,
-        eircode,
-
-        bedrooms,
-        bathrooms,
-
-        latitude,
-        longitude,
-
-        images: imagesNested, // will be undefined if none or invalid
-      },
-      include: { images: { orderBy: { position: "asc" } } },
+    const slug = String(req.params.slug);
+    const property = await prisma.property.findUnique({
+      where: { slug },
+      select: propertySelect,
     });
-
-    return res.status(201).json({ ok: true, property: created });
-  } catch (err: any) {
-    console.error("Error creating property:", err?.message || err);
-    // Surface Prisma known request error message if present
-    const msg: string =
-      err?.meta?.cause ||
-      err?.message ||
-      "Failed to create property";
-    res.status(500).json({ ok: false, error: msg });
+    if (!property) return res.status(404).json({ ok: false, error: "Not found" });
+    res.json({ ok: true, property });
+  } catch (err) {
+    console.error("GET /properties/by-slug failed", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
-/* bedrooms can arrive as number or string (e.g. "4 Bed") in some feeds */
-function bedroomsFrom(b: any): number | undefined {
-  if (b?.bedrooms == null) return undefined;
-  const raw = typeof b.bedrooms === "string" ? b.bedrooms : String(b.bedrooms);
-  const n = Number(String(raw).replace(/[^\d.]/g, ""));
-  return Number.isFinite(n) ? n : undefined;
-}
+/** POST /api/properties (create) */
+apiRouter.post("/properties", async (req: Request, res: Response) => {
+  try {
+    const data = mapCreateBody(req.body);
 
-/* ------------------------------ Export ------------------------------ */
+    // minimal required fields
+    if (!data.slug || !data.title) {
+      return res.status(400).json({
+        ok: false,
+        error: "slug and title are required",
+      });
+    }
 
-export default router;
+    const property = await prisma.property.create({
+      data,
+      select: propertySelect,
+    });
+
+    res.json({ ok: true, property });
+  } catch (err: any) {
+    console.error("Create property failed:", err);
+    res.status(500).json({ ok: false, error: "Failed to create property" });
+  }
+});
