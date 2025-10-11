@@ -6,70 +6,36 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL") // e.g. postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require
 }
 
-//
-// Enums
-//
-enum ListingType {
-  SALE
-  RENT
-}
-
-enum ListingStatus {
-  ACTIVE
-  DRAFT
-  ARCHIVED
-}
-
-//
-// Models
-//
 model Property {
-  id           String         @id @default(uuid())
-  slug         String         @unique
-  title        String
-  description  String?
-  price        Int
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  status      String   @default("For Sale")   // e.g. "For Sale" | "Sale Agreed" | "To Rent" | "Let Agreed"
+  listingType String                         // "sale" | "rent"
+  price       Int
+  pricePeriod String?                        // e.g. "per month" for rentals
+  address     String
+  eircode     String                         // stored UPPERCASE w/out spaces by the API
+  city        String?
+  county      String?
+  type        String?                        // e.g. "House", "Apartment"
+  ber         String?                        // e.g. "B2", "C1"
+  beds        Int?
+  baths       Int?
+  area        Int?                           // square meters
+  description String?
 
-  // enums
-  listingType  ListingType
-  status       ListingStatus   @default(ACTIVE)
+  images     String[]                        // Postgres text[]
+  videoUrl   String?
+  floorplans String[]                        // Postgres text[]
 
-  // common attributes
-  bedrooms     Int?
-  bathrooms    Int?
-  areaSqFt     Int?            // <- keep this optional if you use it; **NO sizeSqM anywhere**
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // address-ish
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  county       String?
-  eircode      String?
-
-  latitude     Float?
-  longitude    Float?
-
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-
-  images       PropertyImage[]
-}
-
-model PropertyImage {
-  id         String   @id @default(uuid())
-  url        String
-  publicId   String?          // optional; must be undefined if not set in nested create
-  width      Int?
-  height     Int?
-  format     String?
-  position   Int?
-
-  // relation
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String
-
-  createdAt  DateTime @default(now())
+  @@index([createdAt])
+  @@index([listingType, status])
+  @@index([eircode])
 }
