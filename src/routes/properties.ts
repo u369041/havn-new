@@ -1,25 +1,20 @@
+// src/routes/properties.ts
 import { Router, Request, Response } from "express";
-import { PrismaClient, ListingType, ListingStatus } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 const router = Router();
 
 /**
  * GET /api/properties
- * Returns the latest properties. 404 if none exist.
+ * List all properties (with images).
  */
-router.get("/api/properties", async (_req: Request, res: Response) => {
+router.get("/properties", async (_req: Request, res: Response) => {
   try {
     const properties = await prisma.property.findMany({
       include: { images: true },
       orderBy: { createdAt: "desc" },
-      take: 50,
     });
-
-    if (!properties.length) {
-      return res.status(404).json({ ok: false, error: "Not found" });
-    }
-
     return res.json({ ok: true, properties });
   } catch (err) {
     console.error("Error fetching properties:", err);
@@ -28,79 +23,114 @@ router.get("/api/properties", async (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/properties
- * Creates a property. Minimal required fields: slug, title, price, listingType.
- * Example body:
- * {
- *   "slug": "ps-test-0018",
- *   "title": "Test Property 0018",
- *   "description": "Created from PowerShell – unique slug test",
- *   "price": 375000,
- *   "listingType": "SALE",
- *   "status": "ACTIVE",
- *   "images": [
- *     { "url": "https://res.cloudinary.com/demo/image/upload/sample.jpg",
- *       "publicId": "test-0018",
- *       "format": "jpg",
- *       "position": 0
- *     }
- *   ]
- * }
+ * IMPORTANT: Put the slug route BEFORE the :id route so it does not get shadowed.
+ *
+ * GET /api/properties/slug/:slug
+ * Fetch by slug.
  */
-router.post("/api/properties", async (req: Request, res: Response) => {
+router.get("/properties/slug/:slug", async (req: Request, res: Response) => {
   try {
-    const b: any = req.body ?? {};
+    const { slug } = req.params;
 
-    // Coerce enums safely (fallbacks keep us inside allowed values)
-    const listingType: ListingType =
-      b.listingType === "RENT" ? ListingType.RENT : ListingType.SALE;
+    // Use findFirst to work even if slug is not marked @unique
+    const property = await prisma.property.findFirst({
+      where: { slug },
+      include: { images: true },
+    });
 
-    const status: ListingStatus =
-      b.status === "ACTIVE"
-        ? ListingStatus.ACTIVE
-        : b.status === "ARCHIVED"
-        ? ListingStatus.ARCHIVED
-        : ListingStatus.ACTIVE;
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Not found" });
+    }
+    return res.json({ ok: true, property });
+  } catch (err) {
+    console.error("Error fetching property by slug:", err);
+    return res.status(500).json({ ok: false, error: "Failed to fetch by slug" });
+  }
+});
 
-    // Optional images (map only allowed fields)
-    const imagesCreate =
-      Array.isArray(b.images) && b.images.length
-        ? b.images
-            .filter((img: any) => img && img.url && img.publicId)
-            .map((img: any) => ({
-              url: String(img.url),
-              publicId: String(img.publicId), // required by schema
-              width: typeof img.width === "number" ? img.width : null,
-              height: typeof img.height === "number" ? img.height : null,
-              format: img.format ? String(img.format) : null,
-              // Prisma type for position is number | undefined (NOT null)
-              position:
-                typeof img.position === "number" ? (img.position as number) : undefined,
-            }))
-        : undefined;
+/**
+ * GET /api/properties/:id
+ * Fetch by id (UUID).
+ */
+router.get("/properties/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const property = await prisma.property.findUnique({
+      where: { id },
+      include: { images: true },
+    });
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Not found" });
+    }
+    return res.json({ ok: true, property });
+  } catch (err) {
+    console.error("Error fetching property by id:", err);
+    return res.status(500).json({ ok: false, error: "Failed to fetch by id" });
+  }
+});
 
-    const data: any = {
-      slug: String(b.slug),
-      title: String(b.title),
-      description: b.description ?? null,
-      price: typeof b.price === "number" ? b.price : null,
+/**
+ * POST /api/properties
+ * Create a property. Minimal required fields: title, description, price, listingType, status, slug
+ * Optional images: [{ url, publicId?, width?, height?, format?, position? }]
+ */
+router.post("/properties", async (req: Request, res: Response) => {
+  try {
+    const {
+      title,
+      description,
+      price,
       listingType,
       status,
-      bedrooms: typeof b.bedrooms === "number" ? b.bedrooms : null,
-      bathrooms: typeof b.bathrooms === "number" ? b.bathrooms : null,
-      areaSqFt: typeof b.areaSqFt === "number" ? b.areaSqFt : null,
-      addressLine1: b.addressLine1 ?? null,
-      addressLine2: b.addressLine2 ?? null,
-      city: b.city ?? null,
-      county: b.county ?? null,
-      eircode: b.eircode ?? null,
-      latitude: typeof b.latitude === "number" ? b.latitude : null,
-      longitude: typeof b.longitude === "number" ? b.longitude : null,
+      slug,
+      images,
+    } = req.body as {
+      title: string;
+      description?: string;
+      price?: number;
+      listingType?: "SALE" | "RENT";
+      status?: "ACTIVE" | "ARCHIVED";
+      slug: string;
+      images?: Array<{
+        url: string;
+        publicId?: string | null;
+        width?: number | null;
+        height?: number | null;
+        format?: string | null;
+        position?: number | null;
+      }>;
     };
 
-    if (imagesCreate && imagesCreate.length) {
-      data.images = { create: imagesCreate };
+    if (!title || !slug) {
+      return res.status(400).json({ ok: false, error: "title and slug are required" });
     }
+
+    // Prepare images (optional)
+    let imagesCreate:
+      | Prisma.PropertyImageCreateWithoutPropertyInput[]
+      | undefined;
+
+    if (Array.isArray(images) && images.length > 0) {
+      imagesCreate = images.map((img) => ({
+        url: img.url,
+        publicId: img.publicId ?? undefined,
+        width: img.width ?? undefined,
+        height: img.height ?? undefined,
+        format: img.format ?? undefined,
+        position:
+          typeof img.position === "number" ? img.position : undefined,
+      }));
+    }
+
+    const data: Prisma.PropertyCreateInput = {
+      title,
+      description: description ?? "",
+      price: typeof price === "number" ? price : 0,
+      listingType: (listingType as any) ?? "SALE",
+      status: (status as any) ?? "ACTIVE",
+      slug,
+      images: imagesCreate && imagesCreate.length > 0 ? { create: imagesCreate } : undefined,
+    };
 
     const property = await prisma.property.create({
       data,
@@ -109,7 +139,7 @@ router.post("/api/properties", async (req: Request, res: Response) => {
 
     return res.status(201).json({ ok: true, property });
   } catch (err: any) {
-    // Handle Prisma unique constraint (e.g., slug)
+    // Handle unique constraint on slug gracefully if present
     if (err?.code === "P2002") {
       return res.status(409).json({ ok: false, error: "Slug already exists" });
     }
