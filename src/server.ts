@@ -3,8 +3,9 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 
-import uploadsRouter from "./routes/uploads";
-import propertiesRouter from "./routes/properties";
+// NodeNext/ESM needs .js on relative imports (the compiled output files)
+import uploadsRouter from "./routes/uploads.js";
+import propertiesRouter from "./routes/properties.js";
 
 const app = express();
 
@@ -13,14 +14,14 @@ app.use(helmet());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-/* CORS with proper typings */
+/* CORS (no explicit CorsOptions type to avoid TS namespace issues) */
 const allowedOrigins = [
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
 ];
 
-const corsOptions: cors.CorsOptions = {
+const corsOptions = {
   origin: (
     origin: string | undefined,
     callback: (err: Error | null, allow?: boolean) => void
