@@ -3,11 +3,10 @@ import {
   PrismaClient,
   ListingType,
   ListingStatus,
-  PropertyType,
   Prisma,
 } from "@prisma/client";
 
-export const apiRouter = Router();
+const router = Router();
 const prisma = new PrismaClient();
 
 /* ----------------------------- helpers ----------------------------- */
@@ -24,10 +23,8 @@ function toEnum<T extends string>(val: any, allowed: readonly T[]): T | undefine
   return allowed.includes(upper as T) ? (upper as T) : undefined;
 }
 
-/** Map request body -> Prisma.PropertyCreateInput (safe & typed) */
-function mapCreateBody(
-  body: any
-): Prisma.PropertyCreateInput {
+/** Map request body -> Prisma.PropertyCreateInput */
+function mapCreateBody(body: any): Prisma.PropertyCreateInput {
   const listingType = toEnum<ListingType>(body.listingType, [
     "SALE",
     "RENT",
@@ -39,14 +36,6 @@ function mapCreateBody(
     "ARCHIVED",
   ] as const) ?? "ACTIVE";
 
-  const propertyType = toEnum<PropertyType>(body.propertyType, [
-    "DETACHED",
-    "SEMI_D",
-    "TERRACED",
-    "APARTMENT",
-    "OTHER",
-  ] as const);
-
   const imagesArray: Prisma.PropertyImageCreateWithoutPropertyInput[] =
     Array.isArray(body.images)
       ? body.images
@@ -56,10 +45,8 @@ function mapCreateBody(
             width: img.width != null ? Number(img.width) : undefined,
             height: img.height != null ? Number(img.height) : undefined,
             format: img.format != null ? String(img.format) : undefined,
-            position:
-              img.position != null ? Number(img.position) : undefined,
+            position: img.position != null ? Number(img.position) : undefined,
           }))
-          // keep only those with a url
           .filter((img) => !!img.url)
       : [];
 
@@ -68,13 +55,8 @@ function mapCreateBody(
     title: String(body.title ?? ""),
     description: body.description != null ? String(body.description) : "",
     price: toInt(body.price) ?? 0,
-
-    // enums (optional)
     listingType: listingType,
     status: status,
-    propertyType: propertyType,
-
-    // numeric/optional fields
     bedrooms: toInt(body.bedrooms),
     bathrooms: toInt(body.bathrooms),
     areaSqFt: toInt(body.areaSqFt),
@@ -85,7 +67,6 @@ function mapCreateBody(
     eircode: body.eircode ?? null,
     latitude: body.latitude != null ? Number(body.latitude) : null,
     longitude: body.longitude != null ? Number(body.longitude) : null,
-
     images:
       imagesArray.length > 0
         ? {
@@ -97,7 +78,6 @@ function mapCreateBody(
   return data;
 }
 
-/** Common select shape for list & detail */
 const propertySelect = {
   id: true,
   slug: true,
@@ -118,7 +98,6 @@ const propertySelect = {
   longitude: true,
   createdAt: true,
   updatedAt: true,
-  propertyType: true,
   images: {
     select: {
       id: true,
@@ -135,19 +114,8 @@ const propertySelect = {
 
 /* ------------------------------ routes ------------------------------ */
 
-/**
- * GET /api/properties
- * Query params:
- *  - page (default 1)
- *  - pageSize (default 20)
- *  - q (search title/description/city/county/eircode)
- *  - minPrice / maxPrice
- *  - beds / baths
- *  - status (ACTIVE/DRAFT/ARCHIVED)
- *  - listingType (SALE/RENT)
- *  - propertyType (DETACHED/SEMI_D/TERRACED/APARTMENT/OTHER)
- */
-apiRouter.get("/properties", async (req: Request, res: Response) => {
+/** GET /api/properties (list) */
+router.get("/properties", async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, toInt(req.query.page) ?? 1);
     const pageSize = Math.min(100, Math.max(1, toInt(req.query.pageSize) ?? 20));
@@ -193,15 +161,6 @@ apiRouter.get("/properties", async (req: Request, res: Response) => {
     ] as const);
     if (listingType) where.listingType = listingType;
 
-    const propertyType = toEnum<PropertyType>(req.query.propertyType, [
-      "DETACHED",
-      "SEMI_D",
-      "TERRACED",
-      "APARTMENT",
-      "OTHER",
-    ] as const);
-    if (propertyType) where.propertyType = propertyType;
-
     const [total, items] = await prisma.$transaction([
       prisma.property.count({ where }),
       prisma.property.findMany({
@@ -226,8 +185,8 @@ apiRouter.get("/properties", async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/properties/:id (detail) */
-apiRouter.get("/properties/:id", async (req: Request, res: Response) => {
+/** GET /api/properties/:id */
+router.get("/properties/:id", async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     const property = await prisma.property.findUnique({
@@ -242,8 +201,8 @@ apiRouter.get("/properties/:id", async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/properties/by-slug/:slug (detail by slug) */
-apiRouter.get("/properties/by-slug/:slug", async (req: Request, res: Response) => {
+/** GET /api/properties/by-slug/:slug */
+router.get("/properties/by-slug/:slug", async (req: Request, res: Response) => {
   try {
     const slug = String(req.params.slug);
     const property = await prisma.property.findUnique({
@@ -258,12 +217,11 @@ apiRouter.get("/properties/by-slug/:slug", async (req: Request, res: Response) =
   }
 });
 
-/** POST /api/properties (create) */
-apiRouter.post("/properties", async (req: Request, res: Response) => {
+/** POST /api/properties */
+router.post("/properties", async (req: Request, res: Response) => {
   try {
     const data = mapCreateBody(req.body);
 
-    // minimal required fields
     if (!data.slug || !data.title) {
       return res.status(400).json({
         ok: false,
@@ -282,3 +240,5 @@ apiRouter.post("/properties", async (req: Request, res: Response) => {
     res.status(500).json({ ok: false, error: "Failed to create property" });
   }
 });
+
+export default router;
