@@ -1,36 +1,34 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL") // e.g. postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require
+  url      = env("DATABASE_URL") // e.g. postgres://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
 }
 
 model Property {
   id          String   @id @default(cuid())
   slug        String   @unique
   title       String
-  status      String   @default("For Sale")   // e.g. "For Sale" | "Sale Agreed" | "To Rent" | "Let Agreed"
-  listingType String                         // "sale" | "rent"
+  status      String   @default("For Sale")   // "For Sale" | "Sale Agreed" | "To Rent" | "Let Agreed"
+  listingType String                           // "sale" | "rent"
   price       Int
-  pricePeriod String?                        // e.g. "per month" for rentals
+  pricePeriod String?
   address     String
-  eircode     String                         // stored UPPERCASE w/out spaces by the API
+  eircode     String                           // store uppercase, no spaces
   city        String?
   county      String?
-  type        String?                        // e.g. "House", "Apartment"
-  ber         String?                        // e.g. "B2", "C1"
+  type        String?
+  ber         String?
   beds        Int?
   baths       Int?
-  area        Int?                           // square meters
+  area        Int?
   description String?
 
-  images     String[]                        // Postgres text[]
+  images     String[]                          // Postgres text[]
   videoUrl   String?
-  floorplans String[]                        // Postgres text[]
+  floorplans String[]                          // Postgres text[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

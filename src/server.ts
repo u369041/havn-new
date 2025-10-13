@@ -3,9 +3,9 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 
-// CommonJS build → normal relative imports (no .js suffix needed)
 import uploadsRouter from "./routes/uploads";
 import propertiesRouter from "./routes/properties";
+import listingsRouter from "./routes/listings";
 
 const app = express();
 
@@ -26,7 +26,7 @@ const corsOptions = {
     origin: string | undefined,
     callback: (err: Error | null, allow?: boolean) => void
   ) => {
-    if (!origin) return callback(null, true); // same-origin/tools/curl
+    if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
@@ -38,7 +38,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-/* Rate limit (60 req/min/IP) */
+/* Rate limit */
 app.use(
   rateLimit({
     windowMs: 60 * 1000,
@@ -54,6 +54,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 /* Routers (order matters) */
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/properties", propertiesRouter);
+app.use("/api/listings", listingsRouter);
 
 /* 404 */
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
