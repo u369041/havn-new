@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const router = Router();
 
+/** GET /api/properties */
 router.get("/", async (_req: Request, res: Response) => {
   try {
     const properties = await prisma.property.findMany({
@@ -15,31 +16,42 @@ router.get("/", async (_req: Request, res: Response) => {
         area: true, images: true, createdAt: true, updatedAt: true
       }
     });
-    res.json({ ok: true, count: properties.length, properties });
-  } catch (err) {
+    return res.json({ ok: true, count: properties.length, properties });
+  } catch (err: any) {
     console.error("[properties] list error:", err);
-    res.status(500).json({ ok: false, error: "server-error" });
+    const debug = String(((_req.query as unknown) as any)?.debug || "") === "1";
+    return res
+      .status(500)
+      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
+                  : { ok: false, error: "server-error" });
   }
 });
 
+/** GET /api/properties/:slug */
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
-    const p = await prisma.property.findUnique({ where: { slug: req.params.slug } });
+    const { slug } = req.params;
+    const p = await prisma.property.findUnique({ where: { slug } });
     if (!p) return res.status(404).json({ ok: false, error: "not-found" });
-    res.json(p);
-  } catch (err) {
+    return res.json(p);
+  } catch (err: any) {
     console.error("[properties] get error:", err);
-    res.status(500).json({ ok: false, error: "server-error" });
+    const debug = String(req.query.debug || "") === "1";
+    return res
+      .status(500)
+      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
+                  : { ok: false, error: "server-error" });
   }
 });
 
+/** POST /api/properties */
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = req.body ?? {};
 
     const missing: string[] = [];
-    if (!body.slug) missing.push("slug");
-    if (!body.title) missing.push("title");
+    if (!body.slug)    missing.push("slug");
+    if (!body.title)   missing.push("title");
     if (body.price == null || isNaN(Number(body.price))) missing.push("price");
     if (!body.address) missing.push("address");
     if (!body.eircode) missing.push("eircode");
@@ -76,7 +88,11 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(409).json({ ok: false, error: "duplicate-slug" });
     }
     console.error("[properties] create error:", err);
-    return res.status(500).json({ ok: false, error: "server-error" });
+    const debug = String(req.query.debug || "") === "1";
+    return res
+      .status(500)
+      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
+                  : { ok: false, error: "server-error" });
   }
 });
 
