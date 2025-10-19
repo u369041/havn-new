@@ -1,4 +1,4 @@
-// server.cjs — minimal, safe, no TS build. Runs directly with Node.
+// server.cjs — HAVN API (Render-ready, Prisma + Express, with debug + schema introspection)
 
 require("dotenv/config");
 
@@ -12,7 +12,6 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const app = express();
 
-// A fingerprint so we can see the running build
 const BUILD =
   process.env.RENDER_GIT_COMMIT ||
   process.env.VERCEL_GIT_COMMIT_SHA ||
@@ -50,7 +49,7 @@ app.use(
   })
 );
 
-// ---------- Debug routes (ALWAYS ON) ----------
+// ---------- Debug Routes ----------
 
 // Health
 app.get("/api/health", (_req, res) => {
@@ -66,6 +65,7 @@ app.get("/api/debug/routes", (_req, res) => {
       "/api/health",
       "/api/debug/routes",
       "/api/debug/db",
+      "/api/debug/schema",
       "/api/debug/seed",
       "/api/properties",
     ],
@@ -82,7 +82,54 @@ app.get("/api/debug/db", async (_req, res) => {
   }
 });
 
-// Seed (requires SEED_TOKEN)
+// ---------- NEW: Schema introspection ----------
+app.get("/api/debug/schema", async (_req, res) => {
+  try {
+    const columns = await prisma.$queryRawUnsafe(`
+      SELECT
+        c.table_schema,
+        c.table_name,
+        c.column_name,
+        c.data_type,
+        c.udt_name,
+        c.is_nullable,
+        c.ordinal_position
+      FROM information_schema.columns c
+      WHERE c.table_schema='public' AND c.table_name='Property'
+      ORDER BY c.ordinal_position;
+    `);
+
+    const statusEnum = await prisma.$queryRawUnsafe(`
+      SELECT t.typname AS enum_name, e.enumlabel AS enum_value
+      FROM pg_type t
+      JOIN pg_enum e ON t.oid = e.enumtypid
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      WHERE n.nspname = 'public' AND t.typname = 'PropertyStatus'
+      ORDER BY e.enumsortorder;
+    `);
+
+    const tableExists = await prisma.$queryRawUnsafe(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema='public' AND table_name='Property'
+      ) AS exists;
+    `);
+
+    res.json({ ok: true, build: BUILD, tableExists, columns, statusEnum });
+  } catch (e) {
+    console.error("SCHEMA INTROSPECTION FAILED:", e);
+    res.status(500).json({
+      ok: false,
+      error: "schema-introspection-failed",
+      message: e?.message || String(e),
+      code: e?.code,
+      meta: e?.meta,
+      stack: e?.stack,
+    });
+  }
+});
+
+// ---------- Seed Route ----------
 app.get("/api/debug/seed", async (req, res) => {
   try {
     const token = String(req.query.token || "");
@@ -164,11 +211,19 @@ app.get("/api/debug/seed", async (req, res) => {
 
     res.json({ ok: true, inserted });
   } catch (e) {
-    res.status(500).json({ ok: false, error: "seed-failed", detail: e?.message || String(e) });
+    console.error("SEED FAILED:", e);
+    res.status(500).json({
+      ok: false,
+      error: "seed-failed",
+      message: e?.message || String(e),
+      code: e?.code,
+      meta: e?.meta,
+      stack: e?.stack,
+    });
   }
 });
 
-// ---------- Properties API ----------
+// ---------- Properties Route ----------
 app.get("/api/properties", async (req, res) => {
   try {
     const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
@@ -178,7 +233,15 @@ app.get("/api/properties", async (req, res) => {
     });
     res.json({ ok: true, count: properties.length, properties });
   } catch (e) {
-    res.status(500).json({ ok: false, error: "server-error", detail: e?.message || String(e) });
+    console.error("PROPERTIES FAILED:", e);
+    res.status(500).json({
+      ok: false,
+      error: "list-failed",
+      message: e?.message || String(e),
+      code: e?.code,
+      meta: e?.meta,
+      stack: e?.stack,
+    });
   }
 });
 
