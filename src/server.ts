@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -10,7 +10,7 @@ import { debug } from "./routes/debug.js";
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 
-// CORS
+// CORS allowlist
 const defaultAllow = [
   "https://havn.ie",
   "https://www.havn.ie",
