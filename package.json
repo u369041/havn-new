@@ -17,12 +17,14 @@
     "cors": "2.8.5",
     "express": "4.19.2",
     "helmet": "7.0.0",
-    "morgan": "1.10.0"
-  },
-  "devDependencies": {
+    "morgan": "1.10.0",
+
+    /* --- TYPES placed in dependencies so Render installs them in production --- */
     "@types/express": "4.17.21",
     "@types/morgan": "1.9.9",
-    "@types/node": "20.14.9",
+    "@types/node": "20.14.9"
+  },
+  "devDependencies": {
     "prisma": "5.22.0",
     "rimraf": "6.0.1",
     "tsx": "4.19.2",
