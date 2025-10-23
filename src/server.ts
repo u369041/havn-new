@@ -7,6 +7,23 @@ import { properties } from "./routes/properties.js";
 import { listings } from "./routes/listings.js";
 import { debug } from "./routes/debug.js";
 
+/* ---------- Robust startup diagnostics ---------- */
+console.log("=== HAVN BOOT ===");
+console.log("BOOT FILE:", import.meta.url);
+console.log("NODE VERSION:", process.versions.node);
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("RENDER_GIT_COMMIT:", process.env.RENDER_GIT_COMMIT ?? "(none)");
+console.log("PORT (env):", process.env.PORT);
+console.log("DATABASE_URL present:", typeof process.env.DATABASE_URL === "string");
+
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+/* ------------------------------------------------ */
+
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 
@@ -44,6 +61,6 @@ app.use("/api/debug", debug);
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 // Boot
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ HAVN API running on :${PORT}`);
 });
