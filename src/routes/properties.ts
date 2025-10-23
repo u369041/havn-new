@@ -1,99 +1,50 @@
-﻿import { Router, Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+﻿import { Router } from "express";
+import { prisma } from "../prisma.js";
 
-const prisma = new PrismaClient();
-const router = Router();
+export const properties = Router();
 
-/** GET /api/properties */
-router.get("/", async (_req: Request, res: Response) => {
+// GET /api/properties
+properties.get("/", async (req, res) => {
+  const raw = Number(req.query.limit ?? 50);
+  const take = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 200) : 50;
+
   try {
-    const properties = await prisma.property.findMany({
+    const rows = await prisma.property.findMany({
+      take,
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, slug: true, title: true, status: true, listingType: true,
-        price: true, pricePeriod: true, address: true, eircode: true,
-        city: true, county: true, type: true, ber: true, beds: true, baths: true,
-        area: true, images: true, createdAt: true, updatedAt: true
+        id: true,
+        slug: true,
+        title: true,
+        price: true,
+        beds: true,
+        baths: true,
+        ber: true,
+        eircode: true,
+        type: true,
+        photos: true,
+        overview: true,
+        features: true,
+        createdAt: true
       }
     });
-    return res.json({ ok: true, count: properties.length, properties });
-  } catch (err: any) {
-    console.error("[properties] list error:", err);
-    const debug = String(((_req.query as unknown) as any)?.debug || "") === "1";
-    return res
-      .status(500)
-      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
-                  : { ok: false, error: "server-error" });
+    res.json({ ok: true, count: rows.length, properties: rows });
+  } catch (err) {
+    console.error("❌ GET /api/properties failed:", err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
-/** GET /api/properties/:slug */
-router.get("/:slug", async (req: Request, res: Response) => {
+// GET /api/properties/:slug
+properties.get("/:slug", async (req, res) => {
   try {
-    const { slug } = req.params;
-    const p = await prisma.property.findUnique({ where: { slug } });
-    if (!p) return res.status(404).json({ ok: false, error: "not-found" });
-    return res.json(p);
-  } catch (err: any) {
-    console.error("[properties] get error:", err);
-    const debug = String(req.query.debug || "") === "1";
-    return res
-      .status(500)
-      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
-                  : { ok: false, error: "server-error" });
+    const item = await prisma.property.findUnique({
+      where: { slug: req.params.slug }
+    });
+    if (!item) return res.status(404).json({ ok: false, error: "Not found" });
+    res.json({ ok: true, property: item });
+  } catch (err) {
+    console.error("❌ GET /api/properties/:slug failed:", err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
-
-/** POST /api/properties */
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const body = req.body ?? {};
-
-    const missing: string[] = [];
-    if (!body.slug)    missing.push("slug");
-    if (!body.title)   missing.push("title");
-    if (body.price == null || isNaN(Number(body.price))) missing.push("price");
-    if (!body.address) missing.push("address");
-    if (!body.eircode) missing.push("eircode");
-    if (missing.length) {
-      return res.status(400).json({ ok: false, error: "missing-fields", missing });
-    }
-
-    const data: any = {
-      slug: String(body.slug),
-      title: String(body.title),
-      status: body.listingType === "rent" ? "To Rent" : (body.status || "For Sale"),
-      listingType: body.listingType || "sale",
-      price: Number(body.price),
-      pricePeriod: body.pricePeriod ?? null,
-      address: String(body.address),
-      eircode: String(body.eircode).toUpperCase().replace(/\s+/g, ""),
-      city: body.city ?? null,
-      county: body.county ?? null,
-      type: body.type ?? null,
-      ber: body.ber ?? null,
-      beds: body.beds != null ? Number(body.beds) : null,
-      baths: body.baths != null ? Number(body.baths) : null,
-      area: body.area != null ? Number(body.area) : null,
-      description: body.description ?? "",
-      images: Array.isArray(body.images) ? body.images.map(String) : [],
-      videoUrl: body.videoUrl ?? null,
-      floorplans: Array.isArray(body.floorplans) ? body.floorplans.map(String) : []
-    };
-
-    const created = await prisma.property.create({ data });
-    return res.status(201).json({ ok: true, property: created });
-  } catch (err: any) {
-    if ((err as any)?.code === "P2002") {
-      return res.status(409).json({ ok: false, error: "duplicate-slug" });
-    }
-    console.error("[properties] create error:", err);
-    const debug = String(req.query.debug || "") === "1";
-    return res
-      .status(500)
-      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
-                  : { ok: false, error: "server-error" });
-  }
-});
-
-export default router;

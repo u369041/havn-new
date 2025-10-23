@@ -1,62 +1,44 @@
-﻿import { Router, Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+﻿import { Router } from "express";
+import { prisma } from "../prisma.js";
 
-const prisma = new PrismaClient();
-const router = Router();
+export const listings = Router();
 
-/** GET /api/listings */
-router.get("/", async (req: Request, res: Response) => {
+// GET /api/listings
+listings.get("/", async (_req, res) => {
   try {
-    const { status, listingType, q } = req.query as Record<string, string | undefined>;
-    const take = Math.min(Math.max(parseInt((req.query.limit as string) ?? "50", 10) || 50, 1), 200);
-
-    const where: any = {};
-    if (status) where.status = String(status);
-    if (listingType) where.listingType = String(listingType);
-    if (q) {
-      const term = String(q);
-      where.OR = [
-        { title:   { contains: term, mode: "insensitive" } },
-        { address: { contains: term, mode: "insensitive" } },
-        { eircode: { contains: term.replace(/\s+/g, ""), mode: "insensitive" } }
-      ];
-    }
-
     const rows = await prisma.property.findMany({
-      where,
-      take,
+      take: 50,
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, slug: true, title: true, status: true, listingType: true,
-        price: true, address: true, eircode: true, images: true, createdAt: true
+        id: true,
+        slug: true,
+        title: true,
+        price: true,
+        beds: true,
+        baths: true,
+        ber: true,
+        eircode: true,
+        type: true,
+        photos: true
       }
     });
-
-    return res.json({ ok: true, count: rows.length, listings: rows });
-  } catch (err: any) {
-    console.error("[listings] list error:", err);
-    const debug = String(req.query.debug || "") === "1";
-    return res
-      .status(500)
-      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
-                  : { ok: false, error: "server-error" });
+    res.json({ ok: true, count: rows.length, listings: rows });
+  } catch (err) {
+    console.error("❌ GET /api/listings failed:", err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
-/** GET /api/listings/:slug */
-router.get("/:slug", async (req: Request, res: Response) => {
+// GET /api/listings/:slug
+listings.get("/:slug", async (req, res) => {
   try {
-    const p = await prisma.property.findUnique({ where: { slug: req.params.slug } });
-    if (!p) return res.status(404).json({ ok: false, error: "not-found" });
-    return res.json({ ok: true, listing: p });
-  } catch (err: any) {
-    console.error("[listings] get error:", err);
-    const debug = String(req.query.debug || "") === "1";
-    return res
-      .status(500)
-      .json(debug ? { ok: false, error: "server-error", detail: String(err) }
-                  : { ok: false, error: "server-error" });
+    const item = await prisma.property.findUnique({
+      where: { slug: req.params.slug }
+    });
+    if (!item) return res.status(404).json({ ok: false, error: "Not found" });
+    res.json({ ok: true, listing: item });
+  } catch (err) {
+    console.error("❌ GET /api/listings/:slug failed:", err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
-
-export default router;

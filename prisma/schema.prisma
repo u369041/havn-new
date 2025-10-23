@@ -4,36 +4,22 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL") // e.g. postgres://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
+  url      = env("DATABASE_URL")
 }
 
 model Property {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  title       String
-  status      String   @default("For Sale")   // "For Sale" | "Sale Agreed" | "To Rent" | "Let Agreed"
-  listingType String                           // "sale" | "rent"
-  price       Int
-  pricePeriod String?
-  address     String
-  eircode     String                           // store uppercase, no spaces
-  city        String?
-  county      String?
-  type        String?
-  ber         String?
-  beds        Int?
-  baths       Int?
-  area        Int?
-  description String?
-
-  images     String[]                          // Postgres text[]
-  videoUrl   String?
-  floorplans String[]                          // Postgres text[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([createdAt])
-  @@index([listingType, status])
-  @@index([eircode])
+  id         String   @id @default(cuid())
+  slug       String   @unique
+  title      String
+  price      Int
+  beds       Int?     @default(0)
+  baths      Int?     @default(0)
+  ber        String?
+  eircode    String?
+  type       String?
+  photos     String[] // postgres text[]
+  overview   String?
+  features   String[] // postgres text[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }

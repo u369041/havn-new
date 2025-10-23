@@ -1,5 +1,43 @@
-node_modules
-dist
+﻿# ------------------------------------------------------------------
+#  HAVN backend .gitignore
+# ------------------------------------------------------------------
+
+# Node & build output
+node_modules/
+dist/
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# Local environment & secrets
 .env
+.env.local
+.env.*.local
+
+# Temporary / test assets
+/Property test/
+*.tmp
+*.bak
+*.swp
+
+# TypeScript compiled JS files (avoid dupes in repo)
+src/**/*.js
+*.map
+
+# Prisma generated / local DB
+prisma/dev.db
+prisma/*.sqlite
+prisma/seed.txt
+
+# VS Code / IDE metadata
+.vscode/
+.idea/
 .DS_Store
-/src/generated/prisma
+Thumbs.db
+
+# OS & editor junk
+ehthumbs.db
+desktop.ini
+
+# Render build cache (safety)
+.cache/
