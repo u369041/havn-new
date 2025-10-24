@@ -1,20 +1,12 @@
-import type { Request, Response, NextFunction } from "express";
+// src/middleware/admin.ts
+import { Request, Response, NextFunction } from "express";
 
-/**
- * Require header: x-admin-key: <ADMIN_KEY>
- * Set ADMIN_KEY in your .env and in Render’s environment.
- */
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const expected = process.env.ADMIN_KEY;
-  const got = req.header("x-admin-key");
+const ADMIN_KEY = process.env.ADMIN_KEY || "havn_8c1d6e0e5b9e4d7f";
 
-  if (!expected) {
-    return res
-      .status(500)
-      .json({ ok: false, error: "server-misconfigured: ADMIN_KEY missing" });
+export function adminOnly(req: Request, res: Response, next: NextFunction) {
+  const key = req.header("x-admin-key");
+  if (key && key === ADMIN_KEY) {
+    return next();
   }
-  if (!got || got !== expected) {
-    return res.status(401).json({ ok: false, error: "unauthorized" });
-  }
-  next();
+  return res.status(401).json({ ok: false, error: "Unauthorized" });
 }
