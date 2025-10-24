@@ -1,60 +1,59 @@
-import express from "express";
+﻿import { Router } from "express";
 import { prisma } from "../prisma.js";
 import { requireAdmin } from "../middleware/admin.js";
 
-export const debug = express.Router();
+export const debug = Router();
 
-/** GET /api/debug/ping */
-debug.get("/ping", (_req, res) => {
-  res.json({ ok: true, pong: true });
-});
-
-/** GET /api/debug/ping-db */
+// simple DB ping
 debug.get("/ping-db", async (_req, res) => {
   try {
-    const r = await prisma.$queryRawUnsafe("SELECT 1 as ok");
-    res.json({ ok: true, result: r });
-  } catch (err) {
-    console.error("DEBUG /ping-db error:", err);
-    res.status(500).json({ ok: false, error: "db-failed" });
+    const result = await prisma.$queryRawUnsafe<Array<{ ok: number }>>("SELECT 1 as ok");
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
   }
 });
 
-/** POST /api/debug/seed  (adds sample rows) */
+// seed some demo properties (admin-only)
 debug.post("/seed", requireAdmin, async (_req, res) => {
   try {
     const rows = [
-      { slug: "seacliff-cottage-howth", title: "Seacliff Cottage, Howth", price: 750000 },
-      { slug: "georgian-apt-dublin-2", title: "Georgian Apartment, Dublin 2", price: 525000 },
+      { slug: "demo-apt-1", title: "Demo Apartment 1", price: 250000 },
+      { slug: "demo-house-2", title: "Demo House 2", price: 495000 },
+      { slug: "demo-cottage-3", title: "Demo Cottage 3", price: 325000 },
     ];
 
-    const results = [];
+    const results: any[] = [];
     for (const r of rows) {
-      const saved = await prisma.property.upsert({
+      const up = await prisma.property.upsert({
         where: { slug: r.slug },
-        // update only existing fields; price optional here
-        update: { title: r.title },
-        // CREATE MUST include required fields, including `price`
+        update: { title: r.title, price: r.price },
         create: { slug: r.slug, title: r.title, price: r.price },
         select: { id: true, slug: true, title: true, price: true },
       });
-      results.push(saved);
+      results.push(up);
     }
-    res.json({ ok: true, count: results.length, properties: results });
-  } catch (err) {
-    console.error("DEBUG /seed error:", err);
-    res.status(500).json({ ok: false, error: "seed-failed" });
+
+    res.json({ ok: true, insertedOrUpdated: results.length, items: results });
+  } catch (err: any) {
+    // bubble detailed info to help us debug quickly
+    res.status(500).json({
+      ok: false,
+      error: String(err?.message ?? err),
+      meta: {
+        code: (err as any)?.code,
+        stack: (err as any)?.stack,
+      },
+    });
   }
 });
 
-/** POST /api/debug/seed-clear  (removes sample rows) */
+// wipe all properties (admin-only)
 debug.post("/seed-clear", requireAdmin, async (_req, res) => {
   try {
-    const slugs = ["seacliff-cottage-howth", "georgian-apt-dublin-2"];
-    const del = await prisma.property.deleteMany({ where: { slug: { in: slugs } } });
-    res.json({ ok: true, deleted: del.count });
-  } catch (err) {
-    console.error("DEBUG /seed-clear error:", err);
-    res.status(500).json({ ok: false, error: "clear-failed" });
+    const out = await prisma.property.deleteMany({});
+    res.json({ ok: true, deleted: out.count });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
   }
 });
