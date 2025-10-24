@@ -5,70 +5,45 @@ import { prisma } from "../prisma.js";
 
 export const debug = Router();
 
-// Simple DB sanity check
+// quick sanity ping
 debug.get("/ping-db", async (_req, res) => {
   try {
-    const r = await prisma.$queryRaw<{ ok: number }[]>`SELECT 1 as ok`;
+    const r = await prisma.$queryRawUnsafe<Array<{ ok: number }>>(`SELECT 1 AS ok`);
     res.json({ ok: true, result: r });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message ?? "unknown" });
   }
 });
 
-// Create ONE safe record (only fields that exist: slug, title, price)
+/**
+ * Create or update a single safe record.
+ * Only uses fields that are definitely present in your schema:
+ *  - slug (unique)
+ *  - title (string)
+ *  - price (number)
+ */
 debug.post("/seed-one", adminOnly, async (_req, res) => {
   try {
-    const ts = Date.now();
-    const r = {
-      slug: `seed-${ts}`,
-      title: `Seed ${new Date(ts).toISOString()}`,
-      price: 123456, // required by your schema
-    };
-    const item = await prisma.property.upsert({
-      where: { slug: r.slug },
-      create: r,
-      update: { title: r.title, price: r.price },
+    const r = await prisma.property.upsert({
+      where: { slug: "seed-sample-1" },
+      update: { title: "Seed Sample #1", price: 123000 },
+      create: { slug: "seed-sample-1", title: "Seed Sample #1", price: 123000 },
       select: { id: true, slug: true, title: true, price: true },
     });
-    res.json({ ok: true, item });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+    res.json({ ok: true, item: r });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message ?? "unknown" });
   }
 });
 
-// Seed a few records
-debug.post("/seed", adminOnly, async (_req, res) => {
-  try {
-    const created: any[] = [];
-    for (let i = 0; i < 5; i++) {
-      const ts = Date.now() + i;
-      const r = {
-        slug: `seed-${ts}`,
-        title: `Seed ${new Date(ts).toISOString()}`,
-        price: 100000 + i * 1000,
-      };
-      const item = await prisma.property.upsert({
-        where: { slug: r.slug },
-        create: r,
-        update: { title: r.title, price: r.price },
-        select: { id: true, slug: true, title: true, price: true },
-      });
-      created.push(item);
-    }
-    res.json({ ok: true, count: created.length, items: created });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
-  }
-});
-
-// Clear seed data
+/** Clear only the seed records we created */
 debug.post("/seed-clear", adminOnly, async (_req, res) => {
   try {
-    const r = await prisma.property.deleteMany({
-      where: { slug: { startsWith: "seed-" } },
+    const del = await prisma.property.deleteMany({
+      where: { slug: { startsWith: "seed-sample-" } },
     });
-    res.json({ ok: true, deleted: r.count });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+    res.json({ ok: true, deleted: del.count });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message ?? "unknown" });
   }
 });
