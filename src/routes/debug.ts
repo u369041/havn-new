@@ -24,16 +24,19 @@ debug.get("/ping-db", async (_req, res) => {
 debug.post("/seed", requireAdmin, async (_req, res) => {
   try {
     const rows = [
-      { slug: "seacliff-cottage-howth", title: "Seacliff Cottage, Howth" },
-      { slug: "georgian-apt-dublin-2", title: "Georgian Apartment, Dublin 2" },
+      { slug: "seacliff-cottage-howth", title: "Seacliff Cottage, Howth", price: 750000 },
+      { slug: "georgian-apt-dublin-2", title: "Georgian Apartment, Dublin 2", price: 525000 },
     ];
 
     const results = [];
     for (const r of rows) {
       const saved = await prisma.property.upsert({
         where: { slug: r.slug },
-        update: { title: r.title }, // only fields that exist
-        create: { slug: r.slug, title: r.title },
+        // update only existing fields; price optional here
+        update: { title: r.title },
+        // CREATE MUST include required fields, including `price`
+        create: { slug: r.slug, title: r.title, price: r.price },
+        select: { id: true, slug: true, title: true, price: true },
       });
       results.push(saved);
     }

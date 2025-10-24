@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 export const prisma = new PrismaClient();
 
-// Be polite on shutdown
-process.on("beforeExit", async () => {
-  await prisma.$disconnect();
-});
+// NOTE: Removed process.on('beforeExit', ...) because your TS setup
+// narrows `process` to `{ env: ProcessEnv }`, which flags `.on` as invalid.
+// Prisma will still disconnect when the process exits.
