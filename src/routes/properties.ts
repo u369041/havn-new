@@ -1,93 +1,77 @@
-﻿import express from "express";
+﻿// src/routes/properties.ts
+import { Router } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma.js";
 
-const router = express.Router();
+const router = Router();
+
+/**
+ * Keep the selection aligned with your Prisma schema.
+ * (No `address` or `description` — those fields don't exist in your model.)
+ */
+const propertySelect: Prisma.PropertySelect = {
+  id: true,
+  slug: true,
+  title: true,
+  price: true,
+  beds: true,
+  baths: true,
+  ber: true,
+  eircode: true,
+  type: true,
+  photos: true,
+  overview: true,
+  features: true,
+  createdAt: true,
+  updatedAt: true,
+};
 
 /**
  * GET /api/properties
- * Full property records (paginated).
- * Query params:
- *   - skip?: number (default 0)
- *   - take?: number (default 50, max 100)
+ * Returns all properties (optionally limited via ?limit=)
  */
-router.get("/properties", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const skip = Number(req.query.skip ?? 0);
-    const take = Math.min(100, Math.max(0, Number(req.query.take ?? 50)));
+    const limitParam = req.query.limit as string | undefined;
+    const take = limitParam ? Math.max(0, Math.min(100, Number(limitParam))) : undefined;
 
-    const [items, total] = await Promise.all([
-      prisma.property.findMany({
-        skip,
-        take,
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          slug: true,
-          title: true,
-          price: true,
-          beds: true,
-          baths: true,
-          ber: true,
-          eircode: true,
-          type: true,
-          photos: true,     // string[]
-          overview: true,   // string | null
-          features: true,   // string[]
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
-      prisma.property.count(),
-    ]);
+    const properties = await prisma.property.findMany({
+      select: propertySelect,
+      orderBy: { createdAt: "desc" },
+      take,
+    });
 
     res.json({
       ok: true,
-      count: items.length,
-      total,
-      skip,
-      take,
-      properties: items,
+      count: properties.length,
+      properties,
     });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err?.message ?? "properties failed" });
+  } catch (err) {
+    console.error("GET /api/properties failed:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
 
 /**
  * GET /api/properties/:slug
- * Single property by slug.
+ * Returns a single property by slug
  */
-router.get("/properties/:slug", async (req, res) => {
+router.get("/:slug", async (req, res) => {
+  const { slug } = req.params;
   try {
-    const { slug } = req.params;
-
     const property = await prisma.property.findUnique({
       where: { slug },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        price: true,
-        beds: true,
-        baths: true,
-        ber: true,
-        eircode: true,
-        type: true,
-        photos: true,
-        overview: true,
-        features: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: propertySelect,
     });
 
     if (!property) {
-      return res.status(404).json({ ok: false, error: "not found" });
+      return res.status(404).json({ ok: false, error: "not_found" });
     }
 
     res.json({ ok: true, property });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err?.message ?? "property failed" });
+  } catch (err) {
+    console.error(`GET /api/properties/${slug} failed:`, err);
+    res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
 
