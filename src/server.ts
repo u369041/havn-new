@@ -1,42 +1,64 @@
-﻿// src/server.ts
-import express from "express";
-import bodyParser from "body-parser";
+﻿import express from "express";
 import cors from "cors";
-import { debug } from "./routes/debug.js";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import propertiesRouter from "./routes/properties.js";
+import listingsRouter from "./routes/listings.js";
+import debugRouter from "./routes/debug.js";
 
 const app = express();
+const PORT = process.env.PORT || 8080;
 
-app.use(cors());
-app.use(bodyParser.json({ limit: "1mb" }));
+// === Security + Middleware ===
+app.use(helmet());
+app.use(
+  cors({
+    origin: [
+      "https://havn.ie",
+      "https://www.havn.ie",
+      "https://havn-new.onrender.com",
+    ],
+  })
+);
+app.use(express.json({ limit: "10mb" }));
 
-// mount routes
-debug(app);
+// Limit requests (basic safety)
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+  })
+);
 
-// health (fallback)
+// === Routes ===
+app.use("/api/properties", propertiesRouter);
+app.use("/api/listings", listingsRouter);
+app.use("/api/debug", debugRouter);
+
+// === Health endpoint ===
 app.get("/api/health", (_req, res) => {
-  const build =
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    process.env.RENDER_GIT_COMMIT ||
-    process.env.GIT_COMMIT ||
-    "dev";
-  res.json({ ok: true, service: "havn-new", build });
+  res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
-// global error handler (so the process doesn’t crash)
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("UNCAUGHT MIDDLEWARE ERROR:", err);
-  res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+// === Start Server ===
+const server = app.listen(PORT, () => {
+  console.log(`✅ HAVN API listening on port ${PORT}`);
 });
 
-// log & keep process alive on unhandled errors
-process.on("unhandledRejection", (reason) => {
-  console.error("UNHANDLED REJECTION:", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err);
-});
+// === Graceful Shutdown ===
+function shutdown() {
+  console.log("🔻 Shutting down HAVN API...");
+  server.close(() => {
+    console.log("✅ Server closed.");
+    process.exit(0);
+  });
+}
 
-const port = process.env.PORT ? Number(process.env.PORT) : 3000;
-app.listen(port, () => {
-  console.log(`[havn-new] listening on :${port}`);
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("❌ Unhandled Rejection:", reason);
+});
+process.on("uncaughtException", (err: unknown) => {
+  console.error("❌ Uncaught Exception:", err);
 });
