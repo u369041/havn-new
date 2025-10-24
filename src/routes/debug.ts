@@ -4,48 +4,66 @@ import { requireAdmin } from "../middleware/admin.js";
 
 export const debug = express.Router();
 
-debug.get("/ping", (_req, res) => res.json({ ok: true }));
+/** Healthy ping (no DB) */
+debug.get("/ping", (_req, res) => {
+  res.json({ ok: true, pong: true });
+});
 
+/** DB ping */
 debug.get("/ping-db", async (_req, res) => {
   try {
-    const result = await prisma.$queryRaw`SELECT 1 AS ok`;
-    return res.json({ ok: true, result });
+    const r = await prisma.$queryRawUnsafe("SELECT 1 as ok");
+    res.json({ ok: true, result: r });
   } catch (err) {
-    console.error("ping-db error:", err);
-    return res.status(500).json({ ok: false, error: "db-error" });
+    console.error("DEBUG /ping-db error:", err);
+    res.status(500).json({ ok: false, error: "db-failed" });
   }
 });
 
-// Create N samples
-debug.get("/seed-sample", requireAdmin, async (req, res) => {
-  const n = Math.max(1, Math.min(50, Number(req.query.count ?? 3)));
+/** Seed a couple of sample properties (PROTECTED) */
+debug.post("/seed", requireAdmin, async (_req, res) => {
   try {
-    const created: Array<{ id: number; slug: string }> = [];
-    for (let i = 0; i < n; i++) {
-      const slug = `sample-${Date.now()}-${i}`;
-      const title = `Sample Property ${i + 1}`;
-      const row = await prisma.property.create({
-        data: { slug, title } as any,
-        select: { id: true, slug: true },
+    const rows = [
+      {
+        slug: "seacliff-cottage-howth",
+        title: "Seacliff Cottage, Howth",
+        description:
+          "Sunny 3-bed with panoramic sea views above the harbour. Freshly renovated.",
+      },
+      {
+        slug: "georgian-apt-dublin-2",
+        title: "Georgian Apartment, Dublin 2",
+        description:
+          "Elegant 2-bed on a quiet square, high ceilings and sash windows.",
+      },
+    ];
+
+    // Upsert by slug so it's idempotent
+    const results = [];
+    for (const r of rows) {
+      const saved = await prisma.property.upsert({
+        where: { slug: r.slug },
+        update: { title: r.title, description: r.description },
+        create: { slug: r.slug, title: r.title, description: r.description },
       });
-      created.push(row);
+      results.push(saved);
     }
-    res.json({ ok: true, createdCount: created.length, created });
-  } catch (err: any) {
-    console.error("seed-sample error:", err);
-    res.status(500).json({ ok: false, error: "seed-failed", message: String(err?.message ?? err) });
+
+    res.json({ ok: true, count: results.length, properties: results });
+  } catch (err) {
+    console.error("DEBUG /seed error:", err);
+    res.status(500).json({ ok: false, error: "seed-failed" });
   }
 });
 
-// Delete all “sample-*” rows created by the seeder
+/** Clear ONLY the sample rows we add (PROTECTED) */
 debug.post("/seed-clear", requireAdmin, async (_req, res) => {
   try {
-    const result = await prisma.property.deleteMany({
-      where: { slug: { startsWith: "sample-" } },
-    });
-    res.json({ ok: true, deleted: result.count });
+    const slugs = ["seacliff-cottage-howth", "georgian-apt-dublin-2"];
+    const del = await prisma.property.deleteMany({ where: { slug: { in: slugs } } });
+    res.json({ ok: true, deleted: del.count });
   } catch (err) {
-    console.error("seed-clear error:", err);
+    console.error("DEBUG /seed-clear error:", err);
     res.status(500).json({ ok: false, error: "clear-failed" });
   }
 });
