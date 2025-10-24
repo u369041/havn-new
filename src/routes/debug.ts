@@ -1,87 +1,79 @@
-﻿import { Router, Request, Response, NextFunction } from "express";
+﻿// src/routes/debug.ts
+import type { Router } from "express";
 import { prisma } from "../prisma.js";
+import { adminOnly } from "../middleware/admin.js";
+import { buildDemoProperties } from "../lib/demoData.js";
 
-const adminOnly = (req: Request, res: Response, next: NextFunction) => {
-  const key = req.header("x-admin-key");
-  if (key && (key === process.env.ADMIN_KEY || key === "havn_8c1d6e0e5b9e4d7f")) return next();
-  return res.status(401).json({ ok: false, error: "unauthorized" });
-};
+export function debug(router: Router) {
+  // Health (simple)
+  router.get("/api/health", async (_req, res) => {
+    const build =
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      process.env.RENDER_GIT_COMMIT ||
+      process.env.GIT_COMMIT ||
+      "dev";
+    res.json({ ok: true, service: "havn-new", build });
+  });
 
-export const debug = Router();
+  // DB ping
+  router.get("/api/debug/ping-db", adminOnly, async (_req, res) => {
+    try {
+      const r = await prisma.$queryRawUnsafe<{ ok: number }[]>("SELECT 1 as ok");
+      res.json({ ok: true, result: r });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
 
-/** Quick DB ping */
-debug.get("/ping-db", async (_req, res) => {
-  try {
-    const r = await prisma.$queryRawUnsafe<Array<{ ok: number }>>("SELECT 1 as ok");
-    res.json({ ok: true, result: r });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
-  }
-});
+  // Clear all properties
+  router.post("/api/debug/seed-clear", adminOnly, async (_req, res) => {
+    try {
+      const r = await prisma.property.deleteMany({});
+      res.json({ ok: true, deleted: r.count });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
 
-/** Inspect columns / NOT NULL flags for a table (e.g. Property) */
-debug.get("/columns/:table", adminOnly, async (req, res) => {
-  try {
-    const t = String(req.params.table).replace(/[^A-Za-z0-9_"]/g, "");
-    const rows = await prisma.$queryRawUnsafe<Array<{
-      column_name: string; is_nullable: "YES" | "NO"; data_type: string; column_default: string | null;
-    }>>(
-      `
-      SELECT column_name, is_nullable, data_type, column_default
-      FROM information_schema.columns
-      WHERE table_schema='public' AND table_name=$1
-      ORDER BY ordinal_position
-      `,
-      t
-    );
-    res.json({ ok: true, table: t, columns: rows });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
-  }
-});
+  // Bulk seed demo data (safe, non-null arrays)
+  router.post("/api/debug/seed-demo", adminOnly, async (req, res) => {
+    const count = Number(req.body?.count ?? 25);
+    const clearFirst = Boolean(req.body?.clearFirst ?? true);
 
-/** Seed exactly one safe record (fill NOT NULL JSON as empty arrays) */
-debug.post("/seed-one", adminOnly, async (_req, res) => {
-  try {
-    const slug = `prop-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      if (clearFirst) {
+        await prisma.property.deleteMany({});
+      }
 
-    // Only include fields we KNOW exist in your current schema:
-    const data = {
-      slug,
-      title: "Seeded Property",
-      price: 123456,
-      // If these JSON columns are NOT NULL in your schema:
-      photos: [] as any[],
-      features: [] as any[],
-    };
+      const demo = buildDemoProperties(count);
+      const results: { slug: string; id?: string | number }[] = [];
 
-    const item = await prisma.property.upsert({
-      where: { slug },
-      update: data,
-      create: data,
-      select: { id: true, slug: true, title: true, price: true },
-    });
+      for (const p of demo) {
+        const r = await prisma.property.upsert({
+          where: { slug: p.slug },
+          update: {
+            title: p.title,
+            price: p.price,
+            photos: p.photos,
+            features: p.features,
+          },
+          create: {
+            slug: p.slug,
+            title: p.title,
+            price: p.price,
+            photos: p.photos,
+            features: p.features,
+          },
+        });
+        results.push({ slug: r.slug as any, id: (r as any).id });
+      }
 
-    res.json({ ok: true, item });
-  } catch (err: any) {
-    // Prisma error surfaces useful fields: code, meta, clientVersion
-    const payload: any = {
-      ok: false,
-      error: err?.message ?? String(err),
-    };
-    if (err?.code) payload.code = err.code;
-    if (err?.meta) payload.meta = err.meta;
-    if (err?.clientVersion) payload.clientVersion = err.clientVersion;
-    res.status(500).json(payload);
-  }
-});
+      const total = await prisma.property.count();
+      res.json({ ok: true, seeded: results.length, total, items: results });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
+}
 
-/** Clear demo data */
-debug.post("/seed-clear", adminOnly, async (_req, res) => {
-  try {
-    const r = await prisma.property.deleteMany({});
-    res.json({ ok: true, deleted: r.count });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
-  }
-});
+export default debug;
