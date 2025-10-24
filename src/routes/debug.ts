@@ -1,93 +1,74 @@
-﻿import { Router } from "express";
+﻿// src/routes/debug.ts
+import { Router } from "express";
+import { adminOnly } from "../middleware/admin.js";
 import { prisma } from "../prisma.js";
-
-// Keep the admin check simple and explicit here for debugging.
-// Matches the key you've been using: havn_8c1d6e0e5b9e4d7f
-function requireAdmin(req: any, res: any, next: any) {
-  const ADMIN_KEY = process.env.ADMIN_KEY ?? "havn_8c1d6e0e5b9e4d7f";
-  const key = req.header("x-admin-key") ?? "";
-  if (key !== ADMIN_KEY) {
-    return res.status(401).json({ ok: false, error: "Unauthorized (bad x-admin-key)" });
-  }
-  next();
-}
 
 export const debug = Router();
 
-/** DB connectivity check */
+// Simple DB sanity check
 debug.get("/ping-db", async (_req, res) => {
   try {
-    const rows = await prisma.$queryRaw<{ ok: number }[]>`SELECT 1 AS ok`;
-    res.json({ ok: true, result: rows });
-  } catch (err: any) {
-    console.error("PING-DB ERROR:", err);
-    res.status(500).json({ ok: false, error: err?.message ?? "ping failed" });
+    const r = await prisma.$queryRaw<{ ok: number }[]>`SELECT 1 as ok`;
+    res.json({ ok: true, result: r });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
   }
 });
 
-function errPayload(err: any) {
-  // Prisma and general error formatter we can safely JSON.stringify
-  const out: any = {
-    message: err?.message ?? String(err),
-    name: err?.name,
-    code: (err && (err.code || err?.meta?.code)) ?? undefined,
-  };
-  if (err?.meta) out.meta = err.meta;
-  if (err?.stack) out.stack = String(err.stack).split("\n").slice(0, 5);
-  return out;
-}
-
-/** Seed just ONE known-safe record to surface any constraint/required-field errors clearly */
-debug.post("/seed-one", requireAdmin, async (_req, res) => {
-  const r = { slug: "seed-test-one", title: "Seed Test One", price: 123456 };
+// Create ONE safe record (only fields that exist: slug, title, price)
+debug.post("/seed-one", adminOnly, async (_req, res) => {
   try {
-    const up = await prisma.property.upsert({
+    const ts = Date.now();
+    const r = {
+      slug: `seed-${ts}`,
+      title: `Seed ${new Date(ts).toISOString()}`,
+      price: 123456, // required by your schema
+    };
+    const item = await prisma.property.upsert({
       where: { slug: r.slug },
-      create: { slug: r.slug, title: r.title, price: r.price },
+      create: r,
       update: { title: r.title, price: r.price },
       select: { id: true, slug: true, title: true, price: true },
     });
-    res.json({ ok: true, result: up });
-  } catch (err: any) {
-    console.error("SEED-ONE ERROR:", err);
-    res.status(500).json({ ok: false, error: errPayload(err) });
+    res.json({ ok: true, item });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
   }
 });
 
-/** Seed a few demo rows — ONLY fields we know exist: slug, title, price */
-debug.post("/seed", requireAdmin, async (_req, res) => {
-  const seeds: Array<{ slug: string; title: string; price: number }> = [
-    { slug: "oak-avenue-12", title: "12 Oak Avenue", price: 350000 },
-    { slug: "maple-grove-4", title: "4 Maple Grove", price: 465000 },
-    { slug: "seaview-apt-21", title: "Seaview Apt 21", price: 289000 },
-  ];
-
+// Seed a few records
+debug.post("/seed", adminOnly, async (_req, res) => {
   try {
-    const results = [];
-    for (const r of seeds) {
-      const up = await prisma.property.upsert({
+    const created: any[] = [];
+    for (let i = 0; i < 5; i++) {
+      const ts = Date.now() + i;
+      const r = {
+        slug: `seed-${ts}`,
+        title: `Seed ${new Date(ts).toISOString()}`,
+        price: 100000 + i * 1000,
+      };
+      const item = await prisma.property.upsert({
         where: { slug: r.slug },
-        create: { slug: r.slug, title: r.title, price: r.price },
+        create: r,
         update: { title: r.title, price: r.price },
         select: { id: true, slug: true, title: true, price: true },
       });
-      results.push(up);
+      created.push(item);
     }
-    res.json({ ok: true, insertedOrUpdated: results.length, results });
-  } catch (err: any) {
-    console.error("SEED ERROR:", err);
-    res.status(500).json({ ok: false, error: errPayload(err) });
+    res.json({ ok: true, count: created.length, items: created });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
   }
 });
 
-/** Clear only our seeded slugs */
-debug.post("/seed-clear", requireAdmin, async (_req, res) => {
-  const slugs = ["oak-avenue-12", "maple-grove-4", "seaview-apt-21", "seed-test-one"];
+// Clear seed data
+debug.post("/seed-clear", adminOnly, async (_req, res) => {
   try {
-    const del = await prisma.property.deleteMany({ where: { slug: { in: slugs } } });
-    res.json({ ok: true, deleted: del.count });
-  } catch (err: any) {
-    console.error("SEED-CLEAR ERROR:", err);
-    res.status(500).json({ ok: false, error: errPayload(err) });
+    const r = await prisma.property.deleteMany({
+      where: { slug: { startsWith: "seed-" } },
+    });
+    res.json({ ok: true, deleted: r.count });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message ?? String(e) });
   }
 });
