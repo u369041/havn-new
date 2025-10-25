@@ -1,44 +1,35 @@
-﻿// src/server.ts
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
-import morgan from "morgan";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import bodyParser from "body-parser";
 
-import listingsRouter from "./routes/listings.js";
 import propertiesRouter from "./routes/properties.js";
 import debugRouter from "./routes/debug.js";
 
 const app = express();
 
-// middleware
-app.use(cors());
-app.use(express.json());
-app.use(morgan("tiny"));
+app.use(helmet());
+app.use(express.json({ limit: "5mb" }));
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors({
+  origin: ["https://havn.ie","https://www.havn.ie","https://havn-new.onrender.com"],
+  methods: ["GET","POST","DELETE","OPTIONS"]
+}));
+app.use(rateLimit({ windowMs: 60_000, max: 60 }));
 
-// health
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
-// business routes
-app.use("/api/listings", listingsRouter);
-app.use("/api/properties", propertiesRouter);
+app.get("/api/debug/env", (_req, res) => {
+  const raw = process.env.DATABASE_URL || "";
+  const host = raw.split("@")[1]?.split("/")[0] || "(unknown)";
+  res.json({ ok: true, db_host: host, sslmode: /sslmode=require/i.test(raw) });
+});
 
-// *** mount debug routes here ***
+app.use("/api/properties", propertiesRouter);
 app.use("/api/debug", debugRouter);
 
-// not found
-app.use((_req, res) => {
-  res.status(404).json({ ok: false, error: "not_found" });
-});
-
-// error handler
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ ok: false, error: typeof err?.message === "string" ? err.message : "internal_error" });
-});
-
-const port = Number(process.env.PORT || 3000);
-app.listen(port, () => {
-  console.log(`API listening on :${port}`);
-});
+const PORT = Number(process.env.PORT) || 8080;
+app.listen(PORT, () => console.log(`✅ HAVN API running on :${PORT}`));

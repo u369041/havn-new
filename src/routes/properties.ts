@@ -1,77 +1,83 @@
-﻿// src/routes/properties.ts
-import { Router } from "express";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../prisma.js";
+﻿import { Router, Request, Response } from "express";
+import prisma from "../prisma.js";
 
 const router = Router();
 
-/**
- * Keep the selection aligned with your Prisma schema.
- * (No `address` or `description` — those fields don't exist in your model.)
- */
-const propertySelect: Prisma.PropertySelect = {
-  id: true,
-  slug: true,
-  title: true,
-  price: true,
-  beds: true,
-  baths: true,
-  ber: true,
-  eircode: true,
-  type: true,
-  photos: true,
-  overview: true,
-  features: true,
-  createdAt: true,
-  updatedAt: true,
-};
-
-/**
- * GET /api/properties
- * Returns all properties (optionally limited via ?limit=)
- */
-router.get("/", async (req, res) => {
+router.get("/__ping", async (_req, res) => {
   try {
-    const limitParam = req.query.limit as string | undefined;
-    const take = limitParam ? Math.max(0, Math.min(100, Number(limitParam))) : undefined;
-
-    const properties = await prisma.property.findMany({
-      select: propertySelect,
-      orderBy: { createdAt: "desc" },
-      take,
+    const ping = await prisma.$queryRawUnsafe<{ now: Date }[]>(`SELECT NOW() AS now`);
+    res.json({ ok: true, ping });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: "db_ping_failed",
+      message: err?.message || String(err),
+      code: err?.code || null,
+      meta: err?.meta || null
     });
-
-    res.json({
-      ok: true,
-      count: properties.length,
-      properties,
-    });
-  } catch (err) {
-    console.error("GET /api/properties failed:", err);
-    res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
 
-/**
- * GET /api/properties/:slug
- * Returns a single property by slug
- */
-router.get("/:slug", async (req, res) => {
-  const { slug } = req.params;
+router.get("/", async (_req: Request, res: Response) => {
   try {
-    const property = await prisma.property.findUnique({
-      where: { slug },
-      select: propertySelect,
+    const props = await prisma.property.findMany({ orderBy: { createdAt: "desc" }, take: 50 });
+    res.json({ ok: true, count: props.length, properties: props });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: "internal_error",
+      message: err?.message || String(err),
+      code: err?.code || null,
+      meta: err?.meta || null
+    });
+  }
+});
+
+router.get("/:slug", async (req: Request, res: Response) => {
+  try {
+    const p = await prisma.property.findUnique({ where: { slug: req.params.slug } });
+    if (!p) return res.status(404).json({ ok: false, error: "not_found" });
+    res.json({ ok: true, property: p });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: "internal_error", message: err?.message || String(err) });
+  }
+});
+
+router.post("/", async (req: Request, res: Response) => {
+  try {
+    const d = req.body || {};
+    if (!d.slug) return res.status(400).json({ ok: false, error: "missing_slug" });
+
+    const existing = await prisma.property.findUnique({ where: { slug: d.slug } });
+    if (existing) return res.json({ ok: true, reused: true, property: existing });
+
+    const created = await prisma.property.create({
+      data: {
+        slug: d.slug,
+        title: d.title || "Untitled",
+        address1: d.address1 || "",
+        address2: d.address2 || "",
+        city: d.city || "",
+        county: d.county || "",
+        eircode: d.eircode || "",
+        price: d.price ?? null,
+        status: d.status ?? null,
+        propertyType: d.propertyType ?? null,
+        ber: d.ber ?? null,
+        bedrooms: d.bedrooms ?? null,
+        bathrooms: d.bathrooms ?? null,
+        size: d.size ?? null,
+        sizeUnits: d.sizeUnits ?? null,
+        features: Array.isArray(d.features) ? d.features : [],
+        description: d.description || "",
+        photos: Array.isArray(d.photos) ? d.photos : [],
+        createdAt: new Date()
+      }
     });
 
-    if (!property) {
-      return res.status(404).json({ ok: false, error: "not_found" });
-    }
-
-    res.json({ ok: true, property });
-  } catch (err) {
-    console.error(`GET /api/properties/${slug} failed:`, err);
-    res.status(500).json({ ok: false, error: "internal_error" });
+    res.json({ ok: true, property: created });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: "internal_error", message: err?.message || String(err) });
   }
 });
 

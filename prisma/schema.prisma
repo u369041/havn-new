@@ -8,18 +8,24 @@ datasource db {
 }
 
 model Property {
-  id         String   @id @default(cuid())
-  slug       String   @unique
-  title      String
-  price      Int
-  beds       Int?     @default(0)
-  baths      Int?     @default(0)
-  ber        String?
-  eircode    String?
-  type       String?
-  photos     String[] // postgres text[]
-  overview   String?
-  features   String[] // postgres text[]
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id           Int       @id @default(autoincrement())
+  slug         String    @unique
+  title        String
+  address1     String?
+  address2     String?
+  city         String?
+  county       String?
+  eircode      String?
+  price        Float?
+  status       String?
+  propertyType String?
+  ber          String?
+  bedrooms     Int?
+  bathrooms    Int?
+  size         Float?
+  sizeUnits    String?
+  features     String[]  @default([])
+  description  String?
+  photos       String[]  @default([])
+  createdAt    DateTime  @default(now())
 }
