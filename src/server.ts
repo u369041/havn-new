@@ -1,60 +1,44 @@
-﻿import express from "express";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+﻿// src/server.ts
+import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
+import morgan from "morgan";
+
+import listingsRouter from "./routes/listings.js";
 import propertiesRouter from "./routes/properties.js";
 import debugRouter from "./routes/debug.js";
-import { prisma } from "./prisma.js";
-
-dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 8080;
 
-// Security + middleware
-app.use(helmet());
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(
-  cors({
-    origin: ["https://havn.ie", "https://www.havn.ie", "https://havn-new.onrender.com"],
-  })
-);
+// middleware
+app.use(cors());
+app.use(express.json());
+app.use(morgan("tiny"));
 
-// Rate limiter (60 req/min)
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-  })
-);
-
-// === ROUTES ===
-app.get("/api/health", (req, res) => {
-  res.json({
-    ok: true,
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-  });
+// health
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
 });
 
+// business routes
+app.use("/api/listings", listingsRouter);
 app.use("/api/properties", propertiesRouter);
+
+// *** mount debug routes here ***
 app.use("/api/debug", debugRouter);
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("🔻 SIGINT received. Closing Prisma...");
-  await prisma.$disconnect();
-  process.exit(0);
+// not found
+app.use((_req, res) => {
+  res.status(404).json({ ok: false, error: "not_found" });
 });
 
-process.on("SIGTERM", async () => {
-  console.log("🔻 SIGTERM received. Closing Prisma...");
-  await prisma.$disconnect();
-  process.exit(0);
+// error handler
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ ok: false, error: typeof err?.message === "string" ? err.message : "internal_error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ HAVN API running on port ${PORT}`);
+const port = Number(process.env.PORT || 3000);
+app.listen(port, () => {
+  console.log(`API listening on :${port}`);
 });
