@@ -1,28 +1,28 @@
 ﻿import express from "express";
-import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import cors from "cors";
+import dotenv from "dotenv";
 import propertiesRouter from "./routes/properties.js";
-import listingsRouter from "./routes/listings.js";
 import debugRouter from "./routes/debug.js";
+import { prisma } from "./prisma.js";
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// === Security + Middleware ===
+// Security + middleware
 app.use(helmet());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: [
-      "https://havn.ie",
-      "https://www.havn.ie",
-      "https://havn-new.onrender.com",
-    ],
+    origin: ["https://havn.ie", "https://www.havn.ie", "https://havn-new.onrender.com"],
   })
 );
-app.use(express.json({ limit: "10mb" }));
 
-// Limit requests (basic safety)
+// Rate limiter (60 req/min)
 app.use(
   rateLimit({
     windowMs: 60 * 1000,
@@ -30,35 +30,31 @@ app.use(
   })
 );
 
-// === Routes ===
+// === ROUTES ===
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use("/api/properties", propertiesRouter);
-app.use("/api/listings", listingsRouter);
 app.use("/api/debug", debugRouter);
 
-// === Health endpoint ===
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, status: "healthy", timestamp: new Date().toISOString() });
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("🔻 SIGINT received. Closing Prisma...");
+  await prisma.$disconnect();
+  process.exit(0);
 });
 
-// === Start Server ===
-const server = app.listen(PORT, () => {
-  console.log(`✅ HAVN API listening on port ${PORT}`);
+process.on("SIGTERM", async () => {
+  console.log("🔻 SIGTERM received. Closing Prisma...");
+  await prisma.$disconnect();
+  process.exit(0);
 });
 
-// === Graceful Shutdown ===
-function shutdown() {
-  console.log("🔻 Shutting down HAVN API...");
-  server.close(() => {
-    console.log("✅ Server closed.");
-    process.exit(0);
-  });
-}
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("unhandledRejection", (reason: unknown) => {
-  console.error("❌ Unhandled Rejection:", reason);
-});
-process.on("uncaughtException", (err: unknown) => {
-  console.error("❌ Uncaught Exception:", err);
+app.listen(PORT, () => {
+  console.log(`✅ HAVN API running on port ${PORT}`);
 });
