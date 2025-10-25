@@ -3,7 +3,7 @@ import prisma from "../prisma.js";
 
 const router = Router();
 
-router.get("/__ping", async (_req, res) => {
+router.get("/__ping", async (_req: Request, res: Response) => {
   try {
     const ping = await prisma.$queryRawUnsafe<{ now: Date }[]>(`SELECT NOW() AS now`);
     res.json({ ok: true, ping });
