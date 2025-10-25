@@ -18,6 +18,9 @@
     "helmet": "^7.1.0"
   },
   "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/express": "^5.0.4",
+    "@types/node": "^24.9.1",
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
