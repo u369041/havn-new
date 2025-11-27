@@ -1,83 +1,124 @@
-﻿import { Router, Request, Response } from "express";
-import prisma from "../prisma.js";
+﻿// src/routes/properties.ts
+import { Router } from "express";
+import prisma from "../prisma"; // adjust path if needed
 
 const router = Router();
 
-router.get("/__ping", async (_req: Request, res: Response) => {
+// GET /api/properties  – list
+router.get("/", async (_req, res) => {
   try {
-    const ping = await prisma.$queryRawUnsafe<{ now: Date }[]>(`SELECT NOW() AS now`);
-    res.json({ ok: true, ping });
-  } catch (err: any) {
-    res.status(500).json({
-      ok: false,
-      error: "db_ping_failed",
-      message: err?.message || String(err),
-      code: err?.code || null,
-      meta: err?.meta || null
+    const properties = await prisma.property.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
     });
+
+    res.json({ ok: true, properties });
+  } catch (error) {
+    console.error("Error fetching properties", error);
+    res.status(500).json({ ok: false, error: "Internal server error" });
   }
 });
 
-router.get("/", async (_req: Request, res: Response) => {
+// GET /api/properties/:id  – detail
+router.get("/:id", async (req, res) => {
   try {
-    const props = await prisma.property.findMany({ orderBy: { createdAt: "desc" }, take: 50 });
-    res.json({ ok: true, count: props.length, properties: props });
-  } catch (err: any) {
-    res.status(500).json({
-      ok: false,
-      error: "internal_error",
-      message: err?.message || String(err),
-      code: err?.code || null,
-      meta: err?.meta || null
+    const { id } = req.params;
+
+    const property = await prisma.property.findUnique({
+      where: { id },
     });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Property not found" });
+    }
+
+    res.json({ ok: true, property });
+  } catch (error) {
+    console.error("Error fetching property by id", error);
+    res.status(500).json({ ok: false, error: "Internal server error" });
   }
 });
 
-router.get("/:slug", async (req: Request, res: Response) => {
+// POST /api/properties  – create
+router.post("/", async (req, res) => {
   try {
-    const p = await prisma.property.findUnique({ where: { slug: req.params.slug } });
-    if (!p) return res.status(404).json({ ok: false, error: "not_found" });
-    res.json({ ok: true, property: p });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: "internal_error", message: err?.message || String(err) });
-  }
-});
+    const {
+      title,
+      description,
+      price,
+      status,
+      propertyType,
+      beds,
+      baths,
+      sizeSqm,
+      addressLine1,
+      addressLine2,
+      city,
+      county,
+      eircode,
+      latitude,
+      longitude,
+      mainImageUrl,
+      imageUrls,
+    } = req.body ?? {};
 
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const d = req.body || {};
-    if (!d.slug) return res.status(400).json({ ok: false, error: "missing_slug" });
+    const errors: string[] = [];
 
-    const existing = await prisma.property.findUnique({ where: { slug: d.slug } });
-    if (existing) return res.json({ ok: true, reused: true, property: existing });
+    if (!title) errors.push("title is required");
+    if (!addressLine1) errors.push("addressLine1 is required");
+    if (!city) errors.push("city is required");
+    if (!eircode) errors.push("eircode is required");
+    if (!status) errors.push("status is required (FOR_SALE / TO_RENT / TO_SHARE)");
+    if (!propertyType) errors.push("propertyType is required (HOUSE / APARTMENT / etc)");
 
-    const created = await prisma.property.create({
+    if (price === undefined || price === null || Number.isNaN(Number(price))) {
+      errors.push("price must be a number");
+    }
+    if (beds === undefined || beds === null || Number.isNaN(Number(beds))) {
+      errors.push("beds must be a number");
+    }
+    if (baths === undefined || baths === null || Number.isNaN(Number(baths))) {
+      errors.push("baths must be a number");
+    }
+
+    if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+      errors.push("imageUrls must contain at least one image");
+    }
+
+    if (!mainImageUrl) {
+      errors.push("mainImageUrl is required (usually the first image)");
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({ ok: false, errors });
+    }
+
+    const property = await prisma.property.create({
       data: {
-        slug: d.slug,
-        title: d.title || "Untitled",
-        address1: d.address1 || "",
-        address2: d.address2 || "",
-        city: d.city || "",
-        county: d.county || "",
-        eircode: d.eircode || "",
-        price: d.price ?? null,
-        status: d.status ?? null,
-        propertyType: d.propertyType ?? null,
-        ber: d.ber ?? null,
-        bedrooms: d.bedrooms ?? null,
-        bathrooms: d.bathrooms ?? null,
-        size: d.size ?? null,
-        sizeUnits: d.sizeUnits ?? null,
-        features: Array.isArray(d.features) ? d.features : [],
-        description: d.description || "",
-        photos: Array.isArray(d.photos) ? d.photos : [],
-        createdAt: new Date()
-      }
+        title,
+        description: description ?? "",
+        price: Number(price),
+        status,
+        propertyType,
+        beds: Number(beds),
+        baths: Number(baths),
+        sizeSqm: sizeSqm ? Number(sizeSqm) : null,
+        addressLine1,
+        addressLine2: addressLine2 || null,
+        city,
+        county: county || null,
+        eircode,
+        latitude: latitude ? Number(latitude) : null,
+        longitude: longitude ? Number(longitude) : null,
+        mainImageUrl,
+        imageUrls,
+      },
     });
 
-    res.json({ ok: true, property: created });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: "internal_error", message: err?.message || String(err) });
+    return res.status(201).json({ ok: true, property });
+  } catch (error) {
+    console.error("Error creating property", error);
+    return res.status(500).json({ ok: false, error: "Internal server error" });
   }
 });
 
