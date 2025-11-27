@@ -5,22 +5,28 @@ import express from 'express';
 const router = express.Router();
 
 /**
- * Stub for old /api/properties routes.
+ * Stub router for /api/properties.
  *
- * The real, production properties endpoints are defined directly
- * in src/server.ts:
- *   - GET /api/properties
- *   - GET /api/properties/:slug
- *   - POST /api/properties
+ * The real implementation is in src/server.ts where we define:
+ *   GET /api/properties
+ *   GET /api/properties/:slug
+ *   POST /api/properties
  *
- * This stub exists only so any app.use('/api/properties', propertiesRouter)
- * lines compile cleanly without Prisma/TS errors.
+ * We keep this file only so any app.use('/api/properties', propertiesRouter)
+ * calls continue to work without TypeScript errors.
  */
 
 router.get('/', (_req, res) => {
   res.status(501).json({
     ok: false,
-    error: 'Use /api/properties routes from server.ts instead.'
+    error: 'Use the main /api/properties endpoints defined in server.ts.',
+  });
+});
+
+router.get('/:slug', (_req, res) => {
+  res.status(501).json({
+    ok: false,
+    error: 'Use the main /api/properties/:slug endpoint defined in server.ts.',
   });
 });
 
