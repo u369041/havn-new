@@ -6,27 +6,15 @@ const router = express.Router();
 
 /**
  * Stub router for /api/properties.
- *
- * The real implementation is in src/server.ts where we define:
- *   GET /api/properties
- *   GET /api/properties/:slug
- *   POST /api/properties
- *
- * We keep this file only so any app.use('/api/properties', propertiesRouter)
- * calls continue to work without TypeScript errors.
+ * The real implementation lives in src/server.ts.
+ * This file exists only so imports like `app.use('/api/properties', propertiesRouter)`
+ * do not break the build.
  */
 
 router.get('/', (_req, res) => {
   res.status(501).json({
     ok: false,
-    error: 'Use the main /api/properties endpoints defined in server.ts.',
-  });
-});
-
-router.get('/:slug', (_req, res) => {
-  res.status(501).json({
-    ok: false,
-    error: 'Use the main /api/properties/:slug endpoint defined in server.ts.',
+    error: 'Use /api/properties defined in server.ts instead of this stub.'
   });
 });
 
