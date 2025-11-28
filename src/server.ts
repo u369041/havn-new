@@ -17,9 +17,8 @@ const ALLOWED_ORIGINS: string[] = [
   "https://havn-new.onrender.com",
 ];
 
-// Cloudinary env vars (SET THESE IN RENDER – secret only on server)
+// Cloudinary env vars (secret only ever used on server)
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
-const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 
 const app = express();
@@ -38,7 +37,6 @@ app.use(
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow server-to-server / curl (no origin)
       if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS"));
@@ -67,7 +65,6 @@ app.get("/api/health", (_req, res) => {
 //  CLOUDINARY SIGNATURE ENDPOINT  (USED BY STEP 1 UPLOAD)
 // ======================================================
 
-// app.all so you can test it with GET in browser and POST from JS
 app.all(
   "/api/uploads/cloudinary-signature",
   (req: Request, res: Response) => {
@@ -78,11 +75,7 @@ app.all(
           req.body.folder.trim()) ||
         "properties";
 
-      if (
-        !CLOUDINARY_API_SECRET ||
-        !CLOUDINARY_CLOUD_NAME ||
-        !CLOUDINARY_API_KEY
-      ) {
+      if (!CLOUDINARY_API_SECRET || !CLOUDINARY_CLOUD_NAME) {
         console.error("Missing Cloudinary env vars");
         return res.status(500).json({
           ok: false,
@@ -98,12 +91,12 @@ app.all(
         .update(paramsToSign + CLOUDINARY_API_SECRET)
         .digest("hex");
 
+      // NOTE: we deliberately do NOT return the apiKey here any more
       return res.json({
         ok: true,
         signature,
         timestamp,
         cloudName: CLOUDINARY_CLOUD_NAME,
-        apiKey: CLOUDINARY_API_KEY,
       });
     } catch (err) {
       console.error("Error generating Cloudinary signature", err);
@@ -119,7 +112,7 @@ app.all(
 //  PROPERTIES ROUTES
 // ================================
 
-// GET /api/properties?limit=&offset=&status=
+// GET /api/properties
 app.get("/api/properties", async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
@@ -250,8 +243,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
   }
 });
 
-// ---------- 404 FALLBACK ----------
-
+// 404 fallback
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     ok: false,
@@ -259,8 +251,6 @@ app.use((req: Request, res: Response) => {
     path: req.path,
   });
 });
-
-// ---------- START SERVER ----------
 
 app.listen(PORT, () => {
   console.log(`HAVN API listening on port ${PORT}`);
