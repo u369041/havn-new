@@ -1,30 +1,31 @@
 // src/server.ts
 
-import express, { Request, Response, NextFunction } from 'express';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import cors from 'cors';
-import { PrismaClient } from '@prisma/client';
-import { createHash } from 'crypto';
+import express, { Request, Response, NextFunction } from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import cors from "cors";
+import { PrismaClient } from "@prisma/client";
+import crypto from "crypto";
 
 const prisma = new PrismaClient();
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 
 const ALLOWED_ORIGINS: string[] = [
-  'https://havn.ie',
-  'https://www.havn.ie',
-  'https://havn-new.onrender.com',
+  "https://havn.ie",
+  "https://www.havn.ie",
+  "https://havn-new.onrender.com",
 ];
 
-// Cloudinary env vars (SET THESE IN RENDER)
-const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || '';
-const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || '';
-const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || '';
+// Cloudinary env vars (SET THESE IN RENDER – secret only on server)
+const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
+const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
+const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 
 const app = express();
 
-// --- middleware ---
+// ---------- MIDDLEWARE ----------
+
 app.use(helmet());
 
 app.use(
@@ -37,9 +38,10 @@ app.use(
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // curl, health checks
+      // allow server-to-server / curl (no origin)
+      if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error('Not allowed by CORS'));
+      return cb(new Error("Not allowed by CORS"));
     },
   }),
 );
@@ -51,42 +53,50 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
-// --- health ---
-app.get('/api/health', (_req, res) => {
+// ---------- HEALTH CHECK ----------
+
+app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    status: 'healthy',
+    status: "healthy",
     timestamp: new Date().toISOString(),
   });
 });
 
-// ================================
-//  CLOUDINARY SIGNATURE ENDPOINT
-// ================================
+// ======================================================
+//  CLOUDINARY SIGNATURE ENDPOINT  (USED BY STEP 1 UPLOAD)
+// ======================================================
+
+// app.all so you can test it with GET in browser and POST from JS
 app.all(
-  '/api/uploads/cloudinary-signature',
+  "/api/uploads/cloudinary-signature",
   (req: Request, res: Response) => {
     try {
       const folder =
         (req.body &&
-          typeof req.body.folder === 'string' &&
+          typeof req.body.folder === "string" &&
           req.body.folder.trim()) ||
-        'properties';
+        "properties";
 
-      if (!CLOUDINARY_API_SECRET || !CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY) {
-        console.error('Missing Cloudinary env vars');
+      if (
+        !CLOUDINARY_API_SECRET ||
+        !CLOUDINARY_CLOUD_NAME ||
+        !CLOUDINARY_API_KEY
+      ) {
+        console.error("Missing Cloudinary env vars");
         return res.status(500).json({
           ok: false,
-          error: 'Cloudinary is not configured on the server',
+          error: "Cloudinary is not configured on the server",
         });
       }
 
       const timestamp = Math.round(Date.now() / 1000);
       const paramsToSign = `folder=${folder}&timestamp=${timestamp}`;
 
-      const signature = createHash('sha1')
+      const signature = crypto
+        .createHash("sha1")
         .update(paramsToSign + CLOUDINARY_API_SECRET)
-        .digest('hex');
+        .digest("hex");
 
       return res.json({
         ok: true,
@@ -96,10 +106,10 @@ app.all(
         apiKey: CLOUDINARY_API_KEY,
       });
     } catch (err) {
-      console.error('Error generating Cloudinary signature', err);
+      console.error("Error generating Cloudinary signature", err);
       return res.status(500).json({
         ok: false,
-        error: 'Failed to generate Cloudinary signature',
+        error: "Failed to generate Cloudinary signature",
       });
     }
   },
@@ -109,7 +119,8 @@ app.all(
 //  PROPERTIES ROUTES
 // ================================
 
-app.get('/api/properties', async (req: Request, res: Response) => {
+// GET /api/properties?limit=&offset=&status=
+app.get("/api/properties", async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     const offset = Number(req.query.offset) || 0;
@@ -122,7 +133,7 @@ app.get('/api/properties', async (req: Request, res: Response) => {
       prisma.property.count({ where }),
       prisma.property.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip: offset,
         take: limit,
       }),
@@ -130,42 +141,44 @@ app.get('/api/properties', async (req: Request, res: Response) => {
 
     res.json({ ok: true, count, properties });
   } catch (err) {
-    console.error('GET /api/properties error', err);
-    res.status(500).json({ ok: false, error: 'Failed to fetch properties' });
+    console.error("GET /api/properties error", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
-app.get('/api/properties/:slug', async (req: Request, res: Response) => {
+// GET /api/properties/:slug
+app.get("/api/properties/:slug", async (req: Request, res: Response) => {
   try {
     const slug = req.params.slug;
     const property = await prisma.property.findUnique({ where: { slug } });
 
     if (!property) {
-      return res.status(404).json({ ok: false, error: 'Property not found' });
+      return res.status(404).json({ ok: false, error: "Property not found" });
     }
 
     res.json({ ok: true, property });
   } catch (err) {
-    console.error('GET /api/properties/:slug error', err);
-    res.status(500).json({ ok: false, error: 'Failed to fetch property' });
+    console.error("GET /api/properties/:slug error", err);
+    res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
-app.post('/api/properties', async (req: Request, res: Response) => {
+// POST /api/properties
+app.post("/api/properties", async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
     const requiredFields = [
-      'slug',
-      'title',
-      'address1',
-      'city',
-      'county',
-      'eircode',
-      'price',
-      'status',
-      'propertyType',
-      'photos',
+      "slug",
+      "title",
+      "address1",
+      "city",
+      "county",
+      "eircode",
+      "price",
+      "status",
+      "propertyType",
+      "photos",
     ] as const;
 
     for (const f of requiredFields) {
@@ -173,7 +186,7 @@ app.post('/api/properties', async (req: Request, res: Response) => {
       if (
         v === undefined ||
         v === null ||
-        (typeof v === 'string' && !v.trim())
+        (typeof v === "string" && !v.trim())
       ) {
         return res.status(400).json({
           ok: false,
@@ -185,15 +198,15 @@ app.post('/api/properties', async (req: Request, res: Response) => {
     if (!Array.isArray(body.photos) || body.photos.length === 0) {
       return res.status(400).json({
         ok: false,
-        error: 'At least one photo is required',
+        error: "At least one photo is required",
       });
     }
 
     const features: string[] = Array.isArray(body.features)
       ? body.features
-      : typeof body.features === 'string'
+      : typeof body.features === "string"
       ? body.features
-          .split(',')
+          .split(",")
           .map((s: string) => s.trim())
           .filter(Boolean)
       : [];
@@ -203,7 +216,7 @@ app.post('/api/properties', async (req: Request, res: Response) => {
         slug: body.slug,
         title: body.title,
         address1: body.address1,
-        address2: body.address2 || '',
+        address2: body.address2 || "",
         city: body.city,
         county: body.county,
         eircode: body.eircode,
@@ -216,35 +229,38 @@ app.post('/api/properties', async (req: Request, res: Response) => {
         bathrooms:
           body.bathrooms !== undefined ? Number(body.bathrooms) : null,
         size: body.size !== undefined ? Number(body.size) : null,
-        sizeUnits: body.sizeUnits || 'sqm',
+        sizeUnits: body.sizeUnits || "sqm",
         features,
-        description: body.description || '',
+        description: body.description || "",
         photos: body.photos,
       },
     });
 
     res.status(201).json({ ok: true, property });
   } catch (err: any) {
-    console.error('POST /api/properties error', err);
+    console.error("POST /api/properties error", err);
 
-    if (err.code === 'P2002') {
+    if (err.code === "P2002") {
       return res
         .status(409)
-        .json({ ok: false, error: 'Slug already exists' });
+        .json({ ok: false, error: "Slug already exists" });
     }
 
-    res.status(500).json({ ok: false, error: 'Failed to create property' });
+    res.status(500).json({ ok: false, error: "Failed to create property" });
   }
 });
 
-// 404 fallback as JSON (so we never get that HTML 404 again)
+// ---------- 404 FALLBACK ----------
+
 app.use((req: Request, res: Response) => {
   res.status(404).json({
     ok: false,
-    error: 'Not found',
+    error: "Not found",
     path: req.path,
   });
 });
+
+// ---------- START SERVER ----------
 
 app.listen(PORT, () => {
   console.log(`HAVN API listening on port ${PORT}`);
