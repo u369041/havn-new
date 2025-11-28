@@ -63,7 +63,7 @@ app.get('/api/health', (_req, res) => {
 // ================================
 //  CLOUDINARY SIGNATURE ENDPOINT
 // ================================
-app.post(
+app.all(
   '/api/uploads/cloudinary-signature',
   (req: Request, res: Response) => {
     try {
