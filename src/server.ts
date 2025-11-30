@@ -6,11 +6,10 @@ import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 
 const prisma = new PrismaClient();
-const app = express();
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 
-const ALLOWED_ORIGINS = [
+const ALLOWED_ORIGINS: string[] = [
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
@@ -19,10 +18,9 @@ const ALLOWED_ORIGINS = [
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 
-// --------------------
-// MIDDLEWARE
-// --------------------
+const app = express();
 
+// ---------- MIDDLEWARE ----------
 app.use(helmet());
 
 app.use(
@@ -49,10 +47,7 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
-// --------------------
-// HEALTH CHECK
-// --------------------
-
+// ---------- HEALTH CHECK ----------
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -61,19 +56,21 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// --------------------------------------------------
-// CLOUDINARY SIGNATURE (STEP 1 UPLOAD)
-// --------------------------------------------------
-
+// ======================================================
+//  CLOUDINARY SIGNATURE ENDPOINT
+// ======================================================
 app.all("/api/uploads/cloudinary-signature", (req: Request, res: Response) => {
   try {
     const folder =
-      (req.body?.folder && String(req.body.folder).trim()) || "properties";
+      (req.body &&
+        typeof req.body.folder === "string" &&
+        req.body.folder.trim()) ||
+      "properties";
 
     if (!CLOUDINARY_API_SECRET || !CLOUDINARY_CLOUD_NAME) {
       return res.status(500).json({
         ok: false,
-        error: "Cloudinary is not configured",
+        error: "Cloudinary is not configured on the server",
       });
     }
 
@@ -85,22 +82,24 @@ app.all("/api/uploads/cloudinary-signature", (req: Request, res: Response) => {
       .update(paramsToSign + CLOUDINARY_API_SECRET)
       .digest("hex");
 
-    res.json({
+    return res.json({
       ok: true,
       signature,
       timestamp,
       cloudName: CLOUDINARY_CLOUD_NAME,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: "Signature error" });
+    console.error("Error generating Cloudinary signature", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to generate Cloudinary signature",
+    });
   }
 });
 
-// --------------------
-// PROPERTIES
-// --------------------
-
+// ================================
+//  PROPERTIES ROUTES
+// ================================
 function parseIntSafe(v: any, fallback: number) {
   const n = parseInt(String(v ?? ""), 10);
   return Number.isFinite(n) ? n : fallback;
@@ -111,10 +110,15 @@ app.get("/api/properties", async (req: Request, res: Response) => {
   try {
     const limit = Math.min(parseIntSafe(req.query.limit, 20), 100);
     const offset = Math.max(parseIntSafe(req.query.offset, 0), 0);
+    const status = (req.query.status as string | undefined) || undefined;
+
+    const where: any = {};
+    if (status) where.status = status;
 
     const [count, properties] = await Promise.all([
-      prisma.property.count(),
+      prisma.property.count({ where }),
       prisma.property.findMany({
+        where,
         orderBy: { createdAt: "desc" },
         skip: offset,
         take: limit,
@@ -137,19 +141,15 @@ app.get("/api/properties", async (req: Request, res: Response) => {
           features: true,
           description: true,
           photos: true,
-          createdAt: true,
+          createdAt: true
         },
       }),
     ]);
 
-    res.json({ ok: true, count, properties });
+    return res.json({ ok: true, count, properties });
   } catch (err: any) {
-    console.error("GET /api/properties", err);
-    res.status(500).json({
-      ok: false,
-      error: err?.message ?? "Failed to fetch properties",
-      code: err?.code ?? null,
-    });
+    console.error("GET /api/properties error", err);
+    return res.status(500).json({ ok: false, error: "Failed to fetch properties" });
   }
 });
 
@@ -179,7 +179,7 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
         features: true,
         description: true,
         photos: true,
-        createdAt: true,
+        createdAt: true
       },
     });
 
@@ -187,14 +187,10 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: "Property not found" });
     }
 
-    res.json({ ok: true, property });
+    return res.json({ ok: true, property });
   } catch (err: any) {
-    console.error("GET /api/properties/:slug", err);
-    res.status(500).json({
-      ok: false,
-      error: err?.message ?? "Failed to fetch property",
-      code: err?.code ?? null,
-    });
+    console.error("GET /api/properties/:slug error", err);
+    return res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
@@ -203,7 +199,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
-    const required = [
+    const requiredFields = [
       "slug",
       "title",
       "address1",
@@ -214,13 +210,18 @@ app.post("/api/properties", async (req: Request, res: Response) => {
       "status",
       "propertyType",
       "photos",
-    ];
+    ] as const;
 
-    for (const f of required) {
-      if (!body[f] || (typeof body[f] === "string" && !body[f].trim())) {
+    for (const f of requiredFields) {
+      const v = body[f];
+      if (
+        v === undefined ||
+        v === null ||
+        (typeof v === "string" && !v.trim())
+      ) {
         return res.status(400).json({
           ok: false,
-          error: `Missing field: ${f}`,
+          error: `Missing required field: ${f}`,
         });
       }
     }
@@ -232,12 +233,18 @@ app.post("/api/properties", async (req: Request, res: Response) => {
       });
     }
 
-    const features = Array.isArray(body.features)
+    const features: string[] = Array.isArray(body.features)
       ? body.features
       : typeof body.features === "string"
-      ? body.features.split(",").map((s: string) => s.trim())
+      ? body.features
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter(Boolean)
       : [];
 
+    // IMPORTANT:
+    // DB does NOT have Property.propertyType yet.
+    // We accept it from the client but DO NOT write it.
     const property = await prisma.property.create({
       data: {
         slug: body.slug,
@@ -250,39 +257,37 @@ app.post("/api/properties", async (req: Request, res: Response) => {
         price: Number(body.price),
         status: body.status,
         ber: body.ber || null,
-        bedrooms: body.bedrooms ? Number(body.bedrooms) : null,
-        bathrooms: body.bathrooms ? Number(body.bathrooms) : null,
-        size: body.size ? Number(body.size) : null,
+        bedrooms: body.bedrooms !== undefined ? Number(body.bedrooms) : null,
+        bathrooms: body.bathrooms !== undefined ? Number(body.bathrooms) : null,
+        size: body.size !== undefined ? Number(body.size) : null,
         sizeUnits: body.sizeUnits || "sqm",
         features,
         description: body.description || "",
-        photos: body.photos,
+        photos: body.photos
       },
     });
 
-    res.status(201).json({ ok: true, property });
+    return res.status(201).json({ ok: true, property });
   } catch (err: any) {
-    console.error("POST /api/properties", err);
-    res.status(500).json({
-      ok: false,
-      error: err?.message ?? "Failed to create property",
-      code: err?.code ?? null,
-    });
+    console.error("POST /api/properties error", err);
+
+    if (err?.code === "P2002") {
+      return res.status(409).json({ ok: false, error: "Slug already exists" });
+    }
+
+    return res.status(500).json({ ok: false, error: "Failed to create property" });
   }
 });
 
-// --------------------
-// 404
-// --------------------
-
+// 404 fallback
 app.use((req: Request, res: Response) => {
-  res.status(404).json({ ok: false, error: "Not found" });
+  res.status(404).json({
+    ok: false,
+    error: "Not found",
+    path: req.path,
+  });
 });
 
-// --------------------
-// START
-// --------------------
-
 app.listen(PORT, () => {
-  console.log(`HAVN API running on port ${PORT}`);
+  console.log(`HAVN API listening on port ${PORT}`);
 });
