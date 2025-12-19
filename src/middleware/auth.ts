@@ -1,24 +1,39 @@
-﻿// src/middleware/auth.ts
-import jwt from "jsonwebtoken";
-import type { Request, Response, NextFunction } from "express";
+﻿import type { Request, Response, NextFunction } from "express";
+import jwt, { JwtPayload } from "jsonwebtoken";
 
 export interface AuthRequest extends Request {
-  user?: { id: number; email: string };
+  user?: { id: string };
 }
 
-export function authRequired(req: AuthRequest, res: Response, next: NextFunction) {
-  const header = req.headers.authorization;
-
-  if (!header) {
-    return res.status(401).json({ ok: false, error: "Missing token" });
-  }
-
-  const token = header.split(" ")[1];
-
+export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "");
-    req.user = decoded as any;
-    next();
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+    if (!token) {
+      return res.status(401).json({ ok: false, error: "Missing token" });
+    }
+
+    const secret = process.env.JWT_SECRET || "";
+    if (!secret) {
+      return res.status(500).json({ ok: false, error: "JWT_SECRET not set" });
+    }
+
+    const decoded = jwt.verify(token, secret) as JwtPayload;
+
+    const userId =
+      typeof decoded === "object" && decoded && typeof decoded.sub === "string"
+        ? decoded.sub
+        : typeof (decoded as any).userId === "string"
+        ? (decoded as any).userId
+        : null;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: "Invalid token" });
+    }
+
+    req.user = { id: userId };
+    return next();
   } catch {
     return res.status(401).json({ ok: false, error: "Invalid token" });
   }
