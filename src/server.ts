@@ -19,6 +19,8 @@ const ALLOWED_ORIGINS: string[] = [
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
 // ---------- MIDDLEWARE ----------
 app.use(helmet());
 
@@ -46,6 +48,46 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
+// ---------- HELPERS ----------
+function requireAdminToken(req: Request, res: Response, next: NextFunction) {
+  if (!ADMIN_TOKEN) {
+    return res.status(500).json({ ok: false, error: "ADMIN_TOKEN not set" });
+  }
+  const token = String(req.headers["x-admin-token"] || "");
+  if (!token || token !== ADMIN_TOKEN) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+  return next();
+}
+
+function parseIntSafe(v: any, fallback: number) {
+  const n = parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const PROPERTY_SELECT = {
+  id: true,
+  slug: true,
+  title: true,
+  address1: true,
+  address2: true,
+  city: true,
+  county: true,
+  eircode: true,
+  price: true,
+  status: true,
+  propertyType: true,
+  ber: true,
+  bedrooms: true,
+  bathrooms: true,
+  size: true,
+  sizeUnits: true,
+  features: true,
+  description: true,
+  photos: true,
+  createdAt: true,
+} as const;
+
 // ---------- HEALTH CHECK ----------
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -53,45 +95,6 @@ app.get("/api/health", (_req, res) => {
     status: "healthy",
     timestamp: new Date().toISOString(),
   });
-});
-
-// ---------- DEBUG DB (TEMP, SAFE TYPES ONLY) ----------
-app.get("/api/debug/db", async (_req: Request, res: Response) => {
-  try {
-    const currentRows: any = await prisma.$queryRawUnsafe(
-      `select current_database()::text as db, current_schema()::text as schema;`,
-    );
-
-    const tableRows: any = await prisma.$queryRawUnsafe(
-      `select exists (
-         select 1
-         from information_schema.tables
-         where table_schema='public' and table_name='Property'
-       )::text as property_table_exists;`,
-    );
-
-    const cols: any = await prisma.$queryRawUnsafe(
-      `select column_name::text as column_name
-       from information_schema.columns
-       where table_schema='public' and table_name='Property'
-       order by column_name;`,
-    );
-
-    return res.json({
-      ok: true,
-      current: currentRows?.[0] ?? null,
-      property_table_exists: tableRows?.[0]?.property_table_exists ?? null,
-      property_columns: Array.isArray(cols) ? cols.map((r) => r.column_name) : [],
-    });
-  } catch (err: any) {
-    console.error("DEBUG /api/debug/db error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "debug failed",
-      debugCode: err?.code ?? null,
-      debugMessage: err?.message ?? String(err),
-    });
-  }
 });
 
 // ======================================================
@@ -138,33 +141,6 @@ app.all("/api/uploads/cloudinary-signature", (req: Request, res: Response) => {
 // ================================
 //  PROPERTIES ROUTES
 // ================================
-function parseIntSafe(v: any, fallback: number) {
-  const n = parseInt(String(v ?? ""), 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-const PROPERTY_SELECT = {
-  id: true,
-  slug: true,
-  title: true,
-  address1: true,
-  address2: true,
-  city: true,
-  county: true,
-  eircode: true,
-  price: true,
-  status: true,
-  propertyType: true,
-  ber: true,
-  bedrooms: true,
-  bathrooms: true,
-  size: true,
-  sizeUnits: true,
-  features: true,
-  description: true,
-  photos: true,
-  createdAt: true,
-} as const;
 
 // GET /api/properties
 app.get("/api/properties", async (req: Request, res: Response) => {
@@ -193,8 +169,6 @@ app.get("/api/properties", async (req: Request, res: Response) => {
     return res.status(500).json({
       ok: false,
       error: "Failed to fetch properties",
-      debugCode: err?.code ?? null,
-      debugMessage: err?.message ?? String(err),
     });
   }
 });
@@ -219,14 +193,12 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
     return res.status(500).json({
       ok: false,
       error: "Failed to fetch property",
-      debugCode: err?.code ?? null,
-      debugMessage: err?.message ?? String(err),
     });
   }
 });
 
-// POST /api/properties
-app.post("/api/properties", async (req: Request, res: Response) => {
+// POST /api/properties (ADMIN ONLY)
+app.post("/api/properties", requireAdminToken, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
@@ -300,11 +272,14 @@ app.post("/api/properties", async (req: Request, res: Response) => {
     return res.status(201).json({ ok: true, property });
   } catch (err: any) {
     console.error("POST /api/properties error", err);
+
+    if (err?.code === "P2002") {
+      return res.status(409).json({ ok: false, error: "Slug already exists" });
+    }
+
     return res.status(500).json({
       ok: false,
       error: "Failed to create property",
-      debugCode: err?.code ?? null,
-      debugMessage: err?.message ?? String(err),
     });
   }
 });
