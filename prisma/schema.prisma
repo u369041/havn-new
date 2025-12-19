@@ -20,7 +20,7 @@ model Property {
   eircode     String?
   price       Float
   status      String
-  propertyType String   @map("propertytype")
+  propertyType String   @map("propertyType")
   ber         String?
   bedrooms    Int?
   bathrooms   Int?
