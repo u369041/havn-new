@@ -139,7 +139,7 @@ function parseIntSafe(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// Safe selection: never references propertyType (prod DB drift)
+// Safe selection (now includes propertyType since we will add it to Neon)
 const SAFE_PROPERTY_SELECT = {
   id: true,
   slug: true,
@@ -151,6 +151,7 @@ const SAFE_PROPERTY_SELECT = {
   eircode: true,
   price: true,
   status: true,
+  propertyType: true,
   ber: true,
   bedrooms: true,
   bathrooms: true,
@@ -199,6 +200,7 @@ app.get("/api/properties", async (req: Request, res: Response) => {
 app.get("/api/properties/:slug", async (req: Request, res: Response) => {
   try {
     const slug = req.params.slug;
+
     const property = await prisma.property.findUnique({
       where: { slug },
       select: SAFE_PROPERTY_SELECT,
@@ -268,7 +270,6 @@ app.post("/api/properties", async (req: Request, res: Response) => {
           .filter(Boolean)
       : [];
 
-    // Accept propertyType from client but DO NOT write it until DB column exists.
     const property = await prisma.property.create({
       data: {
         slug: body.slug,
@@ -280,6 +281,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
         eircode: body.eircode,
         price: Number(body.price),
         status: body.status,
+        propertyType: body.propertyType,
         ber: body.ber || null,
         bedrooms: body.bedrooms !== undefined ? Number(body.bedrooms) : null,
         bathrooms: body.bathrooms !== undefined ? Number(body.bathrooms) : null,
