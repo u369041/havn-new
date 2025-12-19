@@ -105,6 +105,29 @@ function parseIntSafe(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// A safe selection that does NOT reference propertyType (since prod DB is missing it)
+const SAFE_PROPERTY_SELECT = {
+  id: true,
+  slug: true,
+  title: true,
+  address1: true,
+  address2: true,
+  city: true,
+  county: true,
+  eircode: true,
+  price: true,
+  status: true,
+  ber: true,
+  bedrooms: true,
+  bathrooms: true,
+  size: true,
+  sizeUnits: true,
+  features: true,
+  description: true,
+  photos: true,
+  createdAt: true,
+} as const;
+
 // GET /api/properties
 app.get("/api/properties", async (req: Request, res: Response) => {
   try {
@@ -122,27 +145,7 @@ app.get("/api/properties", async (req: Request, res: Response) => {
         orderBy: { createdAt: "desc" },
         skip: offset,
         take: limit,
-        select: {
-          id: true,
-          slug: true,
-          title: true,
-          address1: true,
-          address2: true,
-          city: true,
-          county: true,
-          eircode: true,
-          price: true,
-          status: true,
-          ber: true,
-          bedrooms: true,
-          bathrooms: true,
-          size: true,
-          sizeUnits: true,
-          features: true,
-          description: true,
-          photos: true,
-          createdAt: true
-        },
+        select: SAFE_PROPERTY_SELECT,
       }),
     ]);
 
@@ -160,27 +163,7 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
 
     const property = await prisma.property.findUnique({
       where: { slug },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        address1: true,
-        address2: true,
-        city: true,
-        county: true,
-        eircode: true,
-        price: true,
-        status: true,
-        ber: true,
-        bedrooms: true,
-        bathrooms: true,
-        size: true,
-        sizeUnits: true,
-        features: true,
-        description: true,
-        photos: true,
-        createdAt: true
-      },
+      select: SAFE_PROPERTY_SELECT,
     });
 
     if (!property) {
@@ -245,6 +228,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
     // IMPORTANT:
     // DB does NOT have Property.propertyType yet.
     // We accept it from the client but DO NOT write it.
+    // ALSO: we must use `select` on create(), otherwise Prisma tries to return propertyType and crashes.
     const property = await prisma.property.create({
       data: {
         slug: body.slug,
@@ -263,8 +247,9 @@ app.post("/api/properties", async (req: Request, res: Response) => {
         sizeUnits: body.sizeUnits || "sqm",
         features,
         description: body.description || "",
-        photos: body.photos
+        photos: body.photos,
       },
+      select: SAFE_PROPERTY_SELECT,
     });
 
     return res.status(201).json({ ok: true, property });
