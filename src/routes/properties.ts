@@ -1,119 +1,77 @@
 ﻿import { Router } from "express";
-import prisma from "../prisma"; // adjust if your prisma client export path differs
+import { PrismaClient } from "@prisma/client";
 
 const router = Router();
+const prisma = new PrismaClient();
 
-/**
- * Helpers
- */
-function parseLimit(raw: unknown, fallback = 12, max = 50) {
-  const s = Array.isArray(raw) ? raw[0] : raw;
-  const n = s == null ? NaN : parseInt(String(s), 10);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.min(n, max);
+function requireAdmin(req: any, res: any, next: any) {
+  const token = req.header("x-admin-token");
+  const expected = process.env.ADMIN_TOKEN;
+
+  if (!expected) {
+    return res.status(500).json({ ok: false, message: "ADMIN_TOKEN not set" });
+  }
+  if (!token || token !== expected) {
+    return res.status(401).json({ ok: false, message: "Unauthorized" });
+  }
+  next();
 }
 
-/**
- * GET /api/properties
- * Optional: ?limit=4
- *
- * Returns: Property card data (safe selection that avoids missing DB columns)
- */
 router.get("/", async (req, res) => {
   try {
-    const limit = parseLimit(req.query.limit, 12, 50);
-
-    // IMPORTANT:
-    // We intentionally use `select` to avoid reading columns that might not exist
-    // in production DB (like propertyType right now).
-    const properties = await prisma.property.findMany({
-      take: limit,
+    const items = await prisma.property.findMany({
       orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        address1: true,
-        address2: true,
-        city: true,
-        county: true,
-        eircode: true,
-        price: true,
-        status: true,
-        ber: true,
-        bedrooms: true,
-        bathrooms: true,
-        size: true,
-        sizeUnits: true,
-        features: true,
-        description: true,
-        photos: true,
-        createdAt: true,
-
-        // DO NOT include propertyType until the DB column exists
-        // propertyType: true,
-      },
+      take: 200,
     });
-
-    return res.json(properties);
-  } catch (err: any) {
-    console.error("GET /api/properties failed:", err);
-    // Return a helpful error response (still safe for prod)
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to fetch properties",
-      // Uncomment these 2 lines temporarily if you want the browser response to show the real error:
-      // debugCode: err?.code ?? null,
-      // debugMessage: err?.message ?? String(err),
-    });
+    res.json(items);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e?.message || "Failed to list properties" });
   }
 });
 
-/**
- * GET /api/properties/:idOrSlug
- * Fetch a single property by numeric id or slug.
- */
-router.get("/:idOrSlug", async (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
   try {
-    const { idOrSlug } = req.params;
+    const b = req.body || {};
 
-    const id = Number.isFinite(Number(idOrSlug)) ? Number(idOrSlug) : null;
+    const required = ["slug", "title", "address1", "city", "county", "price", "status"];
+    const missing = required.filter(
+      (k) => b[k] === undefined || b[k] === null || String(b[k]).trim() === ""
+    );
+    if (missing.length) {
+      return res.status(400).json({ ok: false, message: `Missing: ${missing.join(", ")}` });
+    }
 
-    const property = await prisma.property.findFirst({
-      where: id != null ? { id } : { slug: idOrSlug },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        address1: true,
-        address2: true,
-        city: true,
-        county: true,
-        eircode: true,
-        price: true,
-        status: true,
-        ber: true,
-        bedrooms: true,
-        bathrooms: true,
-        size: true,
-        sizeUnits: true,
-        features: true,
-        description: true,
-        photos: true,
-        createdAt: true,
+    const created = await prisma.property.create({
+      data: {
+        slug: String(b.slug),
+        title: String(b.title),
+        address1: String(b.address1),
+        address2: b.address2 ? String(b.address2) : null,
+        city: String(b.city),
+        county: String(b.county),
+        eircode: b.eircode ? String(b.eircode) : null,
+        price: Number(b.price),
+        status: String(b.status),
 
-        // propertyType: true, // keep disabled until DB column exists
+        propertyType: b.propertyType ? String(b.propertyType) : null,
+        ber: b.ber ? String(b.ber) : null,
+        bedrooms: b.bedrooms != null ? Number(b.bedrooms) : null,
+        bathrooms: b.bathrooms != null ? Number(b.bathrooms) : null,
+        size: b.size != null ? Number(b.size) : null,
+        sizeUnits: b.sizeUnits ? String(b.sizeUnits) : null,
+
+        features: Array.isArray(b.features) ? b.features.map(String) : [],
+        description: b.description ? String(b.description) : null,
+        photos: Array.isArray(b.photos) ? b.photos.map(String) : [],
       },
     });
 
-    if (!property) {
-      return res.status(404).json({ ok: false, error: "Property not found" });
+    res.status(201).json(created);
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
-
-    return res.json(property);
-  } catch (err: any) {
-    console.error("GET /api/properties/:idOrSlug failed:", err);
-    return res.status(500).json({ ok: false, error: "Failed to fetch property" });
+    res.status(500).json({ ok: false, message: e?.message || "Create failed" });
   }
 });
 

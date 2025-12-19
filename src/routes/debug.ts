@@ -1,22 +1,45 @@
-﻿// src/routes/debug.ts
-import { Router, Request, Response } from 'express';
-import prisma from '../lib/db.js';
+﻿import { Router } from "express";
 
 const router = Router();
 
-router.get('/health', (_req: Request, res: Response) => {
-  res.json({ ok: true, service: 'havn-api' });
-});
+/**
+ * GET /api/debug/routes
+ * Lists registered routes (method + path).
+ * Remove before production hardening.
+ */
+router.get("/routes", (req, res) => {
+  const app: any = req.app;
 
-router.get('/db', async (_req: Request, res: Response) => {
-  try {
-    const count = await prisma.property.count();
-    res.json({ ok: true, table: 'Property', count });
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error('/api/debug/db error', e);
-    res.status(500).json({ ok: false, error: 'DB_ERROR' });
-  }
+  const routes: Array<{ method: string; path: string }> = [];
+
+  const walk = (stack: any[], prefix = "") => {
+    for (const layer of stack) {
+      if (layer.route && layer.route.path) {
+        const path = prefix + layer.route.path;
+        const methods = Object.keys(layer.route.methods || {});
+        for (const m of methods) {
+          routes.push({ method: m.toUpperCase(), path });
+        }
+      } else if (layer.name === "router" && layer.handle?.stack) {
+        // Try to extract mount path from regexp if possible
+        const mount = layer.regexp?.source
+          ? layer.regexp.source
+              .replace("^\\/", "/")
+              .replace("\\/?(?=\\/|$)", "")
+              .replace("(?=\\/|$)", "")
+              .replace("\\/", "/")
+          : "";
+
+        // This mount extraction isn't perfect; still useful.
+        walk(layer.handle.stack, prefix);
+      }
+    }
+  };
+
+  if (app?._router?.stack) walk(app._router.stack);
+
+  routes.sort((a, b) => (a.path + a.method).localeCompare(b.path + b.method));
+  res.json({ ok: true, count: routes.length, routes });
 });
 
 export default router;

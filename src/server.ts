@@ -5,6 +5,7 @@ import cors from "cors";
 
 import uploadsRouter from "./routes/uploads";
 import propertiesRouter from "./routes/properties";
+import debugRouter from "./routes/debug";
 
 const app = express();
 
@@ -32,16 +33,16 @@ app.use(
   })
 );
 
-// Always answer preflight requests
 app.options("*", cors({ origin: allowedOrigins }));
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ✅ uploads signature route
+// Mount routers (explicit)
 app.use("/api/uploads", uploadsRouter);
-
-// ✅ properties CRUD routes
 app.use("/api/properties", propertiesRouter);
+
+// TEMP: route inventory for debugging
+app.use("/api/debug", debugRouter);
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 app.listen(port, () => {
