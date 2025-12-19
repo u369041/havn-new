@@ -1,86 +1,119 @@
-﻿// src/routes/properties.ts
-import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
-import { authRequired, AuthRequest } from "../middleware/auth.js";
+﻿import { Router } from "express";
+import prisma from "../prisma"; // adjust if your prisma client export path differs
 
-const prisma = new PrismaClient();
 const router = Router();
 
-// GET ALL PROPERTIES
+/**
+ * Helpers
+ */
+function parseLimit(raw: unknown, fallback = 12, max = 50) {
+  const s = Array.isArray(raw) ? raw[0] : raw;
+  const n = s == null ? NaN : parseInt(String(s), 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(n, max);
+}
+
+/**
+ * GET /api/properties
+ * Optional: ?limit=4
+ *
+ * Returns: Property card data (safe selection that avoids missing DB columns)
+ */
 router.get("/", async (req, res) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 20, 100);
-    const offset = Number(req.query.offset) || 0;
+    const limit = parseLimit(req.query.limit, 12, 50);
 
-    const [count, properties] = await Promise.all([
-      prisma.property.count(),
-      prisma.property.findMany({
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-    ]);
+    // IMPORTANT:
+    // We intentionally use `select` to avoid reading columns that might not exist
+    // in production DB (like propertyType right now).
+    const properties = await prisma.property.findMany({
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        address1: true,
+        address2: true,
+        city: true,
+        county: true,
+        eircode: true,
+        price: true,
+        status: true,
+        ber: true,
+        bedrooms: true,
+        bathrooms: true,
+        size: true,
+        sizeUnits: true,
+        features: true,
+        description: true,
+        photos: true,
+        createdAt: true,
 
-    res.json({ ok: true, count, properties });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: "Failed to load properties" });
+        // DO NOT include propertyType until the DB column exists
+        // propertyType: true,
+      },
+    });
+
+    return res.json(properties);
+  } catch (err: any) {
+    console.error("GET /api/properties failed:", err);
+    // Return a helpful error response (still safe for prod)
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to fetch properties",
+      // Uncomment these 2 lines temporarily if you want the browser response to show the real error:
+      // debugCode: err?.code ?? null,
+      // debugMessage: err?.message ?? String(err),
+    });
   }
 });
 
-// GET PROPERTY BY SLUG
-router.get("/:slug", async (req, res) => {
+/**
+ * GET /api/properties/:idOrSlug
+ * Fetch a single property by numeric id or slug.
+ */
+router.get("/:idOrSlug", async (req, res) => {
   try {
-    const slug = req.params.slug;
+    const { idOrSlug } = req.params;
 
-    const property = await prisma.property.findUnique({
-      where: { slug },
+    const id = Number.isFinite(Number(idOrSlug)) ? Number(idOrSlug) : null;
+
+    const property = await prisma.property.findFirst({
+      where: id != null ? { id } : { slug: idOrSlug },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        address1: true,
+        address2: true,
+        city: true,
+        county: true,
+        eircode: true,
+        price: true,
+        status: true,
+        ber: true,
+        bedrooms: true,
+        bathrooms: true,
+        size: true,
+        sizeUnits: true,
+        features: true,
+        description: true,
+        photos: true,
+        createdAt: true,
+
+        // propertyType: true, // keep disabled until DB column exists
+      },
     });
 
     if (!property) {
       return res.status(404).json({ ok: false, error: "Property not found" });
     }
 
-    res.json({ ok: true, property });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: "Failed to load property" });
-  }
-});
-
-// CREATE PROPERTY (AUTH REQUIRED)
-router.post("/", authRequired, async (req: AuthRequest, res) => {
-  try {
-    const userId = req.user!.id;
-    const body = req.body;
-
-    const property = await prisma.property.create({
-      data: {
-        slug: body.slug,
-        title: body.title,
-        address1: body.address1,
-        address2: body.address2 || "",
-        city: body.city,
-        county: body.county,
-        eircode: body.eircode,
-        price: Number(body.price),
-        status: body.status,
-        propertyType: body.propertyType,
-        bedrooms: body.bedrooms ? Number(body.bedrooms) : null,
-        bathrooms: body.bathrooms ? Number(body.bathrooms) : null,
-        size: body.size ? Number(body.size) : null,
-        sizeUnits: body.sizeUnits || "sqm",
-        features: Array.isArray(body.features) ? body.features : [],
-        description: body.description || "",
-        photos: body.photos,
-        userId,
-      },
-    });
-
-    res.status(201).json({ ok: true, property });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: "Failed to create property" });
+    return res.json(property);
+  } catch (err: any) {
+    console.error("GET /api/properties/:idOrSlug failed:", err);
+    return res.status(500).json({ ok: false, error: "Failed to fetch property" });
   }
 });
 
