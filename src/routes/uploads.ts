@@ -5,15 +5,7 @@ const router = Router();
 
 /**
  * GET /api/uploads/cloudinary-signature
- *
- * Returns SAFE values only:
- * - cloudName
- * - apiKey
- * - timestamp
- * - folder
- * - signature
- *
- * Also returns envStatus booleans for debugging (no secrets leaked).
+ * Returns safe upload signing data (never returns API secret).
  */
 router.get("/cloudinary-signature", (req, res) => {
   try {
@@ -21,10 +13,8 @@ router.get("/cloudinary-signature", (req, res) => {
     const apiKey = process.env.CLOUDINARY_API_KEY;
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
-    // This MUST match what the frontend sends
     const folder = "havn/properties";
 
-    // Diagnostic flags (safe to expose)
     const envStatus = {
       hasCloudName: !!cloudName,
       hasApiKey: !!apiKey,
@@ -40,20 +30,11 @@ router.get("/cloudinary-signature", (req, res) => {
       });
     }
 
-    // Unix timestamp (seconds)
     const timestamp = Math.floor(Date.now() / 1000);
 
-    /**
-     * Cloudinary signature rules:
-     * - Include EVERY param you send (folder, timestamp)
-     * - Alphabetical order
-     * - Append API secret at the end
-     */
+    // Must sign folder + timestamp if folder is sent during upload
     const stringToSign = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
-    const signature = crypto
-      .createHash("sha1")
-      .update(stringToSign)
-      .digest("hex");
+    const signature = crypto.createHash("sha1").update(stringToSign).digest("hex");
 
     return res.json({
       ok: true,
@@ -62,7 +43,7 @@ router.get("/cloudinary-signature", (req, res) => {
       timestamp,
       folder,
       signature,
-      envStatus, // proves env vars exist at runtime
+      envStatus,
     });
   } catch (err: any) {
     return res.status(500).json({

@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import cors from "cors";
 
 import uploadsRouter from "./routes/uploads";
-// import propertiesRouter from "./routes/properties";
+import propertiesRouter from "./routes/properties";
 
 const app = express();
 
@@ -32,16 +32,16 @@ app.use(
   })
 );
 
-// Ensure preflight requests succeed
+// Always answer preflight requests
 app.options("*", cors({ origin: allowedOrigins }));
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ✅ Mount uploads routes
+// ✅ uploads signature route
 app.use("/api/uploads", uploadsRouter);
 
-// ✅ Mount properties routes (uncomment in your real file)
-// app.use("/api/properties", propertiesRouter);
+// ✅ properties CRUD routes
+app.use("/api/properties", propertiesRouter);
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 app.listen(port, () => {
