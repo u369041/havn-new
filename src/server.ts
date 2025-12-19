@@ -55,19 +55,23 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// ---------- DEBUG DB (TEMP) ----------
+// ---------- DEBUG DB (TEMP, SAFE TYPES ONLY) ----------
 app.get("/api/debug/db", async (_req: Request, res: Response) => {
   try {
-    const dbNameRows: any = await prisma.$queryRawUnsafe(
-      `select current_database() as db, current_schema() as schema;`,
+    const currentRows: any = await prisma.$queryRawUnsafe(
+      `select current_database()::text as db, current_schema()::text as schema;`,
     );
 
     const tableRows: any = await prisma.$queryRawUnsafe(
-      `select to_regclass('public."Property"') as property_table;`,
+      `select exists (
+         select 1
+         from information_schema.tables
+         where table_schema='public' and table_name='Property'
+       )::text as property_table_exists;`,
     );
 
     const cols: any = await prisma.$queryRawUnsafe(
-      `select column_name
+      `select column_name::text as column_name
        from information_schema.columns
        where table_schema='public' and table_name='Property'
        order by column_name;`,
@@ -75,8 +79,8 @@ app.get("/api/debug/db", async (_req: Request, res: Response) => {
 
     return res.json({
       ok: true,
-      current: dbNameRows?.[0] ?? null,
-      property_table: tableRows?.[0] ?? null,
+      current: currentRows?.[0] ?? null,
+      property_table_exists: tableRows?.[0]?.property_table_exists ?? null,
       property_columns: Array.isArray(cols) ? cols.map((r) => r.column_name) : [],
     });
   } catch (err: any) {
@@ -139,8 +143,7 @@ function parseIntSafe(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// Safe selection (now includes propertyType since we will add it to Neon)
-const SAFE_PROPERTY_SELECT = {
+const PROPERTY_SELECT = {
   id: true,
   slug: true,
   title: true,
@@ -180,7 +183,7 @@ app.get("/api/properties", async (req: Request, res: Response) => {
         orderBy: { createdAt: "desc" },
         skip: offset,
         take: limit,
-        select: SAFE_PROPERTY_SELECT,
+        select: PROPERTY_SELECT,
       }),
     ]);
 
@@ -203,7 +206,7 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
 
     const property = await prisma.property.findUnique({
       where: { slug },
-      select: SAFE_PROPERTY_SELECT,
+      select: PROPERTY_SELECT,
     });
 
     if (!property) {
@@ -291,7 +294,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
         description: body.description || "",
         photos: body.photos,
       },
-      select: SAFE_PROPERTY_SELECT,
+      select: PROPERTY_SELECT,
     });
 
     return res.status(201).json({ ok: true, property });
