@@ -1,13 +1,13 @@
-﻿import type { Request, Response, NextFunction } from "express";
+﻿import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 
-export interface AuthRequest extends Request {
+export type AuthedRequest = Request & {
   user?: { id: string };
-}
+};
 
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    const authHeader = req.headers.authorization || "";
+    const authHeader = req.headers?.authorization ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
     if (!token) {
@@ -22,9 +22,9 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     const decoded = jwt.verify(token, secret) as JwtPayload;
 
     const userId =
-      typeof decoded === "object" && decoded && typeof decoded.sub === "string"
+      typeof decoded?.sub === "string"
         ? decoded.sub
-        : typeof (decoded as any).userId === "string"
+        : typeof (decoded as any)?.userId === "string"
         ? (decoded as any).userId
         : null;
 
@@ -32,7 +32,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
       return res.status(401).json({ ok: false, error: "Invalid token" });
     }
 
-    req.user = { id: userId };
+    (req as AuthedRequest).user = { id: userId };
     return next();
   } catch {
     return res.status(401).json({ ok: false, error: "Invalid token" });
