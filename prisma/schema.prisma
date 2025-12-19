@@ -1,3 +1,5 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,24 +10,40 @@ datasource db {
 }
 
 model Property {
-  id           Int       @id @default(autoincrement())
-  slug         String    @unique
-  title        String
-  address1     String?
-  address2     String?
-  city         String?
-  county       String?
-  eircode      String?
-  price        Float?
-  status       String?
-  propertyType String?
-  ber          String?
-  bedrooms     Int?
-  bathrooms    Int?
-  size         Float?
-  sizeUnits    String?
-  features     String[]  @default([])
-  description  String?
-  photos       String[]  @default([])
-  createdAt    DateTime  @default(now())
+  id          Int       @id @default(autoincrement())
+  slug        String    @unique
+  title       String
+  address1    String
+  address2    String?
+  city        String
+  county      String
+  eircode     String?
+  price       Float
+  status      String
+  propertyType String   @map("propertytype")
+  ber         String?
+  bedrooms    Int?
+  bathrooms   Int?
+  size        Float?
+  sizeUnits   String?   @map("sizeunits")
+  features    String[]
+  description String?
+  photos      String[]
+  createdAt   DateTime  @default(now()) @map("createdat")
+
+  // NEW: link to user (optional for existing rows)
+  userId Int?
+  user   User?    @relation(fields: [userId], references: [id])
+
+  @@map("Property")
+}
+
+model User {
+  id         Int        @id @default(autoincrement())
+  name       String?
+  email      String     @unique
+  password   String
+  createdAt  DateTime   @default(now())
+
+  properties Property[]
 }
