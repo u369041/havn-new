@@ -17,6 +17,7 @@ function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+// GET /api/properties  (list)
 router.get("/", async (req, res) => {
   try {
     const items = await prisma.property.findMany({
@@ -29,6 +30,22 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ✅ GET /api/properties/slug/:slug  (detail)
+router.get("/slug/:slug", async (req, res) => {
+  try {
+    const slug = String(req.params.slug || "").trim();
+    if (!slug) return res.status(400).json({ ok: false, message: "Missing slug" });
+
+    const item = await prisma.property.findUnique({ where: { slug } });
+    if (!item) return res.status(404).json({ ok: false, message: "Not found" });
+
+    res.json(item);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e?.message || "Failed to load property" });
+  }
+});
+
+// POST /api/properties  (create)
 router.post("/", requireAdmin, async (req, res) => {
   try {
     const b = req.body || {};
