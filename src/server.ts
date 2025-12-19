@@ -6,6 +6,7 @@ import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 
 const prisma = new PrismaClient();
+const app = express();
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 
@@ -17,8 +18,6 @@ const ALLOWED_ORIGINS: string[] = [
 
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
-
-const app = express();
 
 // ---------- MIDDLEWARE ----------
 app.use(helmet());
@@ -54,6 +53,41 @@ app.get("/api/health", (_req, res) => {
     status: "healthy",
     timestamp: new Date().toISOString(),
   });
+});
+
+// ---------- DEBUG DB (TEMP) ----------
+app.get("/api/debug/db", async (_req: Request, res: Response) => {
+  try {
+    const dbNameRows: any = await prisma.$queryRawUnsafe(
+      `select current_database() as db, current_schema() as schema;`,
+    );
+
+    const tableRows: any = await prisma.$queryRawUnsafe(
+      `select to_regclass('public."Property"') as property_table;`,
+    );
+
+    const cols: any = await prisma.$queryRawUnsafe(
+      `select column_name
+       from information_schema.columns
+       where table_schema='public' and table_name='Property'
+       order by column_name;`,
+    );
+
+    return res.json({
+      ok: true,
+      current: dbNameRows?.[0] ?? null,
+      property_table: tableRows?.[0] ?? null,
+      property_columns: Array.isArray(cols) ? cols.map((r) => r.column_name) : [],
+    });
+  } catch (err: any) {
+    console.error("DEBUG /api/debug/db error", err);
+    return res.status(500).json({
+      ok: false,
+      error: "debug failed",
+      debugCode: err?.code ?? null,
+      debugMessage: err?.message ?? String(err),
+    });
+  }
 });
 
 // ======================================================
@@ -105,7 +139,7 @@ function parseIntSafe(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// A safe selection that does NOT reference propertyType (since prod DB is missing it)
+// Safe selection: never references propertyType (prod DB drift)
 const SAFE_PROPERTY_SELECT = {
   id: true,
   slug: true,
@@ -152,7 +186,12 @@ app.get("/api/properties", async (req: Request, res: Response) => {
     return res.json({ ok: true, count, properties });
   } catch (err: any) {
     console.error("GET /api/properties error", err);
-    return res.status(500).json({ ok: false, error: "Failed to fetch properties" });
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to fetch properties",
+      debugCode: err?.code ?? null,
+      debugMessage: err?.message ?? String(err),
+    });
   }
 });
 
@@ -160,7 +199,6 @@ app.get("/api/properties", async (req: Request, res: Response) => {
 app.get("/api/properties/:slug", async (req: Request, res: Response) => {
   try {
     const slug = req.params.slug;
-
     const property = await prisma.property.findUnique({
       where: { slug },
       select: SAFE_PROPERTY_SELECT,
@@ -173,7 +211,12 @@ app.get("/api/properties/:slug", async (req: Request, res: Response) => {
     return res.json({ ok: true, property });
   } catch (err: any) {
     console.error("GET /api/properties/:slug error", err);
-    return res.status(500).json({ ok: false, error: "Failed to fetch property" });
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to fetch property",
+      debugCode: err?.code ?? null,
+      debugMessage: err?.message ?? String(err),
+    });
   }
 });
 
@@ -225,10 +268,7 @@ app.post("/api/properties", async (req: Request, res: Response) => {
           .filter(Boolean)
       : [];
 
-    // IMPORTANT:
-    // DB does NOT have Property.propertyType yet.
-    // We accept it from the client but DO NOT write it.
-    // ALSO: we must use `select` on create(), otherwise Prisma tries to return propertyType and crashes.
+    // Accept propertyType from client but DO NOT write it until DB column exists.
     const property = await prisma.property.create({
       data: {
         slug: body.slug,
@@ -255,12 +295,12 @@ app.post("/api/properties", async (req: Request, res: Response) => {
     return res.status(201).json({ ok: true, property });
   } catch (err: any) {
     console.error("POST /api/properties error", err);
-
-    if (err?.code === "P2002") {
-      return res.status(409).json({ ok: false, error: "Slug already exists" });
-    }
-
-    return res.status(500).json({ ok: false, error: "Failed to create property" });
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to create property",
+      debugCode: err?.code ?? null,
+      debugMessage: err?.message ?? String(err),
+    });
   }
 });
 
