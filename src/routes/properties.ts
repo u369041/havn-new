@@ -1,17 +1,27 @@
-﻿import { Router, Request, Response } from "express";
+﻿// src/routes/properties.ts
+import { Router, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
-import { requireAdmin } from "../middleware/adminAuth";
+import { ListingStatus } from "@prisma/client";
+import { requireAuth, optionalAuth, requireAdmin } from "../middleware/auth";
 
 const router = Router();
 
+function isOwnerOrAdmin(req: Request, userId: number | null): boolean {
+  const u = (req as any).user as { id: number; role?: string } | undefined;
+  if (!u) return false;
+  if (u.role === "admin") return true;
+  return userId != null && u.id === userId;
+}
+
 /**
  * GET /api/properties
- * List properties
+ * Public list: PUBLISHED only
  */
 router.get("/", async (_req: Request, res: Response) => {
   try {
     const items = await prisma.property.findMany({
-      orderBy: { createdAt: "desc" },
+      where: { listingStatus: ListingStatus.PUBLISHED },
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
         slug: true,
@@ -30,24 +40,32 @@ router.get("/", async (_req: Request, res: Response) => {
         ber: true,
         berNo: true,
         saleType: true,
-        status: true,
+
+        // Legacy DB column "status" is now exposed as marketStatus
+        marketStatus: true,
+
         photos: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+        publishedAt: true,
+      },
     });
 
-    res.json({ ok: true, items });
+    return res.json({ ok: true, items });
   } catch (err: any) {
-    res.status(500).json({ ok: false, message: err?.message || "Failed to list properties" });
+    return res
+      .status(500)
+      .json({ ok: false, message: err?.message || "Failed to list properties" });
   }
 });
 
 /**
  * GET /api/properties/:slug
- * Property detail
+ * Detail:
+ * - If PUBLISHED => public
+ * - If DRAFT => only owner/admin (otherwise 404)
  */
-router.get("/:slug", async (req: Request, res: Response) => {
+router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
   try {
     const slug = String(req.params.slug || "").trim();
     if (!slug) return res.status(400).json({ ok: false, message: "Missing slug" });
@@ -55,19 +73,30 @@ router.get("/:slug", async (req: Request, res: Response) => {
     const item = await prisma.property.findUnique({ where: { slug } });
     if (!item) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    res.json({ ok: true, item });
+    if (item.listingStatus === ListingStatus.PUBLISHED) {
+      return res.json({ ok: true, item });
+    }
+
+    // Draft: return 404 unless owner/admin (avoid leaking existence)
+    if (!isOwnerOrAdmin(req, item.userId ?? null)) {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    return res.json({ ok: true, item });
   } catch (err: any) {
-    res.status(500).json({ ok: false, message: err?.message || "Failed to fetch property" });
+    return res
+      .status(500)
+      .json({ ok: false, message: err?.message || "Failed to fetch property" });
   }
 });
 
 /**
  * POST /api/properties
- * Create property (ADMIN JWT ONLY)
- * Header required:
- *   Authorization: Bearer <JWT>
+ * Create property (AUTH)
+ * - Always creates as DRAFT (listingStatus)
+ * - marketStatus is optional and maps to legacy DB column "status"
  */
-router.post("/", requireAdmin, async (req: Request, res: Response) => {
+router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
     const b: any = req.body || {};
 
@@ -87,7 +116,9 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
     const ber = b.ber != null ? String(b.ber).trim() : null;
     const berNo = b.berNo != null ? String(b.berNo).trim() : null;
     const saleType = b.saleType != null ? String(b.saleType).trim() : null;
-    const status = b.status != null ? String(b.status).trim() : null;
+
+    // Rename: use marketStatus (not status) now
+    const marketStatus = b.marketStatus != null ? String(b.marketStatus).trim() : null;
 
     const description = b.description != null ? String(b.description) : null;
     const lat = b.lat != null && b.lat !== "" ? Number(b.lat) : null;
@@ -103,7 +134,6 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, message: "price must be a number" });
     }
 
-    // Optionally attach ownership if you want:
     const user = (req as any).user as { id: number } | undefined;
 
     const created = await prisma.property.create({
@@ -124,20 +154,99 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
         ber,
         berNo,
         saleType,
-        status,
+        marketStatus,
         description,
         features,
         photos,
-        userId: user?.id ?? null
-      }
+        userId: user?.id ?? null,
+
+        // Force draft on create
+        listingStatus: ListingStatus.DRAFT,
+        publishedAt: null,
+      },
     });
 
-    res.status(201).json({ ok: true, item: created });
+    return res.status(201).json({ ok: true, item: created });
   } catch (err: any) {
     if (err?.code === "P2002") {
       return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
-    res.status(500).json({ ok: false, message: err?.message || "Create failed" });
+    return res.status(500).json({ ok: false, message: err?.message || "Create failed" });
+  }
+});
+
+/**
+ * POST /api/properties/:id/publish
+ * Owner or admin can publish
+ */
+router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus === ListingStatus.PUBLISHED) {
+      return res.status(409).json({ ok: false, message: "Already published" });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: { listingStatus: ListingStatus.PUBLISHED, publishedAt: new Date() },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Publish failed" });
+  }
+});
+
+/**
+ * POST /api/properties/:id/unpublish
+ * Owner or admin can unpublish (back to draft)
+ */
+router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus === ListingStatus.DRAFT) {
+      return res.status(409).json({ ok: false, message: "Already draft" });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: { listingStatus: ListingStatus.DRAFT, publishedAt: null },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Unpublish failed" });
+  }
+});
+
+/**
+ * Optional admin utility (delete if you don't want it):
+ * GET /api/properties/_admin/all  (draft + published)
+ */
+router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const items = await prisma.property.findMany({ orderBy: [{ updatedAt: "desc" }] });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Failed" });
   }
 });
 

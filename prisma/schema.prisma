@@ -14,6 +14,11 @@ enum UserRole {
   user
 }
 
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+}
+
 model Property {
   id           Int      @id @default(autoincrement())
   slug         String   @unique
@@ -32,7 +37,15 @@ model Property {
   ber          String?
   berNo        String?  @map("berNo")
   saleType     String?  @map("saleType")
-  status       String?
+
+  // Previously: status String?
+  // Keep your old field, but rename it so we can use listingStatus for draft/published.
+  marketStatus String?  @map("status")
+
+  // New: Draft vs Published lifecycle
+  listingStatus ListingStatus @default(DRAFT)
+  publishedAt   DateTime?
+
   description  String?
   features     String[] @default([])
   photos       String[] @default([])
@@ -41,6 +54,10 @@ model Property {
 
   userId Int?
   user   User? @relation(fields: [userId], references: [id])
+
+  @@index([listingStatus])
+  @@index([publishedAt])
+  @@index([userId])
 
   @@map("Property")
 }
