@@ -6,10 +6,11 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "prisma:push": "npx prisma db push",
-    "prisma:generate": "npx prisma generate"
+    "start": "node dist/server.js",
+    "prisma:push": "prisma db push",
+    "prisma:generate": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",

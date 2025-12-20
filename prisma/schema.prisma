@@ -9,31 +9,38 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Property {
-  id          Int       @id @default(autoincrement())
-  slug        String    @unique
-  title       String
-  address1    String
-  address2    String?
-  city        String
-  county      String
-  eircode     String?
-  price       Float
-  status      String
-  propertyType String   @map("propertyType")
-  ber         String?
-  bedrooms    Int?
-  bathrooms   Int?
-  size        Float?
-  sizeUnits   String?   @map("sizeunits")
-  features    String[]
-  description String?
-  photos      String[]
-  createdAt   DateTime  @default(now()) @map("createdat")
+enum UserRole {
+  admin
+  user
+}
 
-  // NEW: link to user (optional for existing rows)
+model Property {
+  id           Int      @id @default(autoincrement())
+  slug         String   @unique
+  title        String
+  address1     String
+  address2     String?
+  city         String
+  county       String
+  eircode      String?
+  lat          Float?
+  lng          Float?
+  price        Int
+  bedrooms     Int?
+  bathrooms    Int?
+  propertyType String   @map("propertyType")
+  ber          String?
+  berNo        String?  @map("berNo")
+  saleType     String?  @map("saleType")
+  status       String?
+  description  String?
+  features     String[] @default([])
+  photos       String[] @default([])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
   userId Int?
-  user   User?    @relation(fields: [userId], references: [id])
+  user   User? @relation(fields: [userId], references: [id])
 
   @@map("Property")
 }
@@ -43,7 +50,7 @@ model User {
   name      String?
   email     String   @unique
   password  String
-  role      String   @default("user") // "admin" | "user"
+  role      UserRole @default(user)
   createdAt DateTime @default(now())
 
   properties Property[]
