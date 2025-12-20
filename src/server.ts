@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth";
 import propertiesRoutes from "./routes/properties";
 import uploadsRoutes from "./routes/uploads";
 import debugRoutes from "./routes/debug";
+import diagRoutes from "./routes/_diag";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -43,12 +44,15 @@ app.use(
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+// ✅ diagnostics
+app.use("/api/_diag", diagRoutes);
+
 app.use("/api/auth", authRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/uploads", uploadsRoutes);
 app.use("/api/debug", debugRoutes);
 
-// ✅ GLOBAL ERROR HANDLER (so we see real errors instead of 502)
+// ✅ GLOBAL ERROR HANDLER
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("UNHANDLED ERROR:", err);
   res.status(500).json({
