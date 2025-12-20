@@ -44,24 +44,18 @@ app.use(
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// ✅ THIS MUST EXIST AFTER DEPLOY
 app.use("/api/_diag", diagRoutes);
-
 app.use("/api/auth", authRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/uploads", uploadsRoutes);
 app.use("/api/debug", debugRoutes);
 
-// ✅ error handler (prevents 502s hiding real errors)
+// Global error handler (won't catch async promise rejections inside Prisma,
+// but will catch sync route errors)
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("UNHANDLED ERROR:", err);
-  res.status(500).json({
-    ok: false,
-    error: err?.message || "Server error",
-  });
+  res.status(500).json({ ok: false, error: err?.message || "Server error" });
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
-app.listen(port, () => {
-  console.log(`HAVN API listening on ${port}`);
-});
+app.listen(port, () => console.log(`HAVN API listening on ${port}`));
