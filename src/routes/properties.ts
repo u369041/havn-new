@@ -1,26 +1,8 @@
-﻿import { Router, Request, Response, NextFunction } from "express";
+﻿import { Router, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
+import { requireAdmin } from "../middleware/adminAuth";
 
 const router = Router();
-
-/**
- * Simple admin guard using header token
- * Header: x-admin-token
- */
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const token = (req.header("x-admin-token") || "").trim();
-  const expected = (process.env.ADMIN_TOKEN || "").trim();
-
-  if (!expected) {
-    return res.status(500).json({ ok: false, message: "ADMIN_TOKEN not set" });
-  }
-
-  if (!token || token !== expected) {
-    return res.status(401).json({ ok: false, message: "Unauthorized" });
-  }
-
-  next();
-}
 
 /**
  * GET /api/properties
@@ -68,17 +50,10 @@ router.get("/", async (_req: Request, res: Response) => {
 router.get("/:slug", async (req: Request, res: Response) => {
   try {
     const slug = String(req.params.slug || "").trim();
-    if (!slug) {
-      return res.status(400).json({ ok: false, message: "Missing slug" });
-    }
+    if (!slug) return res.status(400).json({ ok: false, message: "Missing slug" });
 
-    const item = await prisma.property.findUnique({
-      where: { slug }
-    });
-
-    if (!item) {
-      return res.status(404).json({ ok: false, message: "Property not found" });
-    }
+    const item = await prisma.property.findUnique({ where: { slug } });
+    if (!item) return res.status(404).json({ ok: false, message: "Property not found" });
 
     res.json({ ok: true, item });
   } catch (err: any) {
@@ -88,11 +63,13 @@ router.get("/:slug", async (req: Request, res: Response) => {
 
 /**
  * POST /api/properties
- * Create property (admin only)
+ * Create property (ADMIN JWT ONLY)
+ * Header required:
+ *   Authorization: Bearer <JWT>
  */
 router.post("/", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const b = req.body || {};
+    const b: any = req.body || {};
 
     const slug = String(b.slug || "").trim();
     const title = String(b.title || "").trim();
@@ -120,15 +97,14 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
     const photos = Array.isArray(b.photos) ? b.photos.map(String) : [];
 
     if (!slug || !title || !address1 || !city || !county || !propertyType) {
-      return res.status(400).json({
-        ok: false,
-        message: "Missing required fields"
-      });
+      return res.status(400).json({ ok: false, message: "Missing required fields" });
     }
-
     if (!Number.isFinite(price)) {
       return res.status(400).json({ ok: false, message: "price must be a number" });
     }
+
+    // Optionally attach ownership if you want:
+    const user = (req as any).user as { id: number } | undefined;
 
     const created = await prisma.property.create({
       data: {
@@ -151,7 +127,8 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
         status,
         description,
         features,
-        photos
+        photos,
+        userId: user?.id ?? null
       }
     });
 
@@ -160,7 +137,6 @@ router.post("/", requireAdmin, async (req: Request, res: Response) => {
     if (err?.code === "P2002") {
       return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
-
     res.status(500).json({ ok: false, message: err?.message || "Create failed" });
   }
 });

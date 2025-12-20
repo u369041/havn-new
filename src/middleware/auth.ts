@@ -1,37 +1,51 @@
-﻿import type { Request, Response, NextFunction } from "express";
+﻿import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { prisma } from "../lib/prisma";
 
 type JwtPayload = {
-  userId: number;
-  role: "admin" | "user";
+  sub: number | string;
+  role?: "admin" | "user";
 };
 
-export type AuthedRequest = Request & { user?: JwtPayload };
-
-function getTokenFromHeader(req: Request): string | null {
-  const h = req.headers.authorization || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : null;
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var: ${name}`);
+  return v;
 }
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const token = getTokenFromHeader(req);
-  if (!token) return res.status(401).json({ error: "Missing Bearer token" });
-
-  const secret = process.env.JWT_SECRET;
-  if (!secret) return res.status(500).json({ error: "JWT_SECRET not set" });
-
+/**
+ * Reads Authorization: Bearer <token>
+ * Verifies JWT and attaches req.user
+ */
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    const payload = jwt.verify(token, secret) as JwtPayload;
-    req.user = payload;
-    return next();
-  } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
+    const auth = (req.header("authorization") || "").trim();
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (!m) return res.status(401).json({ ok: false, message: "Missing Bearer token" });
 
-export function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-  if (!req.user) return res.status(401).json({ error: "Not authenticated" });
-  if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
-  return next();
+    const token = m[1];
+    const secret = requireEnv("JWT_SECRET");
+
+    const decoded = jwt.verify(token, secret) as JwtPayload;
+
+    const userId = Number(decoded?.sub);
+    if (!userId || !Number.isFinite(userId)) {
+      return res.status(401).json({ ok: false, message: "Invalid token subject" });
+    }
+
+    // Optional hardening: confirm the user still exists in DB
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, name: true, createdAt: true }
+    });
+
+    if (!user) return res.status(401).json({ ok: false, message: "User not found" });
+
+    // Attach for downstream handlers
+    (req as any).user = user;
+
+    return next();
+  } catch (err: any) {
+    return res.status(401).json({ ok: false, message: err?.message || "Unauthorized" });
+  }
 }
