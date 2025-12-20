@@ -11,4 +11,12 @@ router.get("/env", (_req, res) => {
   });
 });
 
+router.get("/fingerprint", (_req, res) => {
+  res.json({
+    ok: true,
+    renderGitCommit: process.env.RENDER_GIT_COMMIT || null,
+    time: new Date().toISOString(),
+  });
+});
+
 export default router;
