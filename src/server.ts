@@ -43,12 +43,20 @@ app.use(
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// ✅ This is what makes /api/auth/* exist
 app.use("/api/auth", authRoutes);
-
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/uploads", uploadsRoutes);
 app.use("/api/debug", debugRoutes);
+
+// ✅ GLOBAL ERROR HANDLER (so we see real errors instead of 502)
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("UNHANDLED ERROR:", err);
+  res.status(500).json({
+    ok: false,
+    error: err?.message || "Server error",
+    stack: process.env.NODE_ENV === "production" ? undefined : String(err?.stack || ""),
+  });
+});
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 app.listen(port, () => {
