@@ -1,37 +1,51 @@
 import { Router } from "express";
-import prisma from "../prisma";
+import { prisma } from "../lib/prisma";
 
 const router = Router();
 
+/**
+ * GET /api/_diag/env
+ * Proves env vars are present (without leaking secrets)
+ */
 router.get("/env", (_req, res) => {
   res.json({
-    ok: true,
     hasJWT_SECRET: Boolean(process.env.JWT_SECRET),
     hasADMIN_BOOTSTRAP_TOKEN: Boolean(process.env.ADMIN_BOOTSTRAP_TOKEN),
-    nodeEnv: process.env.NODE_ENV || null,
+    nodeEnv: process.env.NODE_ENV || "unknown",
   });
 });
 
+/**
+ * GET /api/_diag/fingerprint
+ * Proves which commit/build is deployed
+ */
 router.get("/fingerprint", (_req, res) => {
   res.json({
     ok: true,
-    renderGitCommit: process.env.RENDER_GIT_COMMIT || null,
-    time: new Date().toISOString(),
+    commit: process.env.RENDER_GIT_COMMIT || process.env.COMMIT_SHA || "unknown",
+    service: process.env.RENDER_SERVICE_NAME || "unknown",
+    nodeEnv: process.env.NODE_ENV || "unknown",
+    ts: new Date().toISOString(),
   });
 });
 
-// ✅ This forces a Prisma DB call and returns the REAL error message
+/**
+ * GET /api/_diag/db
+ * Proves Prisma can connect and run a trivial query.
+ * If it fails, returns a structured error (no secrets).
+ */
 router.get("/db", async (_req, res) => {
   try {
-    // Minimal query
-    const count = await prisma.user.count();
-    res.json({ ok: true, userCount: count });
-  } catch (e: any) {
+    // Lightweight connectivity check:
+    // For Postgres, SELECT 1 is safe and fast.
+    const result = await prisma.$queryRawUnsafe("SELECT 1 as ok");
+    res.json({ ok: true, result });
+  } catch (err: any) {
     res.status(500).json({
       ok: false,
-      error: e?.message || "DB error",
-      code: e?.code || null,
-      meta: e?.meta || null,
+      name: err?.name || "Error",
+      message: err?.message || "DB error",
+      code: err?.code || null,
     });
   }
 });
