@@ -17,14 +17,35 @@ function isOwnerOrAdmin(req: Request, userId: number | null): boolean {
 /**
  * AUTH: GET /api/properties/mine
  * All listings for logged-in user (draft + published)
+ * Stable ordering:
+ *   - Published first (publishedAt desc)
+ *   - Drafts next (updatedAt desc)
  * IMPORTANT: must be defined BEFORE "/:slug"
  */
 router.get("/mine", requireAuth, async (req: Request, res: Response) => {
   try {
     const user = (req as any).user as { id: number };
 
-    const items = await prisma.property.findMany({
-      where: { userId: user.id },
+    const published = await prisma.property.findMany({
+      where: { userId: user.id, listingStatus: ListingStatus.PUBLISHED },
+      orderBy: [{ publishedAt: "desc" }, { updatedAt: "desc" }],
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        city: true,
+        county: true,
+        price: true,
+        photos: true,
+        listingStatus: true,
+        publishedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const drafts = await prisma.property.findMany({
+      where: { userId: user.id, listingStatus: ListingStatus.DRAFT },
       orderBy: [{ updatedAt: "desc" }],
       select: {
         id: true,
@@ -41,7 +62,7 @@ router.get("/mine", requireAuth, async (req: Request, res: Response) => {
       },
     });
 
-    return res.json({ ok: true, items });
+    return res.json({ ok: true, items: [...published, ...drafts] });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Failed to load listings" });
   }
@@ -260,6 +281,7 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     if (b.features !== undefined) data.features = Array.isArray(b.features) ? b.features.map(String) : [];
     if (b.photos !== undefined) data.photos = Array.isArray(b.photos) ? b.photos.map(String) : [];
 
+    // lifecycle is server-controlled
     delete data.listingStatus;
     delete data.publishedAt;
 
