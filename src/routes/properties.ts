@@ -15,8 +15,41 @@ function isOwnerOrAdmin(req: Request, userId: number | null): boolean {
 }
 
 /**
- * GET /api/properties
- * Public list: PUBLISHED only
+ * AUTH: GET /api/properties/mine
+ * All listings for logged-in user (draft + published)
+ * IMPORTANT: must be defined BEFORE "/:slug"
+ */
+router.get("/mine", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user as { id: number };
+
+    const items = await prisma.property.findMany({
+      where: { userId: user.id },
+      orderBy: [{ updatedAt: "desc" }],
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        city: true,
+        county: true,
+        price: true,
+        photos: true,
+        listingStatus: true,
+        publishedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Failed to load listings" });
+  }
+});
+
+/**
+ * PUBLIC: GET /api/properties
+ * PUBLISHED only
  */
 router.get("/", async (_req: Request, res: Response) => {
   try {
@@ -41,10 +74,7 @@ router.get("/", async (_req: Request, res: Response) => {
         ber: true,
         berNo: true,
         saleType: true,
-
-        // Prisma field (DB column is still "status")
         marketStatus: true,
-
         photos: true,
         createdAt: true,
         updatedAt: true,
@@ -55,6 +85,22 @@ router.get("/", async (_req: Request, res: Response) => {
     return res.json({ ok: true, items });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Failed to list properties" });
+  }
+});
+
+/**
+ * ADMIN: GET /api/properties/_admin/all
+ * Draft + Published
+ * IMPORTANT: defined BEFORE "/:slug"
+ */
+router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const items = await prisma.property.findMany({
+      orderBy: [{ updatedAt: "desc" }],
+    });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Failed" });
   }
 });
 
@@ -90,7 +136,7 @@ router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
 /**
  * POST /api/properties
  * Create property (AUTH)
- * - Always creates as DRAFT (listingStatus)
+ * - Always creates as DRAFT
  */
 router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -113,7 +159,6 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
     const berNo = b.berNo != null ? String(b.berNo).trim() : null;
     const saleType = b.saleType != null ? String(b.saleType).trim() : null;
 
-    // IMPORTANT: frontend sends marketStatus now
     const marketStatus = b.marketStatus != null ? String(b.marketStatus).trim() : null;
 
     const description = b.description != null ? String(b.description) : null;
@@ -155,8 +200,6 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
         features,
         photos,
         userId: user?.id ?? null,
-
-        // Force draft on create
         listingStatus: ListingStatus.DRAFT,
         publishedAt: null,
       },
@@ -174,7 +217,6 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 /**
  * PATCH /api/properties/:id
  * Update property (AUTH, owner/admin)
- * ✅ This route fixes: "Cannot PATCH /api/properties/:id"
  */
 router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -195,7 +237,6 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
       if (b[k] !== undefined) data[k] = b[k] === null ? null : String(b[k]).trim();
     };
 
-    // Allowed updates
     setString("slug");
     setString("title");
     setString("address1");
@@ -219,7 +260,6 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     if (b.features !== undefined) data.features = Array.isArray(b.features) ? b.features.map(String) : [];
     if (b.photos !== undefined) data.photos = Array.isArray(b.photos) ? b.photos.map(String) : [];
 
-    // Never allow client to set draft/publish lifecycle directly
     delete data.listingStatus;
     delete data.publishedAt;
 
@@ -239,7 +279,6 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * POST /api/properties/:id/publish
- * Owner or admin can publish
  */
 router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -273,7 +312,6 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
 
 /**
  * POST /api/properties/:id/unpublish
- * Owner or admin can unpublish (back to draft)
  */
 router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -302,21 +340,6 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Unpublish failed" });
-  }
-});
-
-/**
- * ADMIN: GET /api/properties/_admin/all
- * Returns draft + published
- */
-router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => {
-  try {
-    const items = await prisma.property.findMany({
-      orderBy: [{ updatedAt: "desc" }],
-    });
-    return res.json({ ok: true, items });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, message: err?.message || "Failed" });
   }
 });
 
