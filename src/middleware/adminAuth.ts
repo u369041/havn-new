@@ -1,4 +1,5 @@
-﻿import { Request, Response, NextFunction } from "express";
+﻿// src/middleware/adminAuth.ts
+import { Request, Response, NextFunction } from "express";
 import { requireAuth } from "./auth";
 
 /**
@@ -7,7 +8,10 @@ import { requireAuth } from "./auth";
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   return requireAuth(req, res, () => {
     const user = (req as any).user as { role?: string } | undefined;
-    if (!user || user.role !== "admin") {
+    if (!user) {
+      return res.status(401).json({ ok: false, message: "Unauthorized" });
+    }
+    if (user.role !== "admin") {
       return res.status(403).json({ ok: false, message: "Admin only" });
     }
     return next();

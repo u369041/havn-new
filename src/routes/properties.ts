@@ -2,7 +2,8 @@
 import { Router, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { ListingStatus } from "@prisma/client";
-import { requireAuth, optionalAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, optionalAuth } from "../middleware/auth";
+import { requireAdmin } from "../middleware/adminAuth";
 
 const router = Router();
 
@@ -41,7 +42,7 @@ router.get("/", async (_req: Request, res: Response) => {
         berNo: true,
         saleType: true,
 
-        // Legacy DB column "status" is now exposed as marketStatus
+        // Prisma field (DB column is still "status")
         marketStatus: true,
 
         photos: true,
@@ -53,9 +54,7 @@ router.get("/", async (_req: Request, res: Response) => {
 
     return res.json({ ok: true, items });
   } catch (err: any) {
-    return res
-      .status(500)
-      .json({ ok: false, message: err?.message || "Failed to list properties" });
+    return res.status(500).json({ ok: false, message: err?.message || "Failed to list properties" });
   }
 });
 
@@ -84,9 +83,7 @@ router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
 
     return res.json({ ok: true, item });
   } catch (err: any) {
-    return res
-      .status(500)
-      .json({ ok: false, message: err?.message || "Failed to fetch property" });
+    return res.status(500).json({ ok: false, message: err?.message || "Failed to fetch property" });
   }
 });
 
@@ -94,7 +91,6 @@ router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
  * POST /api/properties
  * Create property (AUTH)
  * - Always creates as DRAFT (listingStatus)
- * - marketStatus is optional and maps to legacy DB column "status"
  */
 router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -117,7 +113,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
     const berNo = b.berNo != null ? String(b.berNo).trim() : null;
     const saleType = b.saleType != null ? String(b.saleType).trim() : null;
 
-    // Rename: use marketStatus (not status) now
+    // IMPORTANT: frontend sends marketStatus now
     const marketStatus = b.marketStatus != null ? String(b.marketStatus).trim() : null;
 
     const description = b.description != null ? String(b.description) : null;
@@ -176,6 +172,72 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * PATCH /api/properties/:id
+ * Update property (AUTH, owner/admin)
+ * ✅ This route fixes: "Cannot PATCH /api/properties/:id"
+ */
+router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const b: any = req.body || {};
+    const data: any = {};
+
+    const setString = (k: string) => {
+      if (b[k] !== undefined) data[k] = b[k] === null ? null : String(b[k]).trim();
+    };
+
+    // Allowed updates
+    setString("slug");
+    setString("title");
+    setString("address1");
+    setString("address2");
+    setString("city");
+    setString("county");
+    setString("eircode");
+    setString("propertyType");
+    setString("ber");
+    setString("berNo");
+    setString("saleType");
+    setString("marketStatus");
+    setString("description");
+
+    if (b.price !== undefined) data.price = Number(b.price);
+    if (b.lat !== undefined) data.lat = b.lat === null ? null : Number(b.lat);
+    if (b.lng !== undefined) data.lng = b.lng === null ? null : Number(b.lng);
+    if (b.bedrooms !== undefined) data.bedrooms = b.bedrooms === null ? null : Number(b.bedrooms);
+    if (b.bathrooms !== undefined) data.bathrooms = b.bathrooms === null ? null : Number(b.bathrooms);
+
+    if (b.features !== undefined) data.features = Array.isArray(b.features) ? b.features.map(String) : [];
+    if (b.photos !== undefined) data.photos = Array.isArray(b.photos) ? b.photos.map(String) : [];
+
+    // Never allow client to set draft/publish lifecycle directly
+    delete data.listingStatus;
+    delete data.publishedAt;
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data,
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      return res.status(409).json({ ok: false, message: "Slug already exists" });
+    }
+    return res.status(500).json({ ok: false, message: err?.message || "Update failed" });
+  }
+});
+
+/**
  * POST /api/properties/:id/publish
  * Owner or admin can publish
  */
@@ -197,7 +259,10 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
 
     const updated = await prisma.property.update({
       where: { id },
-      data: { listingStatus: ListingStatus.PUBLISHED, publishedAt: new Date() },
+      data: {
+        listingStatus: ListingStatus.PUBLISHED,
+        publishedAt: new Date(),
+      },
     });
 
     return res.json({ ok: true, item: updated });
@@ -228,7 +293,10 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
 
     const updated = await prisma.property.update({
       where: { id },
-      data: { listingStatus: ListingStatus.DRAFT, publishedAt: null },
+      data: {
+        listingStatus: ListingStatus.DRAFT,
+        publishedAt: null,
+      },
     });
 
     return res.json({ ok: true, item: updated });
@@ -238,12 +306,14 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
 });
 
 /**
- * Optional admin utility (delete if you don't want it):
- * GET /api/properties/_admin/all  (draft + published)
+ * ADMIN: GET /api/properties/_admin/all
+ * Returns draft + published
  */
 router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => {
   try {
-    const items = await prisma.property.findMany({ orderBy: [{ updatedAt: "desc" }] });
+    const items = await prisma.property.findMany({
+      orderBy: [{ updatedAt: "desc" }],
+    });
     return res.json({ ok: true, items });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Failed" });
