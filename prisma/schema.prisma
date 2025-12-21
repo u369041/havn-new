@@ -16,6 +16,7 @@ enum UserRole {
 
 enum ListingStatus {
   DRAFT
+  PENDING
   PUBLISHED
   ARCHIVED
 }
@@ -43,13 +44,22 @@ model Property {
   features     String[] @default([])
   photos       String[] @default([])
 
+  // lifecycle
   listingStatus ListingStatus @default(DRAFT)
   publishedAt   DateTime?
+  archivedAt    DateTime?
 
-  // ✅ Step 5: soft-delete / archive
-  archivedAt DateTime?
+  // ✅ Step 6 moderation fields
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedById    Int?
+  approvedBy      User?     @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
+  rejectedAt      DateTime?
+  rejectedById    Int?
+  rejectedBy      User?     @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
+  rejectionReason String?
 
-  // ✅ Step 4: revision system (draft revision points to published parent)
+  // Step 4 revision system
   revisionOfId Int?
   revisionOf   Property?  @relation("PropertyRevision", fields: [revisionOfId], references: [id])
   revisions    Property[] @relation("PropertyRevision")
@@ -72,4 +82,8 @@ model User {
   createdAt DateTime @default(now())
 
   properties Property[]
+
+  // moderation relations
+  approvals  Property[] @relation("PropertyApprovedBy")
+  rejections Property[] @relation("PropertyRejectedBy")
 }

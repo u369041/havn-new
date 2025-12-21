@@ -7,11 +7,20 @@ import { requireAdmin } from "../middleware/adminAuth";
 
 const router = Router();
 
+function getUser(req: Request): { id: number; role?: string } | null {
+  return ((req as any).user as any) || null;
+}
+
 function isOwnerOrAdmin(req: Request, userId: number | null): boolean {
-  const u = (req as any).user as { id: number; role?: string } | undefined;
+  const u = getUser(req);
   if (!u) return false;
   if (u.role === "admin") return true;
   return userId != null && u.id === userId;
+}
+
+function isAdmin(req: Request): boolean {
+  const u = getUser(req);
+  return !!u && u.role === "admin";
 }
 
 const mineSelect = {
@@ -25,6 +34,10 @@ const mineSelect = {
   listingStatus: true,
   publishedAt: true,
   archivedAt: true,
+  submittedAt: true,
+  approvedAt: true,
+  rejectedAt: true,
+  rejectionReason: true,
   createdAt: true,
   updatedAt: true,
   revisionOfId: true,
@@ -32,18 +45,25 @@ const mineSelect = {
 
 /**
  * AUTH: GET /api/properties/mine
- * Stable ordering:
- *   - Published first (publishedAt desc)
- *   - Drafts next (updatedAt desc)
- *   - Archived last (archivedAt desc)
+ * Order:
+ *  - Published first
+ *  - Pending next
+ *  - Draft next
+ *  - Archived last
  */
 router.get("/mine", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user as { id: number };
+    const user = getUser(req)!;
 
     const published = await prisma.property.findMany({
       where: { userId: user.id, listingStatus: ListingStatus.PUBLISHED },
       orderBy: [{ publishedAt: "desc" }, { updatedAt: "desc" }],
+      select: mineSelect,
+    });
+
+    const pending = await prisma.property.findMany({
+      where: { userId: user.id, listingStatus: ListingStatus.PENDING },
+      orderBy: [{ submittedAt: "desc" }, { updatedAt: "desc" }],
       select: mineSelect,
     });
 
@@ -59,9 +79,30 @@ router.get("/mine", requireAuth, async (req: Request, res: Response) => {
       select: mineSelect,
     });
 
-    return res.json({ ok: true, items: [...published, ...drafts, ...archived] });
+    return res.json({ ok: true, items: [...published, ...pending, ...drafts, ...archived] });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Failed to load listings" });
+  }
+});
+
+/**
+ * ADMIN: GET /api/properties/_admin/pending
+ * Review queue
+ */
+router.get("/_admin/pending", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const items = await prisma.property.findMany({
+      where: { listingStatus: ListingStatus.PENDING },
+      orderBy: [{ submittedAt: "desc" }, { updatedAt: "desc" }],
+      select: {
+        ...mineSelect,
+        userId: true,
+        user: { select: { id: true, email: true, name: true } },
+      },
+    });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Failed" });
   }
 });
 
@@ -81,7 +122,8 @@ router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => 
 
 /**
  * Step 4: POST /api/properties/:id/start-edit
- * - If ARCHIVED: refuse (must unarchive first)
+ * - If ARCHIVED: refuse (unarchive first)
+ * - If PENDING: refuse (admin must reject or approve first)
  * - If PUBLISHED: create/reuse a DRAFT revision
  * - If DRAFT: return itself
  */
@@ -93,19 +135,21 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus === ListingStatus.ARCHIVED) {
       return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
+
+    if (existing.listingStatus === ListingStatus.PENDING) {
+      return res.status(409).json({ ok: false, message: "Pending review. Admin must approve/reject first." });
     }
 
     if (existing.listingStatus === ListingStatus.DRAFT) {
       return res.json({ ok: true, item: existing, reused: true });
     }
 
-    // published: reuse existing draft revision if present
+    // PUBLISHED: reuse existing draft revision if present
     const priorDraft = await prisma.property.findFirst({
       where: {
         revisionOfId: existing.id,
@@ -115,9 +159,7 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
       orderBy: [{ updatedAt: "desc" }],
     });
 
-    if (priorDraft) {
-      return res.json({ ok: true, item: priorDraft, reused: true });
-    }
+    if (priorDraft) return res.json({ ok: true, item: priorDraft, reused: true });
 
     const revisionSlug = `${existing.slug}--draft-${Date.now()}`;
 
@@ -148,6 +190,13 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
         publishedAt: null,
         archivedAt: null,
 
+        submittedAt: null,
+        approvedAt: null,
+        approvedById: null,
+        rejectedAt: null,
+        rejectedById: null,
+        rejectionReason: null,
+
         userId: existing.userId,
         revisionOfId: existing.id,
       },
@@ -161,7 +210,8 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
 
 /**
  * PATCH /api/properties/:id
- * - If ARCHIVED: refuse (must unarchive first)
+ * - If ARCHIVED: refuse
+ * - If PENDING: refuse (avoid changes mid-review)
  */
 router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -171,12 +221,13 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus === ListingStatus.ARCHIVED) {
       return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
+    if (existing.listingStatus === ListingStatus.PENDING) {
+      return res.status(409).json({ ok: false, message: "Pending review. Admin must approve/reject first." });
     }
 
     const b: any = req.body || {};
@@ -214,6 +265,12 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     delete data.publishedAt;
     delete data.archivedAt;
     delete data.revisionOfId;
+    delete data.submittedAt;
+    delete data.approvedAt;
+    delete data.approvedById;
+    delete data.rejectedAt;
+    delete data.rejectedById;
+    delete data.rejectionReason;
 
     const updated = await prisma.property.update({ where: { id }, data });
     return res.json({ ok: true, item: updated });
@@ -224,11 +281,10 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/properties/:id/publish
- * - If ARCHIVED: refuse
- * - If publishing a DRAFT revision: unpublish parent first
+ * ✅ Step 6: POST /api/properties/:id/submit
+ * Owner/admin submits a DRAFT for review => PENDING
  */
-router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => {
+router.post("/:id/submit", requireAuth, async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
@@ -236,18 +292,157 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus === ListingStatus.ARCHIVED) {
       return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
     }
 
+    if (existing.listingStatus !== ListingStatus.DRAFT) {
+      return res.status(409).json({ ok: false, message: "Only drafts can be submitted." });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: ListingStatus.PENDING,
+        submittedAt: new Date(),
+        rejectedAt: null,
+        rejectedById: null,
+        rejectionReason: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Submit failed" });
+  }
+});
+
+/**
+ * ✅ Step 6: POST /api/properties/:id/approve (ADMIN)
+ * PENDING => PUBLISHED
+ * If approving a revision draft (revisionOfId set):
+ *   - parent must be unpublished first (set to DRAFT)
+ */
+router.post("/:id/approve", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const admin = getUser(req)!;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (existing.listingStatus !== ListingStatus.PENDING) {
+      return res.status(409).json({ ok: false, message: "Only pending listings can be approved." });
+    }
+
+    // If this is a revision of a published parent, unpublish the parent first.
+    if (existing.revisionOfId) {
+      const parent = await prisma.property.findUnique({ where: { id: existing.revisionOfId } });
+      if (parent && parent.listingStatus === ListingStatus.PUBLISHED) {
+        // safety: same owner
+        if (parent.userId !== existing.userId) {
+          return res.status(400).json({ ok: false, message: "Revision owner mismatch" });
+        }
+        await prisma.property.update({
+          where: { id: parent.id },
+          data: { listingStatus: ListingStatus.DRAFT, publishedAt: null },
+        });
+      }
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: ListingStatus.PUBLISHED,
+        publishedAt: new Date(),
+        archivedAt: null,
+
+        approvedAt: new Date(),
+        approvedById: admin.id,
+
+        // clear rejection flags
+        rejectedAt: null,
+        rejectedById: null,
+        rejectionReason: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Approve failed" });
+  }
+});
+
+/**
+ * ✅ Step 6: POST /api/properties/:id/reject (ADMIN)
+ * PENDING => DRAFT with rejectionReason
+ * Body: { reason?: string }
+ */
+router.post("/:id/reject", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const admin = getUser(req)!;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (existing.listingStatus !== ListingStatus.PENDING) {
+      return res.status(409).json({ ok: false, message: "Only pending listings can be rejected." });
+    }
+
+    const reason = req.body?.reason ? String(req.body.reason) : "Needs changes";
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: ListingStatus.DRAFT,
+        submittedAt: null,
+        publishedAt: null,
+
+        rejectedAt: new Date(),
+        rejectedById: admin.id,
+        rejectionReason: reason,
+
+        approvedAt: null,
+        approvedById: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Reject failed" });
+  }
+});
+
+/**
+ * POST /api/properties/:id/publish
+ * ✅ Step 6: Only admins can publish directly.
+ * Users must submit -> approve.
+ */
+router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ ok: false, message: "Publishing requires admin approval. Use /submit." });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
     if (existing.listingStatus === ListingStatus.PUBLISHED) {
       return res.status(409).json({ ok: false, message: "Already published" });
     }
 
+    // If this is a revision, unpublish parent if needed.
     if (existing.revisionOfId) {
       const parent = await prisma.property.findUnique({ where: { id: existing.revisionOfId } });
       if (parent && parent.listingStatus === ListingStatus.PUBLISHED) {
@@ -261,9 +456,17 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
       }
     }
 
+    const admin = getUser(req)!;
+
     const updated = await prisma.property.update({
       where: { id },
-      data: { listingStatus: ListingStatus.PUBLISHED, publishedAt: new Date(), archivedAt: null },
+      data: {
+        listingStatus: ListingStatus.PUBLISHED,
+        publishedAt: new Date(),
+        archivedAt: null,
+        approvedAt: new Date(),
+        approvedById: admin.id,
+      },
     });
 
     return res.json({ ok: true, item: updated });
@@ -274,7 +477,7 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
 
 /**
  * POST /api/properties/:id/unpublish
- * - If ARCHIVED: refuse
+ * - If PENDING: refuse (admin must reject/approve)
  */
 router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -284,16 +487,18 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    if (existing.listingStatus === ListingStatus.ARCHIVED) {
-      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    if (existing.listingStatus === ListingStatus.PENDING) {
+      return res.status(409).json({ ok: false, message: "Pending review. Admin must approve/reject first." });
     }
 
     if (existing.listingStatus === ListingStatus.DRAFT) {
       return res.status(409).json({ ok: false, message: "Already draft" });
+    }
+
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
     }
 
     const updated = await prisma.property.update({
@@ -308,8 +513,7 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
 });
 
 /**
- * ✅ Step 5: POST /api/properties/:id/archive
- * Allowed from DRAFT or PUBLISHED (either way becomes ARCHIVED).
+ * Step 5: archive/unarchive
  */
 router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -319,9 +523,7 @@ router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => 
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus === ListingStatus.ARCHIVED) {
       return res.status(409).json({ ok: false, message: "Already archived" });
@@ -333,6 +535,7 @@ router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => 
         listingStatus: ListingStatus.ARCHIVED,
         archivedAt: new Date(),
         publishedAt: null,
+        submittedAt: null,
       },
     });
 
@@ -342,10 +545,6 @@ router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => 
   }
 });
 
-/**
- * ✅ Step 5: POST /api/properties/:id/unarchive
- * Returns listing to DRAFT (safe default).
- */
 router.post("/:id/unarchive", requireAuth, async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
@@ -354,9 +553,7 @@ router.post("/:id/unarchive", requireAuth, async (req: Request, res: Response) =
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus !== ListingStatus.ARCHIVED) {
       return res.status(409).json({ ok: false, message: "Not archived" });
@@ -368,6 +565,7 @@ router.post("/:id/unarchive", requireAuth, async (req: Request, res: Response) =
         listingStatus: ListingStatus.DRAFT,
         archivedAt: null,
         publishedAt: null,
+        submittedAt: null,
       },
     });
 
@@ -418,7 +616,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, message: "price must be a number" });
     }
 
-    const user = (req as any).user as { id: number } | undefined;
+    const user = getUser(req);
 
     const created = await prisma.property.create({
       data: {
@@ -446,6 +644,12 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
         listingStatus: ListingStatus.DRAFT,
         publishedAt: null,
         archivedAt: null,
+        submittedAt: null,
+        approvedAt: null,
+        approvedById: null,
+        rejectedAt: null,
+        rejectedById: null,
+        rejectionReason: null,
         revisionOfId: null,
       },
     });
@@ -459,7 +663,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * PUBLIC: GET /api/properties
- * Only PUBLISHED (never archived)
+ * Only PUBLISHED
  */
 router.get("/", async (_req: Request, res: Response) => {
   try {
@@ -499,13 +703,9 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 /**
- * GET /api/properties/:slug
- * Public detail:
- *  - Only if PUBLISHED
- * Draft/Archived:
- *  - only owner/admin, otherwise 404
- *
- * IMPORTANT: keep LAST (catch-all)
+ * GET /api/properties/:slug (catch-all LAST)
+ * Public: only published.
+ * Owner/admin: can see draft/pending/archived.
  */
 router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
   try {
@@ -515,12 +715,8 @@ router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
     const item = await prisma.property.findUnique({ where: { slug } });
     if (!item) return res.status(404).json({ ok: false, message: "Property not found" });
 
-    // Public: only published
-    if (item.listingStatus === ListingStatus.PUBLISHED) {
-      return res.json({ ok: true, item });
-    }
+    if (item.listingStatus === ListingStatus.PUBLISHED) return res.json({ ok: true, item });
 
-    // Draft/Archived: hide existence unless owner/admin
     if (!isOwnerOrAdmin(req, item.userId ?? null)) {
       return res.status(404).json({ ok: false, message: "Property not found" });
     }
