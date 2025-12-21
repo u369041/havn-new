@@ -14,11 +14,6 @@ enum UserRole {
   user
 }
 
-enum ListingStatus {
-  DRAFT
-  PUBLISHED
-}
-
 model Property {
   id           Int      @id @default(autoincrement())
   slug         String   @unique
@@ -37,27 +32,26 @@ model Property {
   ber          String?
   berNo        String?  @map("berNo")
   saleType     String?  @map("saleType")
-
-  // Previously: status String?
-  // Keep your old field, but rename it so we can use listingStatus for draft/published.
   marketStatus String?  @map("status")
-
-  // New: Draft vs Published lifecycle
-  listingStatus ListingStatus @default(DRAFT)
-  publishedAt   DateTime?
-
   description  String?
   features     String[] @default([])
   photos       String[] @default([])
+
+  // Draft/published lifecycle
+  listingStatus ListingStatus @default(DRAFT)
+  publishedAt   DateTime?
+
+  // ✅ Step 4: revision system
+  // If this is a DRAFT revision created from a PUBLISHED listing, this points to the original listing id.
+  revisionOfId Int?
+  revisionOf   Property? @relation("PropertyRevision", fields: [revisionOfId], references: [id])
+  revisions    Property[] @relation("PropertyRevision")
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   userId Int?
   user   User? @relation(fields: [userId], references: [id])
-
-  @@index([listingStatus])
-  @@index([publishedAt])
-  @@index([userId])
 
   @@map("Property")
 }
@@ -71,4 +65,9 @@ model User {
   createdAt DateTime @default(now())
 
   properties Property[]
+}
+
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
 }
