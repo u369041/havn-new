@@ -1,4 +1,4 @@
-﻿// src/routes/properties.ts
+﻿﻿// src/routes/properties.ts
 import { Router, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { ListingStatus } from "@prisma/client";
@@ -467,7 +467,44 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
 });
 
 /**
- * Step 5: archive/unarchive
+ * ✅ Step 9.2: archive by SLUG (for frontend my-properties.html)
+ * POST /api/properties/:slug/archive
+ *
+ * Mirrors the existing :id/archive logic.
+ * IMPORTANT: must be defined before GET /:slug catch-all.
+ */
+router.post("/:slug/archive", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const slug = String(req.params.slug || "").trim();
+    if (!slug) return res.status(400).json({ ok: false, message: "Missing slug" });
+
+    const existing = await prisma.property.findUnique({ where: { slug } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) return res.status(403).json({ ok: false, message: "Forbidden" });
+
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Already archived" });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id: existing.id },
+      data: {
+        listingStatus: ListingStatus.ARCHIVED,
+        archivedAt: new Date(),
+        publishedAt: null,
+        submittedAt: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Archive failed" });
+  }
+});
+
+/**
+ * Step 5: archive/unarchive (by ID - existing)
  */
 router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => {
   try {
