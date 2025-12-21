@@ -24,6 +24,7 @@ const mineSelect = {
   photos: true,
   listingStatus: true,
   publishedAt: true,
+  archivedAt: true,
   createdAt: true,
   updatedAt: true,
   revisionOfId: true,
@@ -31,7 +32,10 @@ const mineSelect = {
 
 /**
  * AUTH: GET /api/properties/mine
- * Published first, then drafts (stable ordering)
+ * Stable ordering:
+ *   - Published first (publishedAt desc)
+ *   - Drafts next (updatedAt desc)
+ *   - Archived last (archivedAt desc)
  */
 router.get("/mine", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -49,7 +53,13 @@ router.get("/mine", requireAuth, async (req: Request, res: Response) => {
       select: mineSelect,
     });
 
-    return res.json({ ok: true, items: [...published, ...drafts] });
+    const archived = await prisma.property.findMany({
+      where: { userId: user.id, listingStatus: ListingStatus.ARCHIVED },
+      orderBy: [{ archivedAt: "desc" }, { updatedAt: "desc" }],
+      select: mineSelect,
+    });
+
+    return res.json({ ok: true, items: [...published, ...drafts, ...archived] });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || "Failed to load listings" });
   }
@@ -57,7 +67,6 @@ router.get("/mine", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * ADMIN: GET /api/properties/_admin/all
- * IMPORTANT: must be above "/:slug"
  */
 router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => {
   try {
@@ -71,13 +80,10 @@ router.get("/_admin/all", requireAdmin, async (_req: Request, res: Response) => 
 });
 
 /**
- * ✅ Step 4: POST /api/properties/:id/start-edit
- * If listing is PUBLISHED:
- *  - create (or reuse) a DRAFT revision that points back to the published listing (revisionOfId)
- * If listing is already DRAFT:
- *  - return itself
- *
- * IMPORTANT: must be above "/:slug"
+ * Step 4: POST /api/properties/:id/start-edit
+ * - If ARCHIVED: refuse (must unarchive first)
+ * - If PUBLISHED: create/reuse a DRAFT revision
+ * - If DRAFT: return itself
  */
 router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -91,13 +97,15 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
-    // If already draft, edit it directly
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
+
     if (existing.listingStatus === ListingStatus.DRAFT) {
       return res.json({ ok: true, item: existing, reused: true });
     }
 
-    // Must be published at this point
-    // Reuse existing draft revision if present
+    // published: reuse existing draft revision if present
     const priorDraft = await prisma.property.findFirst({
       where: {
         revisionOfId: existing.id,
@@ -111,7 +119,6 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
       return res.json({ ok: true, item: priorDraft, reused: true });
     }
 
-    // Create new draft revision (copy fields)
     const revisionSlug = `${existing.slug}--draft-${Date.now()}`;
 
     const draft = await prisma.property.create({
@@ -139,6 +146,7 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
 
         listingStatus: ListingStatus.DRAFT,
         publishedAt: null,
+        archivedAt: null,
 
         userId: existing.userId,
         revisionOfId: existing.id,
@@ -153,8 +161,7 @@ router.post("/:id/start-edit", requireAuth, async (req: Request, res: Response) 
 
 /**
  * PATCH /api/properties/:id
- * Update property (AUTH, owner/admin)
- * IMPORTANT: must be above "/:slug"
+ * - If ARCHIVED: refuse (must unarchive first)
  */
 router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -166,6 +173,10 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
 
     if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
     }
 
     const b: any = req.body || {};
@@ -201,6 +212,7 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     // server-controlled fields
     delete data.listingStatus;
     delete data.publishedAt;
+    delete data.archivedAt;
     delete data.revisionOfId;
 
     const updated = await prisma.property.update({ where: { id }, data });
@@ -213,11 +225,8 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * POST /api/properties/:id/publish
- * ✅ Step 4: If publishing a DRAFT revision (revisionOfId set):
- *  - unpublish parent (set to DRAFT)
- *  - publish this draft revision
- *
- * IMPORTANT: must be above "/:slug"
+ * - If ARCHIVED: refuse
+ * - If publishing a DRAFT revision: unpublish parent first
  */
 router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -231,35 +240,30 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
+
     if (existing.listingStatus === ListingStatus.PUBLISHED) {
       return res.status(409).json({ ok: false, message: "Already published" });
     }
 
-    // If draft is a revision of a published parent, unpublish the parent
     if (existing.revisionOfId) {
       const parent = await prisma.property.findUnique({ where: { id: existing.revisionOfId } });
       if (parent && parent.listingStatus === ListingStatus.PUBLISHED) {
-        // safety: same owner
         if (parent.userId !== existing.userId) {
           return res.status(400).json({ ok: false, message: "Revision owner mismatch" });
         }
-
         await prisma.property.update({
           where: { id: parent.id },
-          data: {
-            listingStatus: ListingStatus.DRAFT,
-            publishedAt: null,
-          },
+          data: { listingStatus: ListingStatus.DRAFT, publishedAt: null },
         });
       }
     }
 
     const updated = await prisma.property.update({
       where: { id },
-      data: {
-        listingStatus: ListingStatus.PUBLISHED,
-        publishedAt: new Date(),
-      },
+      data: { listingStatus: ListingStatus.PUBLISHED, publishedAt: new Date(), archivedAt: null },
     });
 
     return res.json({ ok: true, item: updated });
@@ -270,7 +274,7 @@ router.post("/:id/publish", requireAuth, async (req: Request, res: Response) => 
 
 /**
  * POST /api/properties/:id/unpublish
- * IMPORTANT: must be above "/:slug"
+ * - If ARCHIVED: refuse
  */
 router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -284,21 +288,92 @@ router.post("/:id/unpublish", requireAuth, async (req: Request, res: Response) =
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Archived. Unarchive first." });
+    }
+
     if (existing.listingStatus === ListingStatus.DRAFT) {
       return res.status(409).json({ ok: false, message: "Already draft" });
     }
 
     const updated = await prisma.property.update({
       where: { id },
+      data: { listingStatus: ListingStatus.DRAFT, publishedAt: null },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Unpublish failed" });
+  }
+});
+
+/**
+ * ✅ Step 5: POST /api/properties/:id/archive
+ * Allowed from DRAFT or PUBLISHED (either way becomes ARCHIVED).
+ */
+router.post("/:id/archive", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus === ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Already archived" });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
       data: {
-        listingStatus: ListingStatus.DRAFT,
+        listingStatus: ListingStatus.ARCHIVED,
+        archivedAt: new Date(),
         publishedAt: null,
       },
     });
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
-    return res.status(500).json({ ok: false, message: err?.message || "Unpublish failed" });
+    return res.status(500).json({ ok: false, message: err?.message || "Archive failed" });
+  }
+});
+
+/**
+ * ✅ Step 5: POST /api/properties/:id/unarchive
+ * Returns listing to DRAFT (safe default).
+ */
+router.post("/:id/unarchive", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Property not found" });
+
+    if (!isOwnerOrAdmin(req, existing.userId ?? null)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus !== ListingStatus.ARCHIVED) {
+      return res.status(409).json({ ok: false, message: "Not archived" });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: ListingStatus.DRAFT,
+        archivedAt: null,
+        publishedAt: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || "Unarchive failed" });
   }
 });
 
@@ -370,6 +445,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
         userId: user?.id ?? null,
         listingStatus: ListingStatus.DRAFT,
         publishedAt: null,
+        archivedAt: null,
         revisionOfId: null,
       },
     });
@@ -383,7 +459,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * PUBLIC: GET /api/properties
- * PUBLISHED only
+ * Only PUBLISHED (never archived)
  */
 router.get("/", async (_req: Request, res: Response) => {
   try {
@@ -424,9 +500,10 @@ router.get("/", async (_req: Request, res: Response) => {
 
 /**
  * GET /api/properties/:slug
- * Detail:
- *  - PUBLISHED => public
- *  - DRAFT => owner/admin only (otherwise 404)
+ * Public detail:
+ *  - Only if PUBLISHED
+ * Draft/Archived:
+ *  - only owner/admin, otherwise 404
  *
  * IMPORTANT: keep LAST (catch-all)
  */
@@ -438,10 +515,12 @@ router.get("/:slug", optionalAuth, async (req: Request, res: Response) => {
     const item = await prisma.property.findUnique({ where: { slug } });
     if (!item) return res.status(404).json({ ok: false, message: "Property not found" });
 
+    // Public: only published
     if (item.listingStatus === ListingStatus.PUBLISHED) {
       return res.json({ ok: true, item });
     }
 
+    // Draft/Archived: hide existence unless owner/admin
     if (!isOwnerOrAdmin(req, item.userId ?? null)) {
       return res.status(404).json({ ok: false, message: "Property not found" });
     }
