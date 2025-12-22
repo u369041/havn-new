@@ -1,16 +1,16 @@
 ﻿import express from "express";
-import prisma from "../prisma"; // ✅ DEFAULT import (fixes Render error)
+import prisma from "../prisma";
 import { requireAuth } from "../middleware/auth";
 import { requireAdmin } from "../middleware/adminAuth";
+import { ListingStatus } from "@prisma/client";
 
 const router = express.Router();
 
 /**
  * GET /api/properties/mine
- * Returns all listings belonging to the logged-in user
  */
 router.get("/mine", requireAuth, async (req, res) => {
-  const userId = req.user.id;
+  const userId = Number(req.user.id);
 
   const items = await prisma.property.findMany({
     where: { userId },
@@ -22,12 +22,11 @@ router.get("/mine", requireAuth, async (req, res) => {
 
 /**
  * POST /api/properties/:id/submit
- * Owner submits a listing for moderation
- * Allowed: DRAFT → SUBMITTED, REJECTED → SUBMITTED
+ * DRAFT | REJECTED → SUBMITTED
  */
 router.post("/:id/submit", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
-  const userId = req.user.id;
+  const userId = Number(req.user.id);
 
   const property = await prisma.property.findFirst({
     where: { id, userId },
@@ -38,8 +37,8 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
   }
 
   if (
-    property.listingStatus !== "DRAFT" &&
-    property.listingStatus !== "REJECTED"
+    property.listingStatus !== ListingStatus.DRAFT &&
+    property.listingStatus !== ListingStatus.REJECTED
   ) {
     return res.status(400).json({
       ok: false,
@@ -50,7 +49,7 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
   await prisma.property.update({
     where: { id },
     data: {
-      listingStatus: "SUBMITTED",
+      listingStatus: ListingStatus.SUBMITTED,
       submittedAt: new Date(),
       rejectionReason: null,
       rejectedAt: null,
@@ -63,11 +62,11 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
 
 /**
  * POST /api/properties/:id/reject
- * Admin rejects a submitted listing
- * Allowed: SUBMITTED → REJECTED
+ * SUBMITTED → REJECTED
  */
 router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
+  const adminId = Number(req.user.id);
   const { reason } = req.body;
 
   if (!reason || typeof reason !== "string") {
@@ -85,7 +84,7 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
     return res.status(404).json({ ok: false, message: "Property not found" });
   }
 
-  if (property.listingStatus !== "SUBMITTED") {
+  if (property.listingStatus !== ListingStatus.SUBMITTED) {
     return res.status(400).json({
       ok: false,
       message: "Only pending listings can be rejected",
@@ -95,10 +94,10 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   await prisma.property.update({
     where: { id },
     data: {
-      listingStatus: "REJECTED", // ✅ FIXED
+      listingStatus: ListingStatus.REJECTED,
       rejectionReason: reason,
       rejectedAt: new Date(),
-      rejectedById: req.user.id,
+      rejectedById: adminId,
     },
   });
 
@@ -107,11 +106,11 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
 
 /**
  * POST /api/properties/:id/approve
- * Admin approves a submitted listing
- * Allowed: SUBMITTED → PUBLISHED
+ * SUBMITTED → PUBLISHED
  */
 router.post("/:id/approve", requireAuth, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
+  const adminId = Number(req.user.id);
 
   const property = await prisma.property.findUnique({
     where: { id },
@@ -121,7 +120,7 @@ router.post("/:id/approve", requireAuth, requireAdmin, async (req, res) => {
     return res.status(404).json({ ok: false, message: "Property not found" });
   }
 
-  if (property.listingStatus !== "SUBMITTED") {
+  if (property.listingStatus !== ListingStatus.SUBMITTED) {
     return res.status(400).json({
       ok: false,
       message: "Only pending listings can be approved",
@@ -131,9 +130,9 @@ router.post("/:id/approve", requireAuth, requireAdmin, async (req, res) => {
   await prisma.property.update({
     where: { id },
     data: {
-      listingStatus: "PUBLISHED",
+      listingStatus: ListingStatus.PUBLISHED,
       approvedAt: new Date(),
-      approvedById: req.user.id,
+      approvedById: adminId,
     },
   });
 
