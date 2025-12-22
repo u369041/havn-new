@@ -1,5 +1,5 @@
 ﻿import express from "express";
-import { prisma } from "../prisma";
+import prisma from "../prisma"; // ✅ DEFAULT import (fixes Render error)
 import { requireAuth } from "../middleware/auth";
 import { requireAdmin } from "../middleware/adminAuth";
 
@@ -7,6 +7,7 @@ const router = express.Router();
 
 /**
  * GET /api/properties/mine
+ * Returns all listings belonging to the logged-in user
  */
 router.get("/mine", requireAuth, async (req, res) => {
   const userId = req.user.id;
@@ -21,7 +22,8 @@ router.get("/mine", requireAuth, async (req, res) => {
 
 /**
  * POST /api/properties/:id/submit
- * Owner submits listing for moderation
+ * Owner submits a listing for moderation
+ * Allowed: DRAFT → SUBMITTED, REJECTED → SUBMITTED
  */
 router.post("/:id/submit", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
@@ -35,7 +37,10 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
     return res.status(404).json({ ok: false, message: "Property not found" });
   }
 
-  if (property.listingStatus !== "DRAFT" && property.listingStatus !== "REJECTED") {
+  if (
+    property.listingStatus !== "DRAFT" &&
+    property.listingStatus !== "REJECTED"
+  ) {
     return res.status(400).json({
       ok: false,
       message: "Only draft or rejected listings can be submitted",
@@ -59,6 +64,7 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
 /**
  * POST /api/properties/:id/reject
  * Admin rejects a submitted listing
+ * Allowed: SUBMITTED → REJECTED
  */
 router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
@@ -89,7 +95,7 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   await prisma.property.update({
     where: { id },
     data: {
-      listingStatus: "REJECTED",        // ✅ FIXED
+      listingStatus: "REJECTED", // ✅ FIXED
       rejectionReason: reason,
       rejectedAt: new Date(),
       rejectedById: req.user.id,
@@ -102,6 +108,7 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req, res) => {
 /**
  * POST /api/properties/:id/approve
  * Admin approves a submitted listing
+ * Allowed: SUBMITTED → PUBLISHED
  */
 router.post("/:id/approve", requireAuth, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
