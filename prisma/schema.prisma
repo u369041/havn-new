@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,81 +7,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  admin
-  user
-}
-
 enum ListingStatus {
   DRAFT
-  PENDING
+  SUBMITTED
   PUBLISHED
+  REJECTED
   ARCHIVED
 }
 
 model Property {
-  id           Int      @id @default(autoincrement())
-  slug         String   @unique
-  title        String
-  address1     String
-  address2     String?
-  city         String
-  county       String
-  eircode      String?
-  lat          Float?
-  lng          Float?
-  price        Int
-  bedrooms     Int?
-  bathrooms    Int?
-  propertyType String   @map("propertyType")
-  ber          String?
-  berNo        String?  @map("berNo")
-  saleType     String?  @map("saleType")
-  marketStatus String?  @map("status")
-  description  String?
-  features     String[] @default([])
-  photos       String[] @default([])
+  id                Int            @id @default(autoincrement())
+  userId            Int
+  slug              String          @unique
+  title             String
+  address1          String
+  address2          String?
+  city              String
+  county            String
+  eircode           String?
+  lat               Float?
+  lng               Float?
+  price             Int
+  bedrooms          Int?
+  bathrooms         Int?
+  propertyType      String
+  ber               String?
+  berNo             String?
+  saleType          String?
+  marketStatus      String?
+  description       String?
+  features          String[]
+  photos            String[]
 
-  // lifecycle
-  listingStatus ListingStatus @default(DRAFT)
-  publishedAt   DateTime?
-  archivedAt    DateTime?
+  listingStatus     ListingStatus  @default(DRAFT)
 
-  // ✅ Step 6 moderation fields
-  submittedAt     DateTime?
-  approvedAt      DateTime?
-  approvedById    Int?
-  approvedBy      User?     @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
-  rejectedAt      DateTime?
-  rejectedById    Int?
-  rejectedBy      User?     @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
-  rejectionReason String?
+  submittedAt       DateTime?
+  approvedAt        DateTime?
+  approvedById      Int?
+  rejectedAt        DateTime?
+  rejectedById      Int?
+  rejectionReason   String?
 
-  // Step 4 revision system
-  revisionOfId Int?
-  revisionOf   Property?  @relation("PropertyRevision", fields: [revisionOfId], references: [id])
-  revisions    Property[] @relation("PropertyRevision")
+  archivedAt        DateTime?
+  publishedAt       DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userId Int?
-  user   User? @relation(fields: [userId], references: [id])
-
-  @@map("Property")
-}
-
-model User {
-  id        Int      @id @default(autoincrement())
-  name      String?
-  email     String   @unique
-  password  String
-  role      UserRole @default(user)
-  createdAt DateTime @default(now())
-
-  properties Property[]
-
-  // moderation relations
-  approvals  Property[] @relation("PropertyApprovedBy")
-  rejections Property[] @relation("PropertyRejectedBy")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }
