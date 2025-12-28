@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  admin
+  user
+}
+
 enum ListingStatus {
   DRAFT
   SUBMITTED
@@ -15,42 +20,62 @@ enum ListingStatus {
   ARCHIVED
 }
 
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  email     String   @unique
+  password  String
+  role      UserRole @default(user)
+  createdAt DateTime @default(now())
+
+  properties Property[]
+
+  approvals  Property[] @relation("PropertyApprovedBy")
+  rejections Property[] @relation("PropertyRejectedBy")
+}
+
 model Property {
-  id                Int            @id @default(autoincrement())
-  userId            Int
-  slug              String          @unique
-  title             String
-  address1          String
-  address2          String?
-  city              String
-  county            String
-  eircode           String?
-  lat               Float?
-  lng               Float?
-  price             Int
-  bedrooms          Int?
-  bathrooms         Int?
-  propertyType      String
-  ber               String?
-  berNo             String?
-  saleType          String?
-  marketStatus      String?
-  description       String?
-  features          String[]
-  photos            String[]
+  id              Int           @id @default(autoincrement())
+  slug            String        @unique
+  title           String
+  address1        String
+  address2        String?
+  city            String
+  county          String
+  eircode         String?
+  price           Int
+  ber             String?
+  bedrooms        Int?
+  bathrooms       Int?
+  features        String[]
+  description     String?
+  photos          String[]
+  berNo           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  lat             Float?
+  lng             Float?
+  propertyType    String
+  saleType        String?
+  marketStatus    String?
 
-  listingStatus     ListingStatus  @default(DRAFT)
+  listingStatus   ListingStatus @default(DRAFT)
+  publishedAt     DateTime?
+  archivedAt      DateTime?
 
-  submittedAt       DateTime?
-  approvedAt        DateTime?
-  approvedById      Int?
-  rejectedAt        DateTime?
-  rejectedById      Int?
-  rejectionReason   String?
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedById    Int?
+  approvedBy      User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
 
-  archivedAt        DateTime?
-  publishedAt       DateTime?
+  rejectedAt      DateTime?
+  rejectedById    Int?
+  rejectedBy      User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
+  rejectionReason String?
 
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  userId          Int
+  user            User          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([listingStatus])
 }
