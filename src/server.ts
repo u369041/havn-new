@@ -6,6 +6,7 @@ import rateLimit from "express-rate-limit";
 import propertiesRouter from "./routes/properties";
 import authRouter from "./routes/auth";
 import adminRouter from "./routes/admin";
+import uploadsRouter from "./routes/uploads"; // ✅ NEW
 
 const app = express();
 
@@ -36,9 +37,11 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
 });
 
+// ✅ API routes
 app.use("/api/properties", propertiesRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/uploads", uploadsRouter); // ✅ NEW
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, message: "Not found" });
