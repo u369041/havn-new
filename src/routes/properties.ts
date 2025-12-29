@@ -2,7 +2,7 @@
 import prisma from "../prisma";
 import { requireAuth } from "../middleware/auth";
 import { requireAdmin } from "../middleware/adminAuth";
-import { ListingStatus } from "@prisma/client";
+import { ListingStatus, Prisma } from "@prisma/client";
 
 const router = express.Router();
 
@@ -54,7 +54,7 @@ router.get("/", async (req, res) => {
 
     const sort = String(req.query.sort || "newest");
 
-    const where: any = {
+    const where: Prisma.PropertyWhereInput = {
       listingStatus: ListingStatus.PUBLISHED,
       archivedAt: null,
     };
@@ -84,7 +84,7 @@ router.get("/", async (req, res) => {
       ];
     }
 
-    const orderBy =
+    const orderBy: Prisma.PropertyOrderByWithRelationInput =
       sort === "price_asc"
         ? { price: "asc" }
         : sort === "price_desc"
@@ -153,7 +153,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
     const uid = Number(req.user.id);
     const role = String(req.user.role || "");
 
-    const where: any =
+    const where: Prisma.PropertyWhereInput =
       role === "admin"
         ? {}
         : {
@@ -197,8 +197,7 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
         rejectionReason: null,
         rejectedAt: null,
         rejectedById: null,
-        moderationNote: null as any, // safe if field exists; ignored if not
-      } as any,
+      },
     });
 
     res.json({ ok: true, item: updated });
@@ -257,7 +256,6 @@ router.post("/:id/reject", requireAuth, requireAdmin, async (req: any, res) => {
       return res.status(400).json({ ok: false, message: "Only submitted listings can be rejected." });
     }
 
-    // IMPORTANT: We return the listing to DRAFT and keep rejectionReason for owner UX.
     const updated = await prisma.property.update({
       where: { id },
       data: {
