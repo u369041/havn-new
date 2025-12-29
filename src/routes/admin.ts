@@ -1,41 +1,25 @@
-﻿import express from "express";
-import prisma from "../prisma";
-import { requireAuth } from "../middleware/auth";
-import { requireAdmin } from "../middleware/adminAuth";
-import { ListingStatus } from "@prisma/client";
+﻿import { Router } from "express";
+import requireAdminAuth from "../middleware/adminAuth";
+import { prisma } from "../lib/prisma";
 
-const router = express.Router();
+const router = Router();
 
 /**
- * GET /api/admin/pending
- * Returns all submitted listings for moderation.
+ * GET /api/admin/submitted
+ * Admin-only: returns submitted listings.
  */
-router.get("/pending", requireAuth, requireAdmin, async (req, res) => {
-  const items = await prisma.property.findMany({
-    where: { listingStatus: ListingStatus.SUBMITTED },
-    orderBy: { submittedAt: "desc" },
-  });
+router.get("/submitted", requireAdminAuth, async (req, res) => {
+  try {
+    const items = await prisma.property.findMany({
+      where: { listingStatus: "SUBMITTED" },
+      orderBy: { submittedAt: "desc" },
+    });
 
-  res.json({ ok: true, items });
-});
-
-/**
- * GET /api/admin/stats
- * Quick counts for moderation dashboard.
- */
-router.get("/stats", requireAuth, requireAdmin, async (req, res) => {
-  const [draft, submitted, published, rejected, archived] = await Promise.all([
-    prisma.property.count({ where: { listingStatus: ListingStatus.DRAFT } }),
-    prisma.property.count({ where: { listingStatus: ListingStatus.SUBMITTED } }),
-    prisma.property.count({ where: { listingStatus: ListingStatus.PUBLISHED } }),
-    prisma.property.count({ where: { listingStatus: ListingStatus.REJECTED } }),
-    prisma.property.count({ where: { listingStatus: ListingStatus.ARCHIVED } }),
-  ]);
-
-  res.json({
-    ok: true,
-    counts: { draft, submitted, published, rejected, archived },
-  });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("GET /admin/submitted error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
 });
 
 export default router;

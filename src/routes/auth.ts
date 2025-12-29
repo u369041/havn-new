@@ -1,55 +1,40 @@
 ﻿import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
+import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
-import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
 
-function signToken(user: any) {
-  return jwt.sign(
-    { role: user.role },
-    process.env.JWT_SECRET!,
-    {
-      subject: String(user.id),
-      expiresIn: "7d",
-    }
-  );
-}
-
 /**
  * POST /api/auth/login
+ * Body: { email, password }
  */
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body || {};
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
     if (!email || !password) {
-      return res.status(400).json({ ok: false, message: "Missing email/password" });
+      return res.status(400).json({ ok: false, message: "Email and password required" });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      return res.status(401).json({ ok: false, message: "Invalid credentials" });
-    }
+    if (!user) return res.status(401).json({ ok: false, message: "Invalid credentials" });
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return res.status(401).json({ ok: false, message: "Invalid credentials" });
-    }
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ ok: false, message: "Invalid credentials" });
 
-    // ✅ AUTO-VERIFY ADMIN ACCOUNTS
-    if (user.role === "admin" && user.emailVerified === false) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { emailVerified: true },
-      });
-      user.emailVerified = true;
-    }
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ ok: false, message: "Server misconfigured" });
 
-    const token = signToken(user);
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      secret,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
 
-    res.json({
+    return res.json({
       ok: true,
       token,
       user: {
@@ -58,12 +43,12 @@ router.post("/login", async (req, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: user.emailVerified,
+        emailVerified: user.emailVerified ?? false,
       },
     });
-  } catch (e) {
-    console.error("[POST /auth/login] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+  } catch (err: any) {
+    console.error("POST /auth/login error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
@@ -72,51 +57,40 @@ router.post("/login", async (req, res) => {
  */
 router.get("/me", requireAuth, async (req: any, res) => {
   try {
-    const userId = Number(req.user?.id);
+    const userId = req.user.userId;
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        name: true,
-        createdAt: true,
-        emailVerified: true,
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: "User not found" });
+
+    return res.json({
+      ok: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        createdAt: user.createdAt,
+        emailVerified: user.emailVerified ?? false,
       },
     });
-
-    if (!user) return res.status(404).json({ ok: false, message: "Not found" });
-
-    res.json({ ok: true, user });
-  } catch (e) {
-    console.error("[GET /auth/me] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+  } catch (err: any) {
+    console.error("GET /auth/me error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
  * POST /api/auth/request-email-verify
+ * Creates and stores token (no email sending yet).
  */
 router.post("/request-email-verify", requireAuth, async (req: any, res) => {
   try {
-    const userId = Number(req.user?.id);
+    const userId = req.user.userId;
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, role: true, emailVerified: true },
-    });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: "User not found" });
 
-    if (!user) return res.status(404).json({ ok: false, message: "Not found" });
-
-    // ✅ Admin accounts automatically verified
     if (user.role === "admin") {
-      if (!user.emailVerified) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { emailVerified: true },
-        });
-      }
       return res.json({ ok: true, message: "Admin accounts are already verified." });
     }
 
@@ -124,48 +98,48 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
       return res.json({ ok: true, message: "Email already verified." });
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 60); // 1h
+    const verifyToken = cryptoRandomToken(32);
+
+    // Token expires in 30 minutes
+    const exp = new Date(Date.now() + 30 * 60 * 1000);
 
     await prisma.user.update({
-      where: { id: user.id },
+      where: { id: userId },
       data: {
-        emailVerifyToken: token,
-        emailVerifyTokenExp: expiresAt,
+        emailVerifyToken: verifyToken,
+        emailVerifyTokenExp: exp,
       },
     });
 
-    // ✅ Return verify URL (later we’ll email it)
-    const verifyUrl = `https://api.havn.ie/api/auth/verify-email?token=${token}`;
-
-    return res.json({ ok: true, verifyUrl });
-  } catch (e) {
-    console.error("[POST /auth/request-email-verify] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.json({
+      ok: true,
+      message: "Verification token created.",
+      token: verifyToken,
+      exp,
+    });
+  } catch (err: any) {
+    console.error("POST /auth/request-email-verify error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
- * GET /api/auth/verify-email?token=...
+ * POST /api/auth/verify-email
+ * Body: { token }
  */
-router.get("/verify-email", async (req, res) => {
+router.post("/verify-email", async (req, res) => {
   try {
-    const token = String(req.query.token || "");
-    if (!token) {
-      return res.status(400).json({ ok: false, message: "Missing token" });
-    }
+    const token = String(req.body.token || "").trim();
+    if (!token) return res.status(400).json({ ok: false, message: "Token required" });
 
     const user = await prisma.user.findFirst({
-      where: {
-        emailVerifyToken: token,
-      },
+      where: { emailVerifyToken: token },
     });
 
-    if (!user) {
-      return res.status(400).json({ ok: false, message: "Invalid token" });
-    }
+    if (!user) return res.status(400).json({ ok: false, message: "Invalid token" });
 
-    if (!user.emailVerifyTokenExp || user.emailVerifyTokenExp < new Date()) {
+    // Token expired?
+    if (user.emailVerifyTokenExp && user.emailVerifyTokenExp.getTime() < Date.now()) {
       return res.status(400).json({ ok: false, message: "Token expired" });
     }
 
@@ -178,11 +152,20 @@ router.get("/verify-email", async (req, res) => {
       },
     });
 
-    res.json({ ok: true, message: "Email verified successfully." });
-  } catch (e) {
-    console.error("[GET /auth/verify-email] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.json({ ok: true, message: "Email verified." });
+  } catch (err: any) {
+    console.error("POST /auth/verify-email error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
+
+function cryptoRandomToken(length: number) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
 
 export default router;

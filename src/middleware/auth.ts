@@ -1,96 +1,172 @@
-﻿// src/middleware/auth.ts
-import { Request, Response, NextFunction } from "express";
+﻿import { Router } from "express";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
 
-export type AuthedUser = {
-  id: number;
-  email: string;
-  role: "admin" | "user";
-  name: string | null;
-  createdAt: Date;
-};
-
-type JwtPayload = {
-  sub: number | string;
-  role?: "admin" | "user";
-};
-
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
-}
-
-function getBearerToken(req: Request): string | null {
-  const auth = (req.header("authorization") || "").trim();
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : null;
-}
-
-async function attachUserFromToken(token: string): Promise<AuthedUser> {
-  const secret = requireEnv("JWT_SECRET");
-  const decoded = jwt.verify(token, secret) as JwtPayload;
-
-  const userId = Number(decoded?.sub);
-  if (!userId || !Number.isFinite(userId)) {
-    throw new Error("Invalid token subject");
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, role: true, name: true, createdAt: true },
-  });
-
-  if (!user) throw new Error("User not found");
-  return user as AuthedUser;
-}
+const router = Router();
 
 /**
- * Requires Authorization: Bearer <token>
- * Verifies JWT and attaches req.user
+ * POST /api/auth/login
+ * Body: { email, password }
  */
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+router.post("/login", async (req, res) => {
   try {
-    const token = getBearerToken(req);
-    if (!token) return res.status(401).json({ ok: false, message: "Missing Bearer token" });
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
 
-    const user = await attachUserFromToken(token);
-    (req as any).user = user;
+    if (!email || !password) {
+      return res.status(400).json({ ok: false, message: "Email and password required" });
+    }
 
-    return next();
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(401).json({ ok: false, message: "Invalid credentials" });
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ ok: false, message: "Invalid credentials" });
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ ok: false, message: "Server misconfigured" });
+
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      secret,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
+
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        createdAt: user.createdAt,
+        emailVerified: user.emailVerified ?? false,
+      },
+    });
   } catch (err: any) {
-    return res.status(401).json({ ok: false, message: err?.message || "Unauthorized" });
+    console.error("POST /auth/login error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
-}
+});
 
 /**
- * Optional auth:
- * - If bearer token is present and valid, attaches req.user
- * - If missing/invalid, continues as anonymous (never 401)
+ * GET /api/auth/me
  */
-export async function optionalAuth(req: Request, _res: Response, next: NextFunction) {
-  const token = getBearerToken(req);
-  if (!token) return next();
-
+router.get("/me", requireAuth, async (req: any, res) => {
   try {
-    const user = await attachUserFromToken(token);
-    (req as any).user = user;
-  } catch {
-    // Ignore invalid tokens for optional-auth routes
-  }
+    const userId = req.user.userId;
 
-  return next();
-}
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: "User not found" });
+
+    return res.json({
+      ok: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        createdAt: user.createdAt,
+        emailVerified: user.emailVerified ?? false,
+      },
+    });
+  } catch (err: any) {
+    console.error("GET /auth/me error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
- * Requires admin user (JWT)
+ * POST /api/auth/request-email-verify
+ * Creates and stores token
  */
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  await requireAuth(req, res, () => {
-    const user = (req as any).user as AuthedUser | undefined;
-    if (!user) return res.status(401).json({ ok: false, message: "Unauthorized" });
-    if (user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
-    return next();
-  });
+router.post("/request-email-verify", requireAuth, async (req: any, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: "User not found" });
+
+    // Admins are always verified
+    if (user.role === "admin") {
+      return res.json({ ok: true, message: "Admin accounts are already verified." });
+    }
+
+    if (user.emailVerified) {
+      return res.json({ ok: true, message: "Email already verified." });
+    }
+
+    const verifyToken = cryptoRandomToken(32);
+
+    // Expire token in 30 minutes
+    const exp = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerifyToken: verifyToken,
+        emailVerifyTokenExp: exp,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      message: "Verification token created.",
+      token: verifyToken,
+      exp,
+    });
+  } catch (err: any) {
+    console.error("POST /auth/request-email-verify error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * POST /api/auth/verify-email
+ * Body: { token }
+ */
+router.post("/verify-email", async (req, res) => {
+  try {
+    const token = String(req.body.token || "").trim();
+    if (!token) return res.status(400).json({ ok: false, message: "Token required" });
+
+    const user = await prisma.user.findFirst({
+      where: { emailVerifyToken: token },
+    });
+
+    if (!user) return res.status(400).json({ ok: false, message: "Invalid token" });
+
+    // Token expired?
+    if (user.emailVerifyTokenExp && user.emailVerifyTokenExp.getTime() < Date.now()) {
+      return res.status(400).json({ ok: false, message: "Token expired" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        emailVerifyToken: null,
+        emailVerifyTokenExp: null,
+      },
+    });
+
+    return res.json({ ok: true, message: "Email verified." });
+  } catch (err: any) {
+    console.error("POST /auth/verify-email error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+function cryptoRandomToken(length: number) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
 }
+
+export default router;

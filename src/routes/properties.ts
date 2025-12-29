@@ -1,183 +1,233 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { ListingStatus } from "@prisma/client";
-
-// ✅ FIX: requireAuth is a NAMED export in your middleware
-import { requireAuth } from "../middleware/requireAuth";
+import requireAuth from "../middleware/requireAuth"; // ✅ DEFAULT import
 
 const router = Router();
 
-/**
- * Helpers
- */
-function isOwnerOrAdmin(req: any, ownerId: number) {
-  const role = req.user?.role;
-  const userId = Number(req.user?.id);
-  return role === "admin" || userId === ownerId;
+function isOwnerOrAdmin(user: any, ownerId: number) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  return user.userId === ownerId;
 }
 
 /**
  * GET /api/properties/mine
+ * Returns all listings owned by user (admins see all)
  */
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
-    const userId = Number(req.user?.id);
-    const role = req.user?.role;
+    const user = req.user;
 
-    const where: any = role === "admin" ? {} : { userId };
+    const where =
+      user.role === "admin"
+        ? {}
+        : {
+            userId: user.userId,
+          };
 
     const items = await prisma.property.findMany({
       where,
       orderBy: { updatedAt: "desc" },
     });
 
-    res.json({ ok: true, items });
-  } catch (e) {
-    console.error("[GET /properties/mine] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("GET /mine error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
  * GET /api/properties
- * Public browse
+ * Public browse endpoint: returns PUBLISHED listings only.
+ * Supports optional filters & pagination.
  */
 router.get("/", async (req, res) => {
   try {
-    const limit = Math.min(Number(req.query.limit || 24), 100);
-    const page = Math.max(Number(req.query.page || 1), 1);
-    const skip = (page - 1) * limit;
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(
+      Math.max(parseInt(String(req.query.limit || "12"), 10), 1),
+      50
+    );
 
-    const items = await prisma.property.findMany({
-      where: {
-        listingStatus: ListingStatus.PUBLISHED,
-        archivedAt: null,
-      },
-      orderBy: { publishedAt: "desc" },
-      skip,
-      take: limit,
-    });
+    const where: any = {
+      listingStatus: "PUBLISHED",
+    };
 
-    const total = await prisma.property.count({
-      where: {
-        listingStatus: ListingStatus.PUBLISHED,
-        archivedAt: null,
-      },
-    });
+    // optional filters
+    const q = String(req.query.q || "").trim();
+    const county = String(req.query.county || "").trim();
+    const city = String(req.query.city || "").trim();
+    const type = String(req.query.type || "").trim();
+    const minPrice = req.query.minPrice ? parseInt(String(req.query.minPrice), 10) : null;
+    const maxPrice = req.query.maxPrice ? parseInt(String(req.query.maxPrice), 10) : null;
 
-    res.json({ ok: true, page, limit, total, items });
-  } catch (e) {
-    console.error("[GET /properties] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: "insensitive" } },
+        { city: { contains: q, mode: "insensitive" } },
+        { county: { contains: q, mode: "insensitive" } },
+        { eircode: { contains: q, mode: "insensitive" } },
+      ];
+    }
+
+    if (county) where.county = { contains: county, mode: "insensitive" };
+    if (city) where.city = { contains: city, mode: "insensitive" };
+    if (type) where.propertyType = type;
+
+    if (minPrice !== null || maxPrice !== null) {
+      where.price = {};
+      if (minPrice !== null) where.price.gte = minPrice;
+      if (maxPrice !== null) where.price.lte = maxPrice;
+    }
+
+    const [total, items] = await Promise.all([
+      prisma.property.count({ where }),
+      prisma.property.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { publishedAt: "desc" },
+      }),
+    ]);
+
+    return res.json({ ok: true, page, limit, total, items });
+  } catch (err: any) {
+    console.error("GET /api/properties error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
- * GET /api/properties/:id
- * Public detail (published only)
+ * GET /api/properties/:slug
+ * Public: published only.
+ * Owners/admin: can view drafts/archived etc.
  */
-router.get("/:id", async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
-
+router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
-    const prop = await prisma.property.findUnique({ where: { id } });
-    if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
+    const slug = String(req.params.slug);
+    const user = req.user || null;
 
-    // Public: only published and not archived
-    if (prop.listingStatus !== ListingStatus.PUBLISHED || prop.archivedAt) {
+    const property = await prisma.property.findUnique({
+      where: { slug },
+    });
+
+    if (!property) {
       return res.status(404).json({ ok: false, message: "Not found" });
     }
 
-    return res.json({ ok: true, item: prop });
-  } catch (e) {
-    console.error("[GET /properties/:id] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    if (property.listingStatus !== "PUBLISHED") {
+      if (!user || !isOwnerOrAdmin(user, property.userId)) {
+        return res.status(404).json({ ok: false, message: "Not found" });
+      }
+    }
+
+    return res.json({ ok: true, item: property });
+  } catch (err: any) {
+    console.error("GET /properties/:slug error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
  * POST /api/properties
- * Create draft (auth required)
+ * Create new draft listing (owner = logged in user)
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
-    const userId = Number(req.user?.id);
+    const user = req.user;
 
-    const data = req.body || {};
-    if (!data.title || !data.slug) {
-      return res.status(400).json({ ok: false, message: "Missing required fields" });
+    const payload = req.body || {};
+    const slug = String(payload.slug || "").trim();
+    if (!slug) {
+      return res.status(400).json({ ok: false, message: "Missing slug" });
     }
 
     const created = await prisma.property.create({
       data: {
-        ...data,
-        userId,
-        listingStatus: ListingStatus.DRAFT,
+        slug,
+        title: payload.title || "Untitled listing",
+        address1: payload.address1 || "",
+        address2: payload.address2 || null,
+        city: payload.city || "",
+        county: payload.county || "",
+        eircode: payload.eircode || null,
+        price: payload.price || 0,
+        ber: payload.ber || null,
+        berNo: payload.berNo || null,
+        bedrooms: payload.bedrooms || null,
+        bathrooms: payload.bathrooms || null,
+        propertyType: payload.propertyType || "house",
+        saleType: payload.saleType || null,
+        marketStatus: payload.marketStatus || null,
+        description: payload.description || null,
+        features: Array.isArray(payload.features) ? payload.features : [],
+        photos: Array.isArray(payload.photos) ? payload.photos : [],
+        listingStatus: "DRAFT",
+        userId: user.userId,
       },
     });
 
-    res.json({ ok: true, item: created });
-  } catch (e) {
-    console.error("[POST /properties] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.json({ ok: true, item: created });
+  } catch (err: any) {
+    console.error("POST /properties error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
- * POST /api/properties/:id/submit
- * ✅ Updated: blocks unverified users (unless admin)
+ * PATCH /api/properties/:id
+ * Update draft listing
  */
-router.post("/:id/submit", requireAuth, async (req: any, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
-
+router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
-    const prop = await prisma.property.findUnique({ where: { id } });
-    if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
+    const id = parseInt(String(req.params.id), 10);
+    const user = req.user;
 
-    if (!isOwnerOrAdmin(req, prop.userId)) {
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+
+    if (!isOwnerOrAdmin(user, existing.userId)) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
-    // ✅ EMAIL VERIFIED CHECK (unless admin)
-    const role = req.user?.role;
-    const currentUserId = Number(req.user?.id);
-
-    if (role !== "admin") {
-      const user = await prisma.user.findUnique({
-        where: { id: currentUserId },
-        select: { emailVerified: true },
-      });
-
-      if (!user?.emailVerified) {
-        return res.status(403).json({
-          ok: false,
-          message: "Please verify your email before submitting a property.",
-          code: "EMAIL_NOT_VERIFIED",
-        });
-      }
+    if (existing.listingStatus === "PUBLISHED") {
+      return res
+        .status(400)
+        .json({ ok: false, message: "Published listings cannot be edited directly." });
     }
 
-    if (prop.listingStatus !== ListingStatus.DRAFT && prop.listingStatus !== ListingStatus.REJECTED) {
-      return res.status(400).json({ ok: false, message: "Only draft/rejected listings can be submitted." });
-    }
+    const payload = req.body || {};
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        listingStatus: ListingStatus.SUBMITTED,
-        submittedAt: new Date(),
-        rejectionReason: null,
-        rejectedAt: null,
-        rejectedById: null,
+        title: payload.title ?? existing.title,
+        address1: payload.address1 ?? existing.address1,
+        address2: payload.address2 ?? existing.address2,
+        city: payload.city ?? existing.city,
+        county: payload.county ?? existing.county,
+        eircode: payload.eircode ?? existing.eircode,
+        price: payload.price ?? existing.price,
+        ber: payload.ber ?? existing.ber,
+        berNo: payload.berNo ?? existing.berNo,
+        bedrooms: payload.bedrooms ?? existing.bedrooms,
+        bathrooms: payload.bathrooms ?? existing.bathrooms,
+        propertyType: payload.propertyType ?? existing.propertyType,
+        saleType: payload.saleType ?? existing.saleType,
+        marketStatus: payload.marketStatus ?? existing.marketStatus,
+        description: payload.description ?? existing.description,
+        features: Array.isArray(payload.features) ? payload.features : existing.features,
+        photos: Array.isArray(payload.photos) ? payload.photos : existing.photos,
       },
     });
 
-    res.json({ ok: true, item: updated });
-  } catch (e) {
-    console.error("[POST /properties/:id/submit] error:", e);
-    res.status(500).json({ ok: false, message: "Server error" });
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("PATCH /properties/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
