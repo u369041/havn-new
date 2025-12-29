@@ -28,6 +28,11 @@ model User {
   role      UserRole @default(user)
   createdAt DateTime @default(now())
 
+  // ✅ Email verification fields (Step 10.3)
+  emailVerified    Boolean   @default(false)
+  emailVerifyToken String?   @unique
+  emailVerifySentAt DateTime?
+
   properties Property[]
 
   approvals  Property[] @relation("PropertyApprovedBy")
