@@ -1,18 +1,19 @@
 ﻿import { Router, Request, Response } from "express";
-import prisma from "../prisma"; // ✅ default import (your project uses this)
-import requireAuth from "../middlewares/requireAuth"; // ✅ PLURAL path (FIX)
+import prisma from "../prisma"; // ✅ default import (your project structure)
+import requireAuth from "../middleware/requireAuth"; // ✅ correct path + default export (FIX)
 
 const router = Router();
 
 /**
  * Helper to safely read req.user added by requireAuth
+ * Your middleware attaches req.user = { userId, role, email, raw }
  */
 const getUserId = (req: Request): number => {
   const u = (req as any).user;
-  if (!u || !u.id) {
+  if (!u || !u.userId) {
     throw new Error("Authenticated user missing on request");
   }
-  return u.id;
+  return Number(u.userId);
 };
 
 /**
@@ -32,6 +33,7 @@ router.get("/", async (_req: Request, res: Response) => {
 
 /**
  * GET /api/properties/mine
+ * Logged-in user's listings
  */
 router.get("/mine", requireAuth, async (req: Request, res: Response) => {
   const userId = getUserId(req);
@@ -46,6 +48,7 @@ router.get("/mine", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * GET /api/properties/:slug
+ * Public property lookup by slug
  */
 router.get("/:slug", async (req: Request, res: Response) => {
   const { slug } = req.params;
@@ -63,7 +66,7 @@ router.get("/:slug", async (req: Request, res: Response) => {
 
 /**
  * POST /api/properties
- * Create new listing draft
+ * Create a new listing draft
  */
 router.post("/", requireAuth, async (req: Request, res: Response) => {
   const userId = getUserId(req);
@@ -89,14 +92,16 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/properties/:id
- * Update existing draft
+ * Update draft listing
  */
 router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const userId = getUserId(req);
 
   const existing = await prisma.property.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ message: "Not found" });
+  if (!existing) {
+    return res.status(404).json({ message: "Not found" });
+  }
 
   if (existing.userId !== userId) {
     return res.status(403).json({ message: "Forbidden" });
@@ -123,14 +128,18 @@ router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
 
 /**
  * ✅ POST /api/properties/:id/submit
- * Draft → Pending
+ * Draft → Submitted (awaiting admin review)
+ *
+ * This replaces the old "pending" idea; your Prisma enum uses SUBMITTED.
  */
 router.post("/:id/submit", requireAuth, async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const userId = getUserId(req);
 
   const existing = await prisma.property.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ message: "Not found" });
+  if (!existing) {
+    return res.status(404).json({ message: "Not found" });
+  }
 
   if (existing.userId !== userId) {
     return res.status(403).json({ message: "Forbidden" });
@@ -145,10 +154,11 @@ router.post("/:id/submit", requireAuth, async (req: Request, res: Response) => {
   const updated = await prisma.property.update({
     where: { id },
     data: {
-      listingStatus: "PENDING",
+      listingStatus: "SUBMITTED",
     },
   });
 
+  // keep response shape consistent with your frontend expectation
   res.json({ item: updated });
 });
 
