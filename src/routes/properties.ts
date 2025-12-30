@@ -5,41 +5,6 @@ import { prisma } from "../lib/prisma";
 const router = Router();
 
 /**
- * ✅ DEBUG: ownership check (TEMP)
- * GET /api/properties/:id/_debug-owner
- */
-router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid id" });
-    }
-
-    const property = await prisma.property.findUnique({
-      where: { id },
-      select: { id: true, userId: true, slug: true, listingStatus: true },
-    });
-
-    if (!property) {
-      return res.status(404).json({ ok: false, message: "Not found" });
-    }
-
-    const userId = Number(req.user?.userId);
-    const isOwner = userId === property.userId;
-
-    return res.json({
-      ok: true,
-      tokenUser: req.user,
-      property,
-      computed: { userId, ownerId: property.userId, isOwner },
-    });
-  } catch (err: any) {
-    console.error("DEBUG OWNER ERROR", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
  * ✅ GET /api/properties
  * Public feed: PUBLISHED only
  */
