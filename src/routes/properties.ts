@@ -5,29 +5,63 @@ import { prisma } from "../lib/prisma";
 const router = Router();
 
 /**
- * Helpers
+ * ✅ DEBUG: ownership check (TEMP)
+ * GET /api/properties/:id/_debug-owner
+ *
+ * Returns:
+ * - req.user.userId
+ * - property.userId
+ * - isOwner boolean
+ *
+ * We will remove this after fixing.
  */
-const okItem = (data: any) => data?.item || data?.property || data?.data || data;
+router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
 
-function isOwnerOrAdmin(user: any, property: any) {
-  if (!user || !property) return false;
-  if (user.role === "ADMIN") return true;
-  return Number(property.userId) === Number(user.id);
-}
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, userId: true, slug: true, listingStatus: true },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+
+    const userId = Number(req.user?.userId);
+    const isOwner = userId === property.userId;
+
+    return res.json({
+      ok: true,
+      tokenUser: req.user,
+      property,
+      computed: {
+        userId,
+        ownerId: property.userId,
+        isOwner,
+      },
+    });
+  } catch (err: any) {
+    console.error("DEBUG OWNER ERROR", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
  * ✅ GET /api/properties
- * Public listings feed — only PUBLISHED should be returned publicly.
+ * Public listings feed
  */
 router.get("/", async (req, res) => {
   try {
-    const limit = Number(req.query.limit || 24);
-    const safeLimit = Math.max(1, Math.min(100, limit));
+    const limit = Math.min(Number(req.query.limit || 12), 50);
 
     const items = await prisma.property.findMany({
       where: { listingStatus: "PUBLISHED" },
       orderBy: { publishedAt: "desc" },
-      take: safeLimit,
+      take: limit,
     });
 
     return res.json({ ok: true, items });
@@ -39,20 +73,15 @@ router.get("/", async (req, res) => {
 
 /**
  * ✅ GET /api/properties/mine
- * Auth required — returns listings for current user (admin gets all).
+ * Auth-only: returns user's properties
  */
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
-    const user = req.user;
-
-    const where =
-      user.role === "ADMIN"
-        ? {}
-        : { userId: user.id };
+    const userId = req.user.userId;
 
     const items = await prisma.property.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
+      where: { userId },
+      orderBy: { updatedAt: "desc" },
     });
 
     return res.json({ ok: true, items });
@@ -64,35 +93,23 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ GET /api/properties/:slug
- * Public detail page — if published, return publicly.
- * If not published, allow owner/admin via token.
+ * Public property detail
  */
-router.get("/:slug", async (req: any, res) => {
-  const slug = String(req.params.slug || "").trim();
-
+router.get("/:slug", async (req, res) => {
   try {
-    const item = await prisma.property.findUnique({ where: { slug } });
+    const slug = String(req.params.slug);
+
+    const item = await prisma.property.findUnique({
+      where: { slug },
+    });
+
     if (!item) return res.status(404).json({ ok: false, message: "Not found" });
 
-    // Published listings are public
-    if (item.listingStatus === "PUBLISHED") {
-      return res.json({ ok: true, item });
+    if (item.listingStatus !== "PUBLISHED") {
+      return res.status(404).json({ ok: false, message: "Not found" });
     }
 
-    // Otherwise require auth + owner/admin
-    // We attempt to read token via Authorization header if present
-    const auth = req.headers.authorization || "";
-    const hasBearer = auth.toLowerCase().startsWith("bearer ");
-
-    if (!hasBearer) {
-      return res.status(401).json({ ok: false, message: "Unauthorized" });
-    }
-
-    // Reuse requireAuth logic by importing it? (we can't here because it's middleware)
-    // So easiest: ask frontend to use /mine when editing.
-    // For safety we still block direct access here for non-published listings:
-    return res.status(401).json({ ok: false, message: "Unauthorized" });
-
+    return res.json({ ok: true, item });
   } catch (err: any) {
     console.error("GET /properties/:slug error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -101,42 +118,65 @@ router.get("/:slug", async (req: any, res) => {
 
 /**
  * ✅ POST /api/properties
- * Create draft listing
+ * Create DRAFT listing
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
-    const user = req.user;
-    const payload = req.body || {};
+    const userId = req.user.userId;
 
-    // Basic slug uniqueness enforced at DB level
+    const {
+      slug,
+      title,
+      address1,
+      address2,
+      city,
+      county,
+      eircode,
+      price,
+      status,
+      propertyType,
+      bedrooms,
+      bathrooms,
+      size,
+      sizeUnits,
+      features,
+      description,
+      photos,
+    } = req.body || {};
+
+    if (!slug || !title || !address1 || !city || !county || !eircode || !price) {
+      return res.status(400).json({ ok: false, message: "Missing required fields" });
+    }
+
+    const existingSlug = await prisma.property.findUnique({ where: { slug } });
+    if (existingSlug) {
+      return res.status(409).json({ ok: false, message: "Slug already exists" });
+    }
+
     const created = await prisma.property.create({
       data: {
-        userId: user.id,
-        slug: payload.slug,
-        title: payload.title,
-        address1: payload.address1,
-        address2: payload.address2 || null,
-        city: payload.city,
-        county: payload.county,
-        eircode: payload.eircode,
-        price: payload.price,
-        marketStatus: payload.marketStatus || payload.status || "for-sale",
-        propertyType: payload.propertyType || "house",
-        bedrooms: payload.bedrooms ?? null,
-        bathrooms: payload.bathrooms ?? null,
-        features: Array.isArray(payload.features) ? payload.features : [],
-        description: payload.description || "",
-        photos: Array.isArray(payload.photos) ? payload.photos : [],
+        userId,
+        slug,
+        title,
+        address1,
+        address2,
+        city,
+        county,
+        eircode,
+        price: Number(price),
+        marketStatus: status || "for-sale",
+        propertyType: propertyType || "house",
+        bedrooms: bedrooms != null ? Number(bedrooms) : null,
+        bathrooms: bathrooms != null ? Number(bathrooms) : null,
+        features: Array.isArray(features) ? features : [],
+        description: description || "",
+        photos: Array.isArray(photos) ? photos : [],
         listingStatus: "DRAFT",
       },
     });
 
-    return res.json({ ok: true, item: created });
+    return res.json({ ok: true, property: created });
   } catch (err: any) {
-    // Unique constraint slug error
-    if (String(err?.code) === "P2002") {
-      return res.status(409).json({ ok: false, message: "Slug already exists" });
-    }
     console.error("POST /properties error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
@@ -144,102 +184,54 @@ router.post("/", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ PATCH /api/properties/:id
- * Update listing (only DRAFT or REJECTED should be editable)
+ * Update DRAFT listing
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
-  const id = Number(req.params.id);
-  const payload = req.body || {};
-
   try {
-    const user = req.user;
+    const id = Number(req.params.id);
+    const userId = req.user.userId;
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
 
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
-    if (!isOwnerOrAdmin(user, existing)) {
+    if (existing.userId !== userId) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
-    const status = String(existing.listingStatus || "DRAFT").toUpperCase();
-    if (status !== "DRAFT" && status !== "REJECTED") {
-      return res.status(409).json({ ok: false, message: `Cannot edit listing in status ${status}` });
+    if (existing.listingStatus !== "DRAFT") {
+      return res.status(409).json({ ok: false, message: "Only drafts can be edited" });
     }
+
+    const payload = req.body || {};
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        slug: payload.slug,
-        title: payload.title,
-        address1: payload.address1,
-        address2: payload.address2 || null,
-        city: payload.city,
-        county: payload.county,
-        eircode: payload.eircode,
-        price: payload.price,
-        marketStatus: payload.marketStatus || payload.status || existing.marketStatus,
-        propertyType: payload.propertyType || existing.propertyType,
-        bedrooms: payload.bedrooms ?? null,
-        bathrooms: payload.bathrooms ?? null,
-        features: Array.isArray(payload.features) ? payload.features : [],
-        description: payload.description || "",
-        photos: Array.isArray(payload.photos) ? payload.photos : [],
-        // Do not change listingStatus here
+        slug: payload.slug ?? existing.slug,
+        title: payload.title ?? existing.title,
+        address1: payload.address1 ?? existing.address1,
+        address2: payload.address2 ?? existing.address2,
+        city: payload.city ?? existing.city,
+        county: payload.county ?? existing.county,
+        eircode: payload.eircode ?? existing.eircode,
+        price: payload.price != null ? Number(payload.price) : existing.price,
+        marketStatus: payload.status ?? existing.marketStatus,
+        propertyType: payload.propertyType ?? existing.propertyType,
+        bedrooms: payload.bedrooms != null ? Number(payload.bedrooms) : existing.bedrooms,
+        bathrooms: payload.bathrooms != null ? Number(payload.bathrooms) : existing.bathrooms,
+        features: Array.isArray(payload.features) ? payload.features : existing.features,
+        description: payload.description ?? existing.description,
+        photos: Array.isArray(payload.photos) ? payload.photos : existing.photos,
       },
     });
 
-    return res.json({ ok: true, item: updated });
+    return res.json({ ok: true, property: updated });
   } catch (err: any) {
-    if (String(err?.code) === "P2002") {
-      return res.status(409).json({ ok: false, message: "Slug already exists" });
-    }
     console.error("PATCH /properties/:id error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
- * ✅ POST /api/properties/:id/submit
- * DRAFT → SUBMITTED
- * ✅ REJECTED → SUBMITTED (resubmission flow)
- */
-router.post("/:id/submit", requireAuth, async (req: any, res) => {
-  const id = Number(req.params.id);
-
-  try {
-    const user = req.user;
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-
-    if (!isOwnerOrAdmin(user, existing)) {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
-    const status = String(existing.listingStatus || "DRAFT").toUpperCase();
-
-    // ✅ Allow submit from DRAFT or REJECTED only
-    if (status !== "DRAFT" && status !== "REJECTED") {
-      return res.status(409).json({
-        ok: false,
-        message: `Cannot submit listing in status ${status}`,
-      });
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        listingStatus: "SUBMITTED",
-        submittedAt: new Date(),
-
-        // ✅ clear rejection state when resubmitting
-        rejectionReason: null,
-        rejectedAt: null,
-      },
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("POST /properties/:id/submit error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
