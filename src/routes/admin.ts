@@ -5,6 +5,26 @@ import { prisma } from "../lib/prisma";
 const router = Router();
 
 /**
+ * ✅ GET /api/admin/listings
+ * Admin-only: returns ALL listings (any status)
+ */
+router.get("/listings", requireAdminAuth, async (_req, res) => {
+  try {
+    const items = await prisma.property.findMany({
+      orderBy: [
+        { listingStatus: "asc" },
+        { createdAt: "desc" },
+      ],
+    });
+
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("GET /admin/listings error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
  * GET /api/admin/submitted
  * Admin-only: returns submitted listings.
  */
