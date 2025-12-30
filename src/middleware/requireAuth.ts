@@ -15,16 +15,17 @@ type AuthMiddleware = ((req: any, res: Response, next: NextFunction) => any) & {
 /**
  * Strict auth middleware.
  * Requires Authorization: Bearer <token>
- * Sets req.user = decoded JWT payload.
  */
-const requireAuth = (function (req: any, res: Response, next: NextFunction) {
+const requireAuth: AuthMiddleware = (req: any, res: Response, next: NextFunction) => {
   try {
     const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer ")) {
-      return res.status(401).json({ ok: false, message: "Missing Bearer token" });
+    const parts = header.split(" ");
+
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
+      return res.status(401).json({ ok: false, message: "Missing token" });
     }
 
-    const token = header.replace("Bearer ", "").trim();
+    const token = parts[1];
     const secret = process.env.JWT_SECRET;
 
     if (!secret) {
@@ -35,57 +36,83 @@ const requireAuth = (function (req: any, res: Response, next: NextFunction) {
     const decoded = jwt.verify(token, secret);
     const payload: any = decoded;
 
-    const userId = payload.sub ? parseInt(payload.sub, 10) : payload.userId;
+    /**
+     * ✅ IMPORTANT FIX:
+     * Some JWTs use:
+     * - sub
+     * - userId
+     * - id
+     *
+     * We support all of them and force numeric.
+     */
+    const rawId =
+      payload.sub ??
+      payload.userId ??
+      payload.id ??
+      null;
+
+    const userId = rawId ? parseInt(String(rawId), 10) : NaN;
+
+    if (!Number.isFinite(userId)) {
+      console.error("Invalid userId in token payload:", payload);
+      return res.status(401).json({ ok: false, message: "Invalid token payload" });
+    }
 
     req.user = {
       userId,
       role: payload.role || "user",
       email: payload.email || null,
       raw: payload,
-    } satisfies UserPayload;
+    } as UserPayload;
 
     return next();
   } catch (err: any) {
+    console.error("Auth error:", err?.message || err);
     return res.status(401).json({ ok: false, message: "Invalid token" });
   }
-}) as AuthMiddleware;
+};
 
 /**
  * Optional auth middleware.
- * If valid token => req.user set
- * If no token/invalid => req.user = null, continues
+ * If token exists, sets req.user. If not, continues.
  */
-requireAuth.optional = function optionalAuth(req: any, res: Response, next: NextFunction) {
+requireAuth.optional = (req: any, res: Response, next: NextFunction) => {
   try {
     const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer ")) {
-      req.user = null;
+    const parts = header.split(" ");
+
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
       return next();
     }
 
-    const token = header.replace("Bearer ", "").trim();
+    const token = parts[1];
     const secret = process.env.JWT_SECRET;
 
     if (!secret) {
-      req.user = null;
       return next();
     }
 
     const decoded = jwt.verify(token, secret);
     const payload: any = decoded;
 
-    const userId = payload.sub ? parseInt(payload.sub, 10) : payload.userId;
+    const rawId =
+      payload.sub ??
+      payload.userId ??
+      payload.id ??
+      null;
+
+    const userId = rawId ? parseInt(String(rawId), 10) : NaN;
+    if (!Number.isFinite(userId)) return next();
 
     req.user = {
       userId,
       role: payload.role || "user",
       email: payload.email || null,
       raw: payload,
-    } satisfies UserPayload;
+    } as UserPayload;
 
     return next();
-  } catch (err) {
-    req.user = null;
+  } catch {
     return next();
   }
 };
