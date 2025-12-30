@@ -7,13 +7,6 @@ const router = Router();
 /**
  * ✅ DEBUG: ownership check (TEMP)
  * GET /api/properties/:id/_debug-owner
- *
- * Returns:
- * - req.user.userId
- * - property.userId
- * - isOwner boolean
- *
- * We will remove this after fixing.
  */
 router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
   try {
@@ -38,11 +31,7 @@ router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
       ok: true,
       tokenUser: req.user,
       property,
-      computed: {
-        userId,
-        ownerId: property.userId,
-        isOwner,
-      },
+      computed: { userId, ownerId: property.userId, isOwner },
     });
   } catch (err: any) {
     console.error("DEBUG OWNER ERROR", err);
@@ -52,7 +41,7 @@ router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ GET /api/properties
- * Public listings feed
+ * Public feed: PUBLISHED only
  */
 router.get("/", async (req, res) => {
   try {
@@ -73,7 +62,7 @@ router.get("/", async (req, res) => {
 
 /**
  * ✅ GET /api/properties/mine
- * Auth-only: returns user's properties
+ * Auth-only: returns user's listings
  */
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
@@ -92,8 +81,49 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * ✅ GET /api/properties/:id  (NUMERIC ONLY)
+ * Returns:
+ * - PUBLISHED to everyone
+ * - DRAFT/SUBMITTED only to owner/admin
+ *
+ * IMPORTANT:
+ * This MUST come BEFORE the slug route.
+ */
+router.get("/:id(\\d+)", requireAuth.optional, async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const item = await prisma.property.findUnique({ where: { id } });
+    if (!item) return res.status(404).json({ ok: false, message: "Not found" });
+
+    // PUBLISHED is public
+    if (item.listingStatus === "PUBLISHED") {
+      return res.json({ ok: true, item });
+    }
+
+    // Everything else requires owner/admin
+    const userId = Number(req.user?.userId);
+    const role = String(req.user?.role || "user").toLowerCase();
+    const isAdmin = role === "admin";
+    const isOwner = Number.isFinite(userId) && userId === item.userId;
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    return res.json({ ok: true, item });
+  } catch (err: any) {
+    console.error("GET /properties/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
  * ✅ GET /api/properties/:slug
- * Public property detail
+ * Public slug detail (PUBLISHED only)
  */
 router.get("/:slug", async (req, res) => {
   try {
@@ -118,7 +148,7 @@ router.get("/:slug", async (req, res) => {
 
 /**
  * ✅ POST /api/properties
- * Create DRAFT listing
+ * Create draft
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
@@ -137,8 +167,6 @@ router.post("/", requireAuth, async (req: any, res) => {
       propertyType,
       bedrooms,
       bathrooms,
-      size,
-      sizeUnits,
       features,
       description,
       photos,
@@ -184,7 +212,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ PATCH /api/properties/:id
- * Update DRAFT listing
+ * Update draft
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
