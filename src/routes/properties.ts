@@ -1,14 +1,25 @@
-﻿import { Router } from "express";
-import { prisma } from "../prisma";
+﻿import { Router, Request, Response } from "express";
+import prisma from "../prisma"; // ✅ default import (FIX)
 import { requireAuth } from "../middleware/requireAuth";
 
 const router = Router();
 
 /**
+ * Helper to safely read req.user added by requireAuth
+ */
+const getUserId = (req: Request): number => {
+  const u = (req as any).user;
+  if (!u || !u.id) {
+    throw new Error("Authenticated user missing on request");
+  }
+  return u.id;
+};
+
+/**
  * GET /api/properties
  * Public listings
  */
-router.get("/", async (_req, res) => {
+router.get("/", async (_req: Request, res: Response) => {
   const items = await prisma.property.findMany({
     where: {
       listingStatus: "PUBLISHED",
@@ -23,8 +34,8 @@ router.get("/", async (_req, res) => {
  * GET /api/properties/mine
  * Logged-in user's listings
  */
-router.get("/mine", requireAuth, async (req, res) => {
-  const userId = req.user!.id;
+router.get("/mine", requireAuth, async (req: Request, res: Response) => {
+  const userId = getUserId(req);
 
   const items = await prisma.property.findMany({
     where: { userId },
@@ -36,9 +47,8 @@ router.get("/mine", requireAuth, async (req, res) => {
 
 /**
  * GET /api/properties/:slug
- * Get property by slug (auth optional)
  */
-router.get("/:slug", async (req, res) => {
+router.get("/:slug", async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   const item = await prisma.property.findUnique({
@@ -56,8 +66,8 @@ router.get("/:slug", async (req, res) => {
  * POST /api/properties
  * Create draft
  */
-router.post("/", requireAuth, async (req, res) => {
-  const userId = req.user!.id;
+router.post("/", requireAuth, async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   const data = req.body;
 
   try {
@@ -82,9 +92,9 @@ router.post("/", requireAuth, async (req, res) => {
  * PATCH /api/properties/:id
  * Update draft
  */
-router.patch("/:id", requireAuth, async (req, res) => {
+router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   const id = Number(req.params.id);
-  const userId = req.user!.id;
+  const userId = getUserId(req);
 
   const existing = await prisma.property.findUnique({ where: { id } });
   if (!existing) {
@@ -115,12 +125,12 @@ router.patch("/:id", requireAuth, async (req, res) => {
 });
 
 /**
- * ✅ POST /api/properties/:id/submit
+ * POST /api/properties/:id/submit
  * Submit draft for admin approval
  */
-router.post("/:id/submit", requireAuth, async (req, res) => {
+router.post("/:id/submit", requireAuth, async (req: Request, res: Response) => {
   const id = Number(req.params.id);
-  const userId = req.user!.id;
+  const userId = getUserId(req);
 
   const existing = await prisma.property.findUnique({ where: { id } });
   if (!existing) {
@@ -139,9 +149,7 @@ router.post("/:id/submit", requireAuth, async (req, res) => {
 
   const updated = await prisma.property.update({
     where: { id },
-    data: {
-      listingStatus: "PENDING",
-    },
+    data: { listingStatus: "PENDING" },
   });
 
   res.json({ item: updated });
