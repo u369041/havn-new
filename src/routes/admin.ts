@@ -5,30 +5,10 @@ import { prisma } from "../lib/prisma";
 const router = Router();
 
 /**
- * ✅ GET /api/admin/listings
- * Admin-only: returns ALL listings (any status)
- */
-router.get("/listings", requireAdminAuth, async (_req, res) => {
-  try {
-    const items = await prisma.property.findMany({
-      orderBy: [
-        { listingStatus: "asc" },
-        { createdAt: "desc" },
-      ],
-    });
-
-    return res.json({ ok: true, items });
-  } catch (err: any) {
-    console.error("GET /admin/listings error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
  * GET /api/admin/submitted
- * Admin-only: returns submitted listings.
+ * Admin-only: returns submitted listings (legacy endpoint)
  */
-router.get("/submitted", requireAdminAuth, async (_req, res) => {
+router.get("/submitted", requireAdminAuth, async (req, res) => {
   try {
     const items = await prisma.property.findMany({
       where: { listingStatus: "SUBMITTED" },
@@ -43,30 +23,46 @@ router.get("/submitted", requireAdminAuth, async (_req, res) => {
 });
 
 /**
- * ✅ POST /api/admin/properties/:id/approve
- * SUBMITTED → PUBLISHED
+ * GET /api/admin/properties/submitted
+ * Admin-only: submitted listings (preferred)
  */
-router.post("/properties/:id/approve", requireAdminAuth, async (req, res) => {
-  const id = Number(req.params.id);
-
+router.get("/properties/submitted", requireAdminAuth, async (req, res) => {
   try {
+    const items = await prisma.property.findMany({
+      where: { listingStatus: "SUBMITTED" },
+      orderBy: { submittedAt: "desc" },
+    });
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("GET /admin/properties/submitted error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+router.post("/properties/:id/approve", requireAdminAuth, async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (existing.listingStatus !== "SUBMITTED") {
       return res.status(409).json({
         ok: false,
-        message: `Cannot approve listing in status ${existing.listingStatus}`,
+        message: `Cannot approve from status ${existing.listingStatus}`,
       });
     }
+
+    const now = new Date();
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "PUBLISHED",
-        publishedAt: new Date(),
-        rejectionReason: null,
-        rejectedAt: null,
+        approvedAt: now,
+        approvedById: req.user?.userId ?? null,
+        publishedAt: now,
       },
     });
 
@@ -77,35 +73,33 @@ router.post("/properties/:id/approve", requireAdminAuth, async (req, res) => {
   }
 });
 
-/**
- * ✅ POST /api/admin/properties/:id/reject
- * SUBMITTED → REJECTED
- */
-router.post("/properties/:id/reject", requireAdminAuth, async (req, res) => {
-  const id = Number(req.params.id);
-  const reason = String(req.body?.reason || "").trim();
-
-  if (!reason) {
-    return res.status(400).json({ ok: false, message: "Rejection reason is required" });
-  }
-
+router.post("/properties/:id/reject", requireAdminAuth, async (req: any, res) => {
   try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) return res.status(400).json({ ok: false, message: "Rejection reason required" });
+
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (existing.listingStatus !== "SUBMITTED") {
       return res.status(409).json({
         ok: false,
-        message: `Cannot reject listing in status ${existing.listingStatus}`,
+        message: `Cannot reject from status ${existing.listingStatus}`,
       });
     }
+
+    const now = new Date();
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "REJECTED",
+        rejectedAt: now,
+        rejectedById: req.user?.userId ?? null,
         rejectionReason: reason,
-        rejectedAt: new Date(),
       },
     });
 
@@ -116,21 +110,18 @@ router.post("/properties/:id/reject", requireAdminAuth, async (req, res) => {
   }
 });
 
-/**
- * ✅ POST /api/admin/properties/:id/archive
- * PUBLISHED → ARCHIVED
- */
 router.post("/properties/:id/archive", requireAdminAuth, async (req, res) => {
-  const id = Number(req.params.id);
-
   try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (existing.listingStatus !== "PUBLISHED") {
       return res.status(409).json({
         ok: false,
-        message: `Cannot archive listing in status ${existing.listingStatus}`,
+        message: `Cannot archive from status ${existing.listingStatus}`,
       });
     }
 
@@ -149,28 +140,28 @@ router.post("/properties/:id/archive", requireAdminAuth, async (req, res) => {
   }
 });
 
-/**
- * ✅ POST /api/admin/properties/:id/restore
- * ARCHIVED → PUBLISHED
- */
 router.post("/properties/:id/restore", requireAdminAuth, async (req, res) => {
-  const id = Number(req.params.id);
-
   try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (existing.listingStatus !== "ARCHIVED") {
       return res.status(409).json({
         ok: false,
-        message: `Cannot restore listing in status ${existing.listingStatus}`,
+        message: `Cannot restore from status ${existing.listingStatus}`,
       });
     }
+
+    // restore to PUBLISHED if it had been published before, otherwise DRAFT
+    const restoreTo = existing.publishedAt ? "PUBLISHED" : "DRAFT";
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        listingStatus: "PUBLISHED",
+        listingStatus: restoreTo as any,
         archivedAt: null,
       },
     });
