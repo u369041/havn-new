@@ -25,14 +25,14 @@ async function generateUniqueSlug(base: string) {
   let candidate = clean;
   let n = 2;
 
-  // try a few suffixes to avoid collisions
   while (true) {
     const existing = await prisma.property.findUnique({ where: { slug: candidate } });
     if (!existing) return candidate;
+
     candidate = `${clean}-${n}`;
     n++;
+
     if (n > 50) {
-      // extremely unlikely, but avoids infinite loop
       candidate = `${clean}-${Date.now()}`;
     }
   }
@@ -40,7 +40,8 @@ async function generateUniqueSlug(base: string) {
 
 /**
  * GET /api/properties/mine
- * Returns all listings owned by user (admins see all)
+ * Returns listings owned by user
+ * Admin sees all
  */
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
@@ -66,12 +67,8 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 });
 
 /**
- * ✅ NEW (CANONICAL): GET /api/properties/_admin
- * Admin inventory endpoint: returns ALL listings (all statuses).
- *
- * IMPORTANT:
- * - Uses underscore route to avoid collision with "/:slug"
- * - Requires auth AND admin role
+ * ✅ ADMIN INVENTORY: GET /api/properties/_admin
+ * Returns ALL listings (all statuses), admin-only
  */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
@@ -82,15 +79,12 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     }
 
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "25"), 10), 1), 100);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 100);
 
-    const where: any = {}; // ✅ no listingStatus restriction
+    const where: any = {};
 
     const q = String(req.query.q || "").trim();
-    const county = String(req.query.county || "").trim();
-    const city = String(req.query.city || "").trim();
-    const type = String(req.query.type || "").trim();
-    const status = String(req.query.listingStatus || "").trim(); // optional filter
+    const status = String(req.query.listingStatus || "").trim();
 
     if (q) {
       where.OR = [
@@ -104,9 +98,6 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
       ];
     }
 
-    if (county) where.county = { contains: county, mode: "insensitive" };
-    if (city) where.city = { contains: city, mode: "insensitive" };
-    if (type) where.propertyType = type;
     if (status) where.listingStatus = status;
 
     const [total, items] = await Promise.all([
@@ -115,7 +106,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { updatedAt: "desc" }, // ✅ best for moderation queues
+        orderBy: { updatedAt: "desc" },
       }),
     ]);
 
@@ -128,40 +119,16 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 
 /**
  * GET /api/properties
- * Public browse endpoint: returns PUBLISHED listings only.
- * Supports optional filters & pagination.
- *
- * ✅ Upgrade:
- * If includeAll=true OR scope=admin AND user is admin, returns ALL statuses.
+ * Public browse: PUBLISHED only
  */
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
-    const user = req.user || null;
-
-    const includeAll = String(req.query.includeAll || "").toLowerCase() === "true";
-    const scopeAdmin = String(req.query.scope || "").toLowerCase() === "admin";
-    const wantsAll = includeAll || scopeAdmin;
-
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10), 1), 50);
 
-    // Default: public listings only
     const where: any = { listingStatus: "PUBLISHED" };
 
-    // Admin override
-    if (wantsAll) {
-      if (!user) return res.status(401).json({ ok: false, message: "Missing token" });
-      if (user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
-      delete where.listingStatus;
-    }
-
     const q = String(req.query.q || "").trim();
-    const county = String(req.query.county || "").trim();
-    const city = String(req.query.city || "").trim();
-    const type = String(req.query.type || "").trim();
-    const minPrice = req.query.minPrice ? parseInt(String(req.query.minPrice), 10) : null;
-    const maxPrice = req.query.maxPrice ? parseInt(String(req.query.maxPrice), 10) : null;
-
     if (q) {
       where.OR = [
         { title: { contains: q, mode: "insensitive" } },
@@ -171,23 +138,13 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
       ];
     }
 
-    if (county) where.county = { contains: county, mode: "insensitive" };
-    if (city) where.city = { contains: city, mode: "insensitive" };
-    if (type) where.propertyType = type;
-
-    if (minPrice !== null || maxPrice !== null) {
-      where.price = {};
-      if (minPrice !== null) where.price.gte = minPrice;
-      if (maxPrice !== null) where.price.lte = maxPrice;
-    }
-
     const [total, items] = await Promise.all([
       prisma.property.count({ where }),
       prisma.property.findMany({
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: wantsAll ? { updatedAt: "desc" } : { publishedAt: "desc" },
+        orderBy: { publishedAt: "desc" },
       }),
     ]);
 
@@ -200,8 +157,8 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
 
 /**
  * GET /api/properties/:slug
- * Public: published only.
- * Owners/admin: can view drafts/submitted/rejected/archived.
+ * Public: only PUBLISHED
+ * Owner/admin: can view drafts/submitted/rejected
  */
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
@@ -226,40 +183,8 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
 });
 
 /**
- * GET /api/properties/:id/_debug-owner
- * Debug helper you used earlier (kept intentionally).
- */
-router.get("/:id/_debug-owner", requireAuth, async (req: any, res) => {
-  try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
-
-    const property = await prisma.property.findUnique({ where: { id } });
-    if (!property) return res.status(404).json({ ok: false, message: "Not found" });
-
-    return res.json({
-      ok: true,
-      tokenUser: {
-        userId: req.user?.userId,
-        role: req.user?.role,
-        email: req.user?.email,
-        raw: req.user?.raw || "",
-      },
-      property: { id: property.id, userId: property.userId, listingStatus: property.listingStatus, slug: property.slug },
-    });
-  } catch (err: any) {
-    console.error("GET /_debug-owner error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
  * POST /api/properties
- * Create new draft listing (owner = logged in user)
- *
- * Guardrail: slug is now OPTIONAL.
- * - If payload.slug is missing/blank, server generates a unique slug.
- * - This prevents frontend slug/UI issues from blocking publishing.
+ * Create draft
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
@@ -275,7 +200,6 @@ router.post("/", requireAuth, async (req: any, res) => {
       const base = [title, city, eircode].filter(Boolean).join(" ");
       slug = await generateUniqueSlug(base);
     } else {
-      // still ensure uniqueness if frontend sends a slug
       const existing = await prisma.property.findUnique({ where: { slug } });
       if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
@@ -314,10 +238,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 
 /**
  * PATCH /api/properties/:id
- * Update draft listing (owner/admin)
- *
- * Guardrail: slug is NOT editable via PATCH.
- * This prevents broken links + “slug drift” while a listing is mid-workflow.
+ * Update draft
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
@@ -345,7 +266,6 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        // slug intentionally omitted
         title: payload.title ?? existing.title,
         address1: payload.address1 ?? existing.address1,
         address2: payload.address2 ?? existing.address2,
@@ -375,7 +295,7 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 
 /**
  * POST /api/properties/:id/submit
- * Owner/admin: move DRAFT -> SUBMITTED (locks listing)
+ * DRAFT -> SUBMITTED
  */
 router.post("/:id/submit", requireAuth, async (req: any, res) => {
   try {
@@ -390,10 +310,7 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
     if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus !== "DRAFT") {
-      return res.status(409).json({
-        ok: false,
-        message: `Cannot submit from status ${existing.listingStatus}`,
-      });
+      return res.status(409).json({ ok: false, message: `Cannot submit from status ${existing.listingStatus}` });
     }
 
     const updated = await prisma.property.update({
@@ -407,6 +324,77 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     console.error("POST /properties/:id/submit error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * ✅ POST /api/properties/:id/approve (ADMIN ONLY)
+ * SUBMITTED -> PUBLISHED
+ */
+router.post("/:id/approve", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (existing.listingStatus !== "SUBMITTED") {
+      return res.status(409).json({ ok: false, message: "Only SUBMITTED listings can be approved." });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: "PUBLISHED",
+        publishedAt: new Date(),
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("POST /approve error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * ✅ POST /api/properties/:id/reject (ADMIN ONLY)
+ * SUBMITTED -> REJECTED
+ */
+router.post("/:id/reject", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (existing.listingStatus !== "SUBMITTED") {
+      return res.status(409).json({ ok: false, message: "Only SUBMITTED listings can be rejected." });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: "REJECTED",
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("POST /reject error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
