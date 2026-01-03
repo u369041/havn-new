@@ -25,18 +25,73 @@ async function generateUniqueSlug(base: string) {
   let candidate = clean;
   let n = 2;
 
-  // try a few suffixes to avoid collisions
   while (true) {
     const existing = await prisma.property.findUnique({ where: { slug: candidate } });
     if (!existing) return candidate;
     candidate = `${clean}-${n}`;
     n++;
     if (n > 50) {
-      // extremely unlikely, but avoids infinite loop
       candidate = `${clean}-${Date.now()}`;
     }
   }
 }
+
+/**
+ * ✅ NEW: GET /api/properties/admin
+ * Admin inventory endpoint: returns ALL listings (all statuses).
+ */
+router.get("/admin", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "25"), 10), 1), 100);
+
+    const where: any = {}; // ✅ no listingStatus restriction
+
+    const q = String(req.query.q || "").trim();
+    const county = String(req.query.county || "").trim();
+    const city = String(req.query.city || "").trim();
+    const type = String(req.query.type || "").trim();
+    const status = String(req.query.listingStatus || "").trim(); // optional status filter
+
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: "insensitive" } },
+        { city: { contains: q, mode: "insensitive" } },
+        { county: { contains: q, mode: "insensitive" } },
+        { eircode: { contains: q, mode: "insensitive" } },
+        { address1: { contains: q, mode: "insensitive" } },
+        { address2: { contains: q, mode: "insensitive" } },
+        { slug: { contains: q, mode: "insensitive" } },
+      ];
+    }
+
+    if (county) where.county = { contains: county, mode: "insensitive" };
+    if (city) where.city = { contains: city, mode: "insensitive" };
+    if (type) where.propertyType = type;
+    if (status) where.listingStatus = status;
+
+    const [total, items] = await Promise.all([
+      prisma.property.count({ where }),
+      prisma.property.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { updatedAt: "desc" }, // ✅ better for moderation queues
+      }),
+    ]);
+
+    return res.json({ ok: true, page, limit, total, items });
+  } catch (err: any) {
+    console.error("GET /api/properties/admin error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
  * GET /api/properties/mine
@@ -68,14 +123,35 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 /**
  * GET /api/properties
  * Public browse endpoint: returns PUBLISHED listings only.
- * Supports optional filters & pagination.
+ *
+ * ✅ UPGRADE:
+ * If query param includeAll=true AND user is admin, return all statuses.
+ * (So admin can also use /api/properties?includeAll=true if desired)
  */
-router.get("/", async (req, res) => {
+router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
+    const user = req.user || null;
+
+    const includeAll = String(req.query.includeAll || "").toLowerCase() === "true";
+    const scopeAdmin = String(req.query.scope || "").toLowerCase() === "admin";
+    const wantsAll = includeAll || scopeAdmin;
+
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10), 1), 50);
 
+    // ✅ Default: published only (public)
     const where: any = { listingStatus: "PUBLISHED" };
+
+    // ✅ Admin override: allow all statuses
+    if (wantsAll) {
+      if (!user) {
+        return res.status(401).json({ ok: false, message: "Missing token" });
+      }
+      if (user.role !== "admin") {
+        return res.status(403).json({ ok: false, message: "Forbidden" });
+      }
+      delete where.listingStatus; // ✅ remove restriction
+    }
 
     const q = String(req.query.q || "").trim();
     const county = String(req.query.county || "").trim();
@@ -109,7 +185,7 @@ router.get("/", async (req, res) => {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { publishedAt: "desc" },
+        orderBy: wantsAll ? { updatedAt: "desc" } : { publishedAt: "desc" },
       }),
     ]);
 
@@ -136,7 +212,6 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
 
     if (property.listingStatus !== "PUBLISHED") {
       if (!user || !isOwnerOrAdmin(user, property.userId)) {
-        // intentionally 404 to avoid leaking existence
         return res.status(404).json({ ok: false, message: "Not found" });
       }
     }
@@ -198,7 +273,6 @@ router.post("/", requireAuth, async (req: any, res) => {
       const base = [title, city, eircode].filter(Boolean).join(" ");
       slug = await generateUniqueSlug(base);
     } else {
-      // still ensure uniqueness if frontend sends a slug
       const existing = await prisma.property.findUnique({ where: { slug } });
       if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
@@ -240,7 +314,6 @@ router.post("/", requireAuth, async (req: any, res) => {
  * Update draft listing (owner/admin)
  *
  * Guardrail: slug is NOT editable via PATCH.
- * This prevents broken links + “slug drift” while a listing is mid-workflow.
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
@@ -268,7 +341,6 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        // slug intentionally omitted
         title: payload.title ?? existing.title,
         address1: payload.address1 ?? existing.address1,
         address2: payload.address2 ?? existing.address2,
