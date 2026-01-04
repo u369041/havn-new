@@ -42,6 +42,11 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
 
+    // ✅ Hard guard (prevents weird runtime crashes)
+    if (!user || !Number.isFinite(Number(user.userId))) {
+      return res.status(401).json({ ok: false, message: "Invalid auth session" });
+    }
+
     const where =
       user.role === "admin"
         ? {}
@@ -56,15 +61,31 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 
     return res.json({ ok: true, items });
   } catch (err: any) {
-    console.error("GET /mine error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
+    // ✅ Print the real error into Render logs
+    console.error("GET /api/properties/mine error", {
+      message: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: err?.stack,
+      name: err?.name,
+    });
+
+    // ✅ Return helpful debug output (safe — does not expose secrets)
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err?.message || String(err),
+      code: err?.code || null,
+      meta: err?.meta || null,
+      hint:
+        "Likely Prisma/DB drift. Check Render logs for full stack. Common causes: missing column, wrong type for text[] (photos/features), or migration drift.",
+    });
   }
 });
 
 /**
  * ✅ GET /api/properties/_admin
  * Admin inventory endpoint: returns ALL listings (all statuses).
- * NOTE: Moderation actions live under /api/admin/* routes.
  */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
