@@ -63,6 +63,11 @@ router.post("/properties/:id/approve", requireAdminAuth, async (req: any, res) =
         approvedAt: now,
         approvedById: req.user?.userId ?? null,
         publishedAt: now,
+
+        // ✅ Clear any previous rejection data
+        rejectedAt: null,
+        rejectedById: null,
+        rejectedReason: null,
       },
     });
 
@@ -99,7 +104,14 @@ router.post("/properties/:id/reject", requireAdminAuth, async (req: any, res) =>
         listingStatus: "REJECTED",
         rejectedAt: now,
         rejectedById: req.user?.userId ?? null,
-        rejectionReason: reason,
+
+        // ✅ FIX: correct schema field name
+        rejectedReason: reason,
+
+        // ✅ Clear any publish/approval data
+        approvedAt: null,
+        approvedById: null,
+        publishedAt: null,
       },
     });
 
