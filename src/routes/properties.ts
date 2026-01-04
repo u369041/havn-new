@@ -64,6 +64,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 /**
  * ✅ GET /api/properties/_admin
  * Admin inventory endpoint: returns ALL listings (all statuses).
+ * NOTE: Moderation actions live under /api/admin/* routes.
  */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
@@ -114,92 +115,6 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     return res.json({ ok: true, page, limit, total, items });
   } catch (err: any) {
     console.error("GET /api/properties/_admin error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
- * ✅ POST /api/properties/:id/approve
- * Admin-only moderation action
- * SUBMITTED -> PUBLISHED
- */
-router.post("/:id/approve", requireAuth, async (req: any, res) => {
-  try {
-    const user = req.user;
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-
-    if (existing.listingStatus !== "SUBMITTED") {
-      return res.status(409).json({
-        ok: false,
-        message: `Only SUBMITTED listings can be approved. Current: ${existing.listingStatus}`,
-      });
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        listingStatus: "PUBLISHED",
-        publishedAt: new Date(),
-        rejectedReason: null,
-        rejectedAt: null,
-      },
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("POST /properties/:id/approve error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-/**
- * ✅ POST /api/properties/:id/reject
- * Admin-only moderation action
- * SUBMITTED -> REJECTED
- * Optional { reason }
- */
-router.post("/:id/reject", requireAuth, async (req: any, res) => {
-  try {
-    const user = req.user;
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
-
-    const reason = String(req.body?.reason || "").trim().slice(0, 500);
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-
-    if (existing.listingStatus !== "SUBMITTED") {
-      return res.status(409).json({
-        ok: false,
-        message: `Only SUBMITTED listings can be rejected. Current: ${existing.listingStatus}`,
-      });
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        listingStatus: "REJECTED",
-        rejectedAt: new Date(),
-        rejectedReason: reason || null,
-      },
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("POST /properties/:id/reject error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
