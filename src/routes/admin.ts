@@ -39,6 +39,10 @@ router.get("/properties/submitted", requireAdminAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/admin/properties/:id/approve
+ * Admin-only moderation: SUBMITTED -> PUBLISHED
+ */
 router.post("/properties/:id/approve", requireAdminAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -78,6 +82,11 @@ router.post("/properties/:id/approve", requireAdminAuth, async (req: any, res) =
   }
 });
 
+/**
+ * POST /api/admin/properties/:id/reject
+ * Admin-only moderation: SUBMITTED -> REJECTED
+ * Requires { reason }
+ */
 router.post("/properties/:id/reject", requireAdminAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -105,7 +114,7 @@ router.post("/properties/:id/reject", requireAdminAuth, async (req: any, res) =>
         rejectedAt: now,
         rejectedById: req.user?.userId ?? null,
 
-        // ✅ FIX: correct schema field name
+        // ✅ FIX: matches schema.prisma
         rejectedReason: reason,
 
         // ✅ Clear any publish/approval data
@@ -122,6 +131,10 @@ router.post("/properties/:id/reject", requireAdminAuth, async (req: any, res) =>
   }
 });
 
+/**
+ * POST /api/admin/properties/:id/archive
+ * Admin-only: PUBLISHED -> ARCHIVED
+ */
 router.post("/properties/:id/archive", requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -152,6 +165,10 @@ router.post("/properties/:id/archive", requireAdminAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/admin/properties/:id/restore
+ * Admin-only: ARCHIVED -> PUBLISHED (if previously published) else -> DRAFT
+ */
 router.post("/properties/:id/restore", requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -167,7 +184,6 @@ router.post("/properties/:id/restore", requireAdminAuth, async (req, res) => {
       });
     }
 
-    // restore to PUBLISHED if it had been published before, otherwise DRAFT
     const restoreTo = existing.publishedAt ? "PUBLISHED" : "DRAFT";
 
     const updated = await prisma.property.update({
