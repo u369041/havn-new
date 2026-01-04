@@ -29,8 +29,8 @@ model User {
   createdAt DateTime @default(now())
 
   // ✅ Email verification
-  emailVerified     Boolean   @default(false)
-  emailVerifyToken  String?   @unique
+  emailVerified       Boolean   @default(false)
+  emailVerifyToken    String?   @unique
   emailVerifyTokenExp DateTime?
 
   // ✅ Basic authenticity / account telemetry (future use)
@@ -44,46 +44,48 @@ model User {
 }
 
 model Property {
-  id              Int           @id @default(autoincrement())
-  slug            String        @unique
-  title           String
-  address1        String
-  address2        String?
-  city            String
-  county          String
-  eircode         String?
-  price           Int
-  ber             String?
-  bedrooms        Int?
-  bathrooms       Int?
-  features        String[]
-  description     String?
-  photos          String[]
-  berNo           String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  lat             Float?
-  lng             Float?
-  propertyType    String
-  saleType        String?
-  marketStatus    String?
+  id           Int      @id @default(autoincrement())
+  slug         String   @unique
+  title        String
+  address1     String
+  address2     String?
+  city         String
+  county       String
+  eircode      String?
+  price        Int
+  ber          String?
+  bedrooms     Int?
+  bathrooms    Int?
+  features     String[]
+  description  String?
+  photos       String[]
+  berNo        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lat          Float?
+  lng          Float?
+  propertyType String
+  saleType     String?
+  marketStatus String?
 
-  listingStatus   ListingStatus @default(DRAFT)
-  publishedAt     DateTime?
-  archivedAt      DateTime?
+  listingStatus ListingStatus @default(DRAFT)
+  publishedAt   DateTime?
+  archivedAt    DateTime?
 
-  submittedAt     DateTime?
-  approvedAt      DateTime?
-  approvedById    Int?
-  approvedBy      User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  approvedById Int?
+  approvedBy   User? @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
 
-  rejectedAt      DateTime?
-  rejectedById    Int?
-  rejectedBy      User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
-  rejectionReason String?
+  rejectedAt   DateTime?
+  rejectedById Int?
+  rejectedBy   User? @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
 
-  userId          Int
-  user            User          @relation(fields: [userId], references: [id])
+  // ✅ Canonical rejection reason field
+  rejectedReason String?
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([listingStatus])
