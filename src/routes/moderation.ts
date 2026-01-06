@@ -2,7 +2,7 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../lib/prisma";
-import { sendListingApprovedEmail, sendListingRejectedEmail } from "../lib/resendMail";
+import { sendListingApprovedEmail, sendListingRejectedEmail } from "../lib/resendmail";
 
 const router = Router();
 
