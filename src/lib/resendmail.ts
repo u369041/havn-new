@@ -1,8 +1,12 @@
-// src/lib/resendMail.ts
+// src/lib/resendmail.ts
 import { Resend } from "resend";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "no-reply@havn.ie";
+
+// ✅ Fallback sender (works if you haven't configured domain sender yet)
+const FROM_EMAIL =
+  process.env.RESEND_FROM_EMAIL ||
+  "HAVN.ie <onboarding@resend.dev>"; // ✅ safest fallback
 
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
@@ -12,7 +16,10 @@ function assertResendConfigured() {
   }
 }
 
-export async function sendListingApprovedEmail(to: string, opts: { title: string; slug: string }) {
+export async function sendListingApprovedEmail(
+  to: string,
+  opts: { title: string; slug: string }
+) {
   assertResendConfigured();
 
   const subject = "✅ Your HAVN listing is now live";
@@ -83,7 +90,7 @@ export async function sendListingRejectedEmail(
 }
 
 function escapeHtml(s: string) {
-  return s
+  return String(s || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
