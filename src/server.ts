@@ -5,17 +5,20 @@ import rateLimit from "express-rate-limit";
 
 import propertiesRouter from "./routes/properties";
 import authRouter from "./routes/auth";
-import adminRouter from "./routes/admin";
-import moderationRouter from "./routes/moderation";
 import uploadsRouter from "./routes/uploads";
 import diagRouter from "./routes/diag";
 
+// ✅ MODERATION ROUTER (approve/reject)
+import moderationRouter from "./routes/moderation";
+
 const app = express();
 
+// ✅ Security + parsing
 app.use(helmet());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// ✅ CORS locked to havn.ie + render preview domain
 app.use(
   cors({
     origin: [
@@ -27,6 +30,7 @@ app.use(
   })
 );
 
+// ✅ Basic rate limiting
 app.use(
   rateLimit({
     windowMs: 60 * 1000,
@@ -34,45 +38,31 @@ app.use(
   })
 );
 
-// ✅ Must be fast and always available
+// ✅ Fast health check (must always work)
 app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
 });
 
-/**
- * ✅ HARD VERIFY ADMIN ROUTING IS LIVE
- * If this is NOT reachable after deploy, Render is not deploying your latest build.
- */
-app.get("/api/admin/ping", (req, res) => {
-  res.json({ ok: true, route: "admin-ping", ts: new Date().toISOString() });
-});
-
-/**
- * ✅ HARD VERIFY DEPLOYED COMMIT
- * Helps detect wrong branch / old build / stale deploy instantly.
- */
-app.get("/api/_diag/build", (req, res) => {
-  res.json({
-    ok: true,
-    build: process.env.RENDER_GIT_COMMIT || "unknown",
-    ts: new Date().toISOString(),
-  });
-});
-
-// ✅ DIAG ROUTES (RESTORED)
+// ✅ DIAG ROUTES (restored)
 app.use("/api/_diag", diagRouter);
 
-// ✅ API routes
+// ✅ CORE ROUTES
 app.use("/api/properties", propertiesRouter);
 app.use("/api/auth", authRouter);
-
-// ✅ Admin routes (MUST exist)
-app.use("/api/admin", adminRouter);
-app.use("/api/admin", moderationRouter);
-
-// ✅ Uploads
 app.use("/api/uploads", uploadsRouter);
 
+// ✅ ADMIN MODERATION ROUTES
+// This exposes:
+// POST /api/admin/properties/:id/approve
+// POST /api/admin/properties/:id/reject
+app.use("/api/admin", moderationRouter);
+
+// ✅ Admin ping route (nice for quick verification)
+app.get("/api/admin/ping", (req, res) => {
+  res.json({ ok: true, route: "admin", ts: Date.now() });
+});
+
+// ✅ 404 fallback
 app.use((req, res) => {
   res.status(404).json({ ok: false, message: "Not found" });
 });
