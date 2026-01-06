@@ -1,11 +1,14 @@
 // src/routes/moderation.ts
 import { Router } from "express";
+import jwt from "jsonwebtoken";
 import { prisma } from "../lib/prisma";
 import { sendListingApprovedEmail, sendListingRejectedEmail } from "../lib/resendMail";
-import jwt from "jsonwebtoken";
 
 const router = Router();
 
+/**
+ * ✅ Minimal JWT auth middleware
+ */
 function requireAuth(req: any, res: any, next: any) {
   try {
     const h = req.headers.authorization || "";
@@ -23,12 +26,19 @@ function requireAuth(req: any, res: any, next: any) {
   }
 }
 
+/**
+ * ✅ Admin-only middleware
+ */
 function requireAdmin(req: any, res: any, next: any) {
-  const role = req.user?.role;
-  if (role !== "admin") return res.status(403).json({ ok: false, error: "Admin only" });
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ ok: false, error: "Admin only" });
+  }
   next();
 }
 
+/**
+ * ✅ Generate a safe slug if missing
+ */
 function ensureSlug(s: string) {
   return String(s || "")
     .trim()
@@ -39,52 +49,65 @@ function ensureSlug(s: string) {
 }
 
 /**
- * ✅ IMPORTANT:
- * This router is mounted at /api/admin in server.ts:
- *
- * app.use("/api/admin", moderationRouter)
- *
- * Therefore we MUST define *relative* routes here:
- * ✅ /properties/:id/approve
- * ✅ /properties/:id/reject
+ * ✅ Helper: check if a field exists on Property model at runtime
+ * avoids prisma update errors when schema doesn't include columns
  */
+function propertyHasField(fieldName: string): boolean {
+  try {
+    const model = (prisma as any)._dmmf?.modelMap?.Property;
+    const fields = model?.fields || [];
+    return fields.some((f: any) => f.name === fieldName);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * ✅ POST /api/admin/properties/:id/approve
+ * - Sets status => PUBLISHED
+ * - Ensures slug exists
+ * - Emails user if we have user relation + email
+ *
+ * IMPORTANT: Router is mounted at /api/admin
  */
 router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = String(req.params.id);
 
+    // load property + user if relation exists
+    const includeUser = propertyHasField("userId"); // crude but effective
     const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { user: true }, // requires relation Property.user
-    });
+      where: { id } as any,
+      ...(includeUser ? { include: { user: true } } : {}),
+    } as any);
 
     if (!prop) return res.status(404).json({ ok: false, error: "Property not found" });
 
-    if (String(prop.status).toUpperCase() !== "SUBMITTED") {
+    const currentStatus = String((prop as any).status || "").toUpperCase();
+    if (currentStatus && currentStatus !== "SUBMITTED") {
       return res.status(400).json({ ok: false, error: "Only SUBMITTED listings can be approved" });
     }
 
-    const slug = prop.slug ? prop.slug : ensureSlug(prop.title || prop.address || prop.id);
+    const slugFieldExists = propertyHasField("slug");
+    const slug = slugFieldExists
+      ? ((prop as any).slug || ensureSlug((prop as any).title || (prop as any).address || id))
+      : null;
+
+    const data: any = {};
+    if (propertyHasField("status")) data.status = "PUBLISHED";
+    if (slugFieldExists && slug) data.slug = slug;
 
     const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        status: "PUBLISHED",
-        slug,
-        rejectedReason: null,
-        approvedAt: new Date(),
-      },
-    });
+      where: { id } as any,
+      data,
+    } as any);
 
-    // ✅ Email owner
-    const email = prop.user?.email;
+    // Email owner (only if relation exists and email present)
+    const email = (prop as any)?.user?.email;
     if (email) {
       await sendListingApprovedEmail(email, {
-        title: updated.title || updated.address || updated.slug || "Your listing",
-        slug: updated.slug!,
+        title: (updated as any).title || (updated as any).address || (updated as any).slug || "Your listing",
+        slug: (updated as any).slug || "",
       });
     }
 
@@ -97,38 +120,49 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req, re
 
 /**
  * ✅ POST /api/admin/properties/:id/reject
+ * - Sets status => REJECTED
+ * - Stores rejection reason ONLY if field exists in DB
+ * - Emails user with reason
  */
 router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = String(req.params.id);
     const reason = String(req.body?.reason || "").trim();
 
+    if (!reason) {
+      return res.status(400).json({ ok: false, error: "Rejection reason required" });
+    }
+
+    const includeUser = propertyHasField("userId");
     const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { user: true },
-    });
+      where: { id } as any,
+      ...(includeUser ? { include: { user: true } } : {}),
+    } as any);
 
     if (!prop) return res.status(404).json({ ok: false, error: "Property not found" });
 
-    if (String(prop.status).toUpperCase() !== "SUBMITTED") {
+    const currentStatus = String((prop as any).status || "").toUpperCase();
+    if (currentStatus && currentStatus !== "SUBMITTED") {
       return res.status(400).json({ ok: false, error: "Only SUBMITTED listings can be rejected" });
     }
 
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        status: "REJECTED",
-        rejectedReason: reason || null,
-        rejectedAt: new Date(),
-      },
-    });
+    const data: any = {};
+    if (propertyHasField("status")) data.status = "REJECTED";
 
-    // ✅ Email owner with reject reason + edit link
-    const email = prop.user?.email;
+    // If schema supports a rejection reason field, store it
+    if (propertyHasField("rejectedReason")) data.rejectedReason = reason;
+    if (propertyHasField("rejectReason")) data.rejectReason = reason;
+
+    const updated = await prisma.property.update({
+      where: { id } as any,
+      data,
+    } as any);
+
+    const email = (prop as any)?.user?.email;
     if (email) {
-      const editUrl = `https://havn.ie/property-upload.html?id=${encodeURIComponent(updated.id)}`;
+      const editUrl = `https://havn.ie/property-upload.html?id=${encodeURIComponent((updated as any).id || id)}`;
       await sendListingRejectedEmail(email, {
-        title: updated.title || updated.address || updated.slug || "Your listing",
+        title: (updated as any).title || (updated as any).address || (updated as any).slug || "Your listing",
         reason,
         editUrl,
       });
