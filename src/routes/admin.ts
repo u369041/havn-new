@@ -5,9 +5,7 @@ import { prisma } from "../lib/prisma";
 const router = Router();
 
 /**
- * ✅ Minimal auth middleware (JWT)
- * - Expects Authorization: Bearer <token>
- * - Decodes token and attaches req.user
+ * ✅ Minimal JWT auth middleware
  */
 function requireAuth(req: any, res: any, next: any) {
   try {
@@ -28,27 +26,31 @@ function requireAuth(req: any, res: any, next: any) {
 
 /**
  * ✅ Admin-only middleware
- * - Requires req.user.role === "admin"
  */
 function requireAdmin(req: any, res: any, next: any) {
-  const role = req.user?.role;
-  if (role !== "admin") return res.status(403).json({ ok: false, error: "Admin only" });
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ ok: false, error: "Admin only" });
+  }
   next();
 }
 
 /**
+ * ✅ Public ping to confirm router is deployed
+ * GET /api/admin/ping
+ */
+router.get("/ping", (req, res) => {
+  res.json({ ok: true, route: "admin", ts: new Date().toISOString() });
+});
+
+/**
  * ✅ GET /api/admin/properties
- * Returns ALL properties for admin view, newest first.
- *
- * NOTE:
- * This endpoint exists so admin.html can fetch a single list
- * and do filtering client-side.
+ * Returns ALL properties for admin moderation view
  */
 router.get("/properties", requireAuth, requireAdmin, async (req, res) => {
   try {
     const items = await prisma.property.findMany({
       orderBy: { updatedAt: "desc" },
-      take: 200, // safety cap for UI
+      take: 300,
     });
 
     res.json({ ok: true, items });
@@ -60,22 +62,24 @@ router.get("/properties", requireAuth, requireAdmin, async (req, res) => {
 
 /**
  * ✅ GET /api/admin/statuses
- * Returns distinct Property.status values + counts.
- * This is the SINGLE SOURCE OF TRUTH for what the DB actually contains.
+ * Returns EXACT DB truth: distinct statuses + counts
+ *
+ * ⚠️ Uses raw SQL instead of Prisma groupBy to avoid TS recursion errors on Render builds.
  */
 router.get("/statuses", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const grouped = await prisma.property.groupBy({
-      by: ["status"],
-      _count: { status: true },
-      orderBy: { status: "asc" },
-    });
+    const rows = await prisma.$queryRaw<
+      Array<{ status: string | null; count: number }>
+    >`SELECT status, COUNT(*)::int AS count
+      FROM "Property"
+      GROUP BY status
+      ORDER BY status ASC;`;
 
     res.json({
       ok: true,
-      statuses: grouped.map((g) => ({
-        status: g.status,
-        count: g._count.status,
+      statuses: rows.map((r) => ({
+        status: r.status ?? "NULL",
+        count: r.count ?? 0,
       })),
     });
   } catch (err: any) {
