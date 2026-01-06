@@ -8,17 +8,18 @@ import authRouter from "./routes/auth";
 import uploadsRouter from "./routes/uploads";
 import diagRouter from "./routes/diag";
 
-// ✅ MODERATION ROUTER (approve/reject)
+// ✅ Admin feed (listings + status counts)
+import adminRouter from "./routes/admin";
+
+// ✅ Approve/Reject moderation routes
 import moderationRouter from "./routes/moderation";
 
 const app = express();
 
-// ✅ Security + parsing
 app.use(helmet());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ CORS locked to havn.ie + render preview domain
 app.use(
   cors({
     origin: [
@@ -30,7 +31,6 @@ app.use(
   })
 );
 
-// ✅ Basic rate limiting
 app.use(
   rateLimit({
     windowMs: 60 * 1000,
@@ -38,31 +38,25 @@ app.use(
   })
 );
 
-// ✅ Fast health check (must always work)
 app.get("/api/health", (req, res) => {
   res.status(200).json({ ok: true });
 });
 
-// ✅ DIAG ROUTES (restored)
+// ✅ DIAG
 app.use("/api/_diag", diagRouter);
 
-// ✅ CORE ROUTES
+// ✅ CORE
 app.use("/api/properties", propertiesRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/uploads", uploadsRouter);
 
-// ✅ ADMIN MODERATION ROUTES
-// This exposes:
-// POST /api/admin/properties/:id/approve
-// POST /api/admin/properties/:id/reject
+// ✅ ADMIN
+// 1) Feed routes: /api/admin/properties, /api/admin/statuses, /api/admin/ping
+app.use("/api/admin", adminRouter);
+
+// 2) Moderation routes: /api/admin/properties/:id/approve, /api/admin/properties/:id/reject
 app.use("/api/admin", moderationRouter);
 
-// ✅ Admin ping route (nice for quick verification)
-app.get("/api/admin/ping", (req, res) => {
-  res.json({ ok: true, route: "admin", ts: Date.now() });
-});
-
-// ✅ 404 fallback
 app.use((req, res) => {
   res.status(404).json({ ok: false, message: "Not found" });
 });
