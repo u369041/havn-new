@@ -8,7 +8,7 @@ import authRouter from "./routes/auth";
 import uploadsRouter from "./routes/uploads";
 import diagRouter from "./routes/diag";
 
-// ✅ Admin feed (listings + status counts)
+// ✅ Admin feed / ping etc
 import adminRouter from "./routes/admin";
 
 // ✅ Approve/Reject moderation routes
@@ -50,12 +50,19 @@ app.use("/api/properties", propertiesRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/uploads", uploadsRouter);
 
-// ✅ ADMIN
-// 1) Feed routes: /api/admin/properties, /api/admin/statuses, /api/admin/ping
-app.use("/api/admin", adminRouter);
+/**
+ * ✅ ADMIN
+ * IMPORTANT:
+ * - moderationRouter MUST be mounted BEFORE adminRouter
+ * - because both are under /api/admin and adminRouter currently has legacy handlers
+ *   that otherwise intercept /properties/:id/approve|reject first.
+ */
 
-// 2) Moderation routes: /api/admin/properties/:id/approve, /api/admin/properties/:id/reject
+// 1) Moderation routes FIRST: /api/admin/properties/:id/approve + /reject
 app.use("/api/admin", moderationRouter);
+
+// 2) Admin misc routes AFTER: /api/admin/ping etc
+app.use("/api/admin", adminRouter);
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, message: "Not found" });

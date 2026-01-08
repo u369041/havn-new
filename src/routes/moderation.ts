@@ -1,175 +1,169 @@
-// src/routes/moderation.ts
 import { Router } from "express";
-import { prisma } from "../lib/prisma";
-import { sendListingApprovedEmail, sendListingRejectedEmail } from "../lib/resendMail";
-import jwt from "jsonwebtoken";
+import prisma from "../lib/prisma";
+import { requireAuth } from "../middleware/requireAuth";
+
+// If you already have these helpers, keep them.
+// If not, comment these imports out and the calls below.
+import {
+  sendListingApprovedEmail,
+  sendListingRejectedEmail,
+} from "../lib/resendMail";
 
 const router = Router();
 
-/**
- * ✅ IMPORTANT:
- * Prisma expects Property.id as Int (number).
- * So we must parse req.params.id into a number.
- */
-
-function requireAuth(req: any, res: any, next: any) {
-  try {
-    const h = req.headers.authorization || "";
-    const token = h.startsWith("Bearer ") ? h.slice(7) : "";
-    if (!token) return res.status(401).json({ ok: false, error: "Missing token" });
-
-    const secret = process.env.JWT_SECRET || "";
-    if (!secret) return res.status(500).json({ ok: false, error: "JWT_SECRET missing" });
-
-    const decoded = jwt.verify(token, secret) as any;
-    req.user = decoded;
-    next();
-  } catch (e) {
-    return res.status(401).json({ ok: false, error: "Invalid token" });
-  }
+function parseId(raw: string) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
-function requireAdmin(req: any, res: any, next: any) {
-  const role = req.user?.role;
-  if (role !== "admin") return res.status(403).json({ ok: false, error: "Admin only" });
-  next();
+function slugify(input: string) {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
 }
 
-function ensureSlug(s: string) {
-  return (
-    String(s || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")
-      .slice(0, 80) || `listing-${Date.now()}`
-  );
+function makeSlugFallback(p: any) {
+  const parts = [
+    p?.title || "listing",
+    p?.county || "",
+    p?.city || "",
+    p?.eircode || "",
+    String(p?.id || ""),
+  ].filter(Boolean);
+  return slugify(parts.join(" "));
 }
 
-function parseId(req: any, res: any) {
-  const raw = req.params.id;
-  const id = Number(raw);
+// POST /api/admin/properties/:id/approve
+router.post(
+  "/properties/:id/approve",
+  requireAuth({ role: "admin" }),
+  async (req, res) => {
+    try {
+      const id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-  if (!raw || !Number.isFinite(id) || id <= 0) {
-    res.status(400).json({
-      ok: false,
-      error: "Invalid id",
-      detail: `Expected numeric id, got: ${raw}`,
-    });
-    return null;
+      const prop = await prisma.property.findUnique({
+        where: { id },
+        include: { owner: true },
+      });
+
+      if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
+
+      if (prop.listingStatus !== "SUBMITTED") {
+        return res.status(400).json({
+          ok: false,
+          message: `Cannot approve from status ${prop.listingStatus}`,
+        });
+      }
+
+      const slug = prop.slug && prop.slug.trim() ? prop.slug : makeSlugFallback(prop);
+
+      const updated = await prisma.property.update({
+        where: { id },
+        data: {
+          listingStatus: "PUBLISHED",
+          publishedAt: new Date(),
+          approvedAt: new Date(),
+          approvedById: (req as any).user?.id ?? null,
+          rejectedAt: null,
+          rejectedById: null,
+          rejectedReason: null,
+          slug,
+        },
+        include: { owner: true },
+      });
+
+      // Best-effort email (don’t fail the approval if email fails)
+      try {
+        const to = updated.owner?.email;
+        if (to) {
+          await sendListingApprovedEmail({
+            to,
+            listingTitle: updated.title || "Your listing",
+            liveUrl: `https://havn.ie/property.html?slug=${encodeURIComponent(
+              updated.slug || slug
+            )}`,
+          });
+        }
+      } catch (e) {
+        console.warn("Resend approve email failed:", e);
+      }
+
+      return res.json({ ok: true, property: updated });
+    } catch (e: any) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
   }
+);
 
-  return id;
-}
+// POST /api/admin/properties/:id/reject
+router.post(
+  "/properties/:id/reject",
+  requireAuth({ role: "admin" }),
+  async (req, res) => {
+    try {
+      const id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-/**
- * ✅ POST /api/admin/properties/:id/approve
- * Only SUBMITTED → PUBLISHED
- */
-router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const id = parseId(req, res);
-    if (!id) return;
+      const reason = String(req.body?.reason || "").trim();
+      if (!reason) {
+        return res.status(400).json({ ok: false, message: "Reject reason required" });
+      }
 
-    const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { user: true },
-    });
-
-    if (!prop) return res.status(404).json({ ok: false, error: "Property not found" });
-
-    const status = String(prop.status || "").toUpperCase();
-    if (status !== "SUBMITTED") {
-      return res.status(400).json({
-        ok: false,
-        error: "Only SUBMITTED listings can be approved",
-        status,
+      const prop = await prisma.property.findUnique({
+        where: { id },
+        include: { owner: true },
       });
-    }
 
-    const slug = prop.slug ? prop.slug : ensureSlug(prop.title || prop.address || String(prop.id));
+      if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
 
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        status: "PUBLISHED",
-        slug,
-        rejectedReason: null,
-        approvedAt: new Date(),
-      },
-    });
+      if (prop.listingStatus !== "SUBMITTED") {
+        return res.status(400).json({
+          ok: false,
+          message: `Cannot reject from status ${prop.listingStatus}`,
+        });
+      }
 
-    // ✅ Email owner
-    const email = prop.user?.email;
-    if (email) {
-      await sendListingApprovedEmail(email, {
-        title: updated.title || updated.address || updated.slug || "Your listing",
-        slug: updated.slug!,
+      const updated = await prisma.property.update({
+        where: { id },
+        data: {
+          listingStatus: "REJECTED",
+          rejectedAt: new Date(),
+          rejectedById: (req as any).user?.id ?? null,
+          rejectedReason: reason,
+        },
+        include: { owner: true },
       });
-    }
 
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("APPROVE ERROR:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Approve failed" });
+      // Best-effort email
+      try {
+        const to = updated.owner?.email;
+        if (to) {
+          await sendListingRejectedEmail({
+            to,
+            listingTitle: updated.title || "Your listing",
+            reason,
+            editUrl: `https://havn.ie/property-upload.html?id=${encodeURIComponent(
+              String(updated.id)
+            )}`,
+          });
+        }
+      } catch (e) {
+        console.warn("Resend reject email failed:", e);
+      }
+
+      return res.json({ ok: true, property: updated });
+    } catch (e: any) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
   }
-});
-
-/**
- * ✅ POST /api/admin/properties/:id/reject
- * Only SUBMITTED → REJECTED
- * Requires reason (optional in DB, but enforced in UI)
- */
-router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const id = parseId(req, res);
-    if (!id) return;
-
-    const reason = String(req.body?.reason || "").trim();
-
-    const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { user: true },
-    });
-
-    if (!prop) return res.status(404).json({ ok: false, error: "Property not found" });
-
-    const status = String(prop.status || "").toUpperCase();
-    if (status !== "SUBMITTED") {
-      return res.status(400).json({
-        ok: false,
-        error: "Only SUBMITTED listings can be rejected",
-        status,
-      });
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        status: "REJECTED",
-        rejectedReason: reason || null,
-        rejectedAt: new Date(),
-      },
-    });
-
-    // ✅ Email owner with reject reason + edit link
-    const email = prop.user?.email;
-    if (email) {
-      const editUrl = `https://havn.ie/property-upload.html?id=${encodeURIComponent(
-        String(updated.id)
-      )}`;
-      await sendListingRejectedEmail(email, {
-        title: updated.title || updated.address || updated.slug || "Your listing",
-        reason,
-        editUrl,
-      });
-    }
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("REJECT ERROR:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Reject failed" });
-  }
-});
+);
 
 export default router;
