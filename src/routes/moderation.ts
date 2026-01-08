@@ -2,19 +2,6 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 
-let sendListingApprovedEmail: any = null;
-let sendListingRejectedEmail: any = null;
-
-// Optional email wiring (won’t break build if missing)
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const mail = require("../lib/resendMail");
-  sendListingApprovedEmail = mail.sendListingApprovedEmail;
-  sendListingRejectedEmail = mail.sendListingRejectedEmail;
-} catch {
-  console.warn("Resend mail not available – continuing without emails");
-}
-
 const router = Router();
 
 function parseId(raw: string) {
@@ -47,21 +34,26 @@ function makeSlugFallback(p: any) {
   );
 }
 
+function ensureAdmin(req: any) {
+  // Your requireAuth middleware should attach user on req
+  const role = req?.user?.role;
+  return role === "admin";
+}
+
 /**
  * POST /api/admin/properties/:id/approve
+ * Requires: listingStatus SUBMITTED -> PUBLISHED
  */
-router.post(
-  "/properties/:id/approve",
-  requireAuth({ role: "admin" }),
-  async (req, res) => {
+router.post("/properties/:id/approve", requireAuth, async (req: any, res) => {
+  try {
+    if (!ensureAdmin(req)) {
+      return res.status(403).json({ ok: false, message: "Admin only" });
+    }
+
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-    const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { owner: true },
-    });
-
+    const prop = await prisma.property.findUnique({ where: { id } });
     if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (prop.listingStatus !== "SUBMITTED") {
@@ -71,7 +63,7 @@ router.post(
       });
     }
 
-    const slug = prop.slug || makeSlugFallback(prop);
+    const slug = prop.slug && String(prop.slug).trim() ? prop.slug : makeSlugFallback(prop);
 
     const updated = await prisma.property.update({
       where: { id },
@@ -79,7 +71,7 @@ router.post(
         listingStatus: "PUBLISHED",
         publishedAt: new Date(),
         approvedAt: new Date(),
-        approvedById: (req as any).user?.id ?? null,
+        approvedById: req.user?.id ?? null,
         rejectedAt: null,
         rejectedById: null,
         rejectedReason: null,
@@ -87,46 +79,33 @@ router.post(
       },
     });
 
-    if (sendListingApprovedEmail && prop.owner?.email) {
-      try {
-        await sendListingApprovedEmail({
-          to: prop.owner.email,
-          listingTitle: prop.title || "Your listing",
-          liveUrl: `https://havn.ie/property.html?slug=${encodeURIComponent(
-            slug
-          )}`,
-        });
-      } catch {
-        /* ignore email failure */
-      }
-    }
-
-    res.json({ ok: true, property: updated });
+    return res.json({ ok: true, property: updated });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
-);
+});
 
 /**
  * POST /api/admin/properties/:id/reject
+ * Requires: listingStatus SUBMITTED -> REJECTED
+ * Body: { reason: string }
  */
-router.post(
-  "/properties/:id/reject",
-  requireAuth({ role: "admin" }),
-  async (req, res) => {
+router.post("/properties/:id/reject", requireAuth, async (req: any, res) => {
+  try {
+    if (!ensureAdmin(req)) {
+      return res.status(403).json({ ok: false, message: "Admin only" });
+    }
+
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
 
     const reason = String(req.body?.reason || "").trim();
     if (!reason) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "Reject reason required" });
+      return res.status(400).json({ ok: false, message: "Reject reason required" });
     }
 
-    const prop = await prisma.property.findUnique({
-      where: { id },
-      include: { owner: true },
-    });
-
+    const prop = await prisma.property.findUnique({ where: { id } });
     if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (prop.listingStatus !== "SUBMITTED") {
@@ -141,26 +120,16 @@ router.post(
       data: {
         listingStatus: "REJECTED",
         rejectedAt: new Date(),
-        rejectedById: (req as any).user?.id ?? null,
+        rejectedById: req.user?.id ?? null,
         rejectedReason: reason,
       },
     });
 
-    if (sendListingRejectedEmail && prop.owner?.email) {
-      try {
-        await sendListingRejectedEmail({
-          to: prop.owner.email,
-          listingTitle: prop.title || "Your listing",
-          reason,
-          editUrl: `https://havn.ie/property-upload.html?id=${id}`,
-        });
-      } catch {
-        /* ignore email failure */
-      }
-    }
-
-    res.json({ ok: true, property: updated });
+    return res.json({ ok: true, property: updated });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
-);
+});
 
 export default router;
