@@ -1,6 +1,7 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
+import { sendListingStatusEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -42,7 +43,6 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
 
-    // ✅ Hard guard (prevents weird runtime crashes)
     if (!user || !Number.isFinite(Number(user.userId))) {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
@@ -83,9 +83,6 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ GET /api/properties/_admin
- * Admin inventory endpoint:
- * - no query: returns ALL listings (all statuses)
- * - ?id=32 or ?slug=... returns a single listing (for property-admin.html)
  */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
@@ -95,7 +92,6 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
-    // ✅ Single-item mode (used by moderation page)
     const idRaw = req.query.id;
     const slugRaw = req.query.slug;
 
@@ -115,20 +111,18 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
       return res.json({ ok: true, item });
     }
 
-    // ✅ List mode
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "25"), 10), 1), 100);
 
-    const where: any = {}; // no listingStatus restriction
+    const where: any = {};
 
     const q = String(req.query.q || "").trim();
     const county = String(req.query.county || "").trim();
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
 
-    // UI might send listingStatus=PENDING, but DB uses SUBMITTED
     const statusRaw = String(req.query.listingStatus || "").trim().toUpperCase();
-    const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw; // ✅ normalize
+    const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw;
 
     if (q) {
       where.OR = [
@@ -350,9 +344,6 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 /**
  * POST /api/properties/:id/submit
  * Owner/admin: move DRAFT -> SUBMITTED (locks listing)
- *
- * NOTE: UI can label SUBMITTED as "Pending"
- * Prisma enum does NOT include "PENDING"
  */
 router.post("/:id/submit", requireAuth, async (req: any, res) => {
   try {
@@ -376,9 +367,18 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        listingStatus: "SUBMITTED", // ✅ correct enum value
+        listingStatus: "SUBMITTED",
         submittedAt: new Date(),
       },
+    });
+
+    // ✅ EMAIL: notify admin (fire-and-forget, never breaks flow)
+    void sendListingStatusEmail({
+      status: "SUBMITTED",
+      listingTitle: (updated as any).title || "Untitled listing",
+      slug: (updated as any).slug,
+      listingId: String((updated as any).id),
+      adminUrl: `https://havn.ie/property-admin.html?id=${(updated as any).id}`,
     });
 
     return res.json({ ok: true, item: updated });

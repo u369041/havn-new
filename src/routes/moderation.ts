@@ -1,69 +1,39 @@
+// src/routes/moderation.ts
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import requireAuth from "../middleware/requireAuth";
+import requireAuth from "../middleware/requireAuth"; // default import
+import { sendListingStatusEmail } from "../lib/mail";
 
 const router = Router();
 
-function parseId(raw: string) {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
-
-function slugify(input: string) {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 80);
-}
-
-function makeSlugFallback(p: any) {
-  return slugify(
-    [
-      p?.title || "listing",
-      p?.county || "",
-      p?.city || "",
-      p?.eircode || "",
-      p?.id,
-    ]
-      .filter(Boolean)
-      .join(" ")
-  );
-}
-
-function ensureAdmin(req: any) {
-  // Your requireAuth middleware should attach user on req
-  const role = req?.user?.role;
-  return role === "admin";
+function requireAdmin(req: any, res: any, next: any) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ ok: false, message: "Admin only" });
+  }
+  next();
 }
 
 /**
  * POST /api/admin/properties/:id/approve
- * Requires: listingStatus SUBMITTED -> PUBLISHED
  */
-router.post("/properties/:id/approve", requireAuth, async (req: any, res) => {
+router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: any, res) => {
   try {
-    if (!ensureAdmin(req)) {
-      return res.status(403).json({ ok: false, message: "Admin only" });
-    }
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-    const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
+    const existing = await prisma.property.findUnique({
+      where: { id },
+      include: { user: true },
+    });
 
-    const prop = await prisma.property.findUnique({ where: { id } });
-    if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
-    if (prop.listingStatus !== "SUBMITTED") {
-      return res.status(400).json({
+    if (existing.listingStatus !== "SUBMITTED") {
+      return res.status(409).json({
         ok: false,
-        message: `Cannot approve from ${prop.listingStatus}`,
+        message: `Cannot approve from status ${existing.listingStatus}`,
       });
     }
-
-    const slug = prop.slug && String(prop.slug).trim() ? prop.slug : makeSlugFallback(prop);
 
     const updated = await prisma.property.update({
       where: { id },
@@ -71,47 +41,54 @@ router.post("/properties/:id/approve", requireAuth, async (req: any, res) => {
         listingStatus: "PUBLISHED",
         publishedAt: new Date(),
         approvedAt: new Date(),
-        approvedById: req.user?.id ?? null,
+        approvedById: req.user.userId,
         rejectedAt: null,
         rejectedById: null,
         rejectedReason: null,
-        slug,
       },
+      include: { user: true },
     });
 
-    return res.json({ ok: true, property: updated });
-  } catch (e: any) {
-    console.error(e);
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    // ✅ EMAIL: notify lister
+    void sendListingStatusEmail({
+      status: "APPROVED",
+      listingTitle: updated.title,
+      slug: updated.slug,
+      listingId: String(updated.id),
+      userEmail: updated.user?.email || "",
+      publicUrl: `https://havn.ie/property.html?slug=${updated.slug}`,
+      adminUrl: `https://havn.ie/property-admin.html?id=${updated.id}`,
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("approve error", err);
+    return res.status(500).json({ ok: false, message: err?.message || "Server error" });
   }
 });
 
 /**
  * POST /api/admin/properties/:id/reject
- * Requires: listingStatus SUBMITTED -> REJECTED
- * Body: { reason: string }
+ * Body: { reason?: string }
  */
-router.post("/properties/:id/reject", requireAuth, async (req: any, res) => {
+router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any, res) => {
   try {
-    if (!ensureAdmin(req)) {
-      return res.status(403).json({ ok: false, message: "Admin only" });
-    }
-
-    const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
 
     const reason = String(req.body?.reason || "").trim();
-    if (!reason) {
-      return res.status(400).json({ ok: false, message: "Reject reason required" });
-    }
 
-    const prop = await prisma.property.findUnique({ where: { id } });
-    if (!prop) return res.status(404).json({ ok: false, message: "Not found" });
+    const existing = await prisma.property.findUnique({
+      where: { id },
+      include: { user: true },
+    });
 
-    if (prop.listingStatus !== "SUBMITTED") {
-      return res.status(400).json({
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (existing.listingStatus !== "SUBMITTED") {
+      return res.status(409).json({
         ok: false,
-        message: `Cannot reject from ${prop.listingStatus}`,
+        message: `Cannot reject from status ${existing.listingStatus}`,
       });
     }
 
@@ -120,15 +97,30 @@ router.post("/properties/:id/reject", requireAuth, async (req: any, res) => {
       data: {
         listingStatus: "REJECTED",
         rejectedAt: new Date(),
-        rejectedById: req.user?.id ?? null,
-        rejectedReason: reason,
+        rejectedById: req.user.userId,
+        rejectedReason: reason || null,
+        approvedAt: null,
+        approvedById: null,
+        publishedAt: null,
       },
+      include: { user: true },
     });
 
-    return res.json({ ok: true, property: updated });
-  } catch (e: any) {
-    console.error(e);
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    // ✅ EMAIL: notify lister
+    void sendListingStatusEmail({
+      status: "REJECTED",
+      listingTitle: updated.title,
+      slug: updated.slug,
+      listingId: String(updated.id),
+      userEmail: updated.user?.email || "",
+      adminUrl: `https://havn.ie/property-admin.html?id=${updated.id}`,
+      reason,
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("reject error", err);
+    return res.status(500).json({ ok: false, message: err?.message || "Server error" });
   }
 });
 
