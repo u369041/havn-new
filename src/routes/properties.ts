@@ -35,16 +35,6 @@ async function generateUniqueSlug(base: string) {
 }
 
 /**
- * Normalize any legacy status values so UI logic stays consistent.
- * We previously used SUBMITTED; now we use PENDING.
- */
-function normalizeListingStatus(s: any) {
-  const v = String(s || "").toUpperCase();
-  if (v === "SUBMITTED") return "PENDING";
-  return v || "DRAFT";
-}
-
-/**
  * GET /api/properties/mine
  * Returns all listings owned by user (admins see all)
  */
@@ -52,11 +42,17 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
 
+    // ✅ Hard guard (prevents weird runtime crashes)
     if (!user || !Number.isFinite(Number(user.userId))) {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const where = user.role === "admin" ? {} : { userId: user.userId };
+    const where =
+      user.role === "admin"
+        ? {}
+        : {
+            userId: user.userId,
+          };
 
     const items = await prisma.property.findMany({
       where,
@@ -87,7 +83,9 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 
 /**
  * ✅ GET /api/properties/_admin
- * Admin inventory endpoint: returns ALL listings (all statuses).
+ * Admin inventory endpoint:
+ * - no query: returns ALL listings (all statuses)
+ * - ?id=32 or ?slug=... returns a single listing (for property-admin.html)
  */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
@@ -97,16 +95,40 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
+    // ✅ Single-item mode (used by moderation page)
+    const idRaw = req.query.id;
+    const slugRaw = req.query.slug;
+
+    if (idRaw || slugRaw) {
+      let item: any = null;
+
+      if (idRaw) {
+        const id = parseInt(String(idRaw), 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+        item = await prisma.property.findUnique({ where: { id } });
+      } else if (slugRaw) {
+        const slug = String(slugRaw);
+        item = await prisma.property.findUnique({ where: { slug } });
+      }
+
+      if (!item) return res.status(404).json({ ok: false, message: "Not found" });
+      return res.json({ ok: true, item });
+    }
+
+    // ✅ List mode
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "25"), 10), 1), 100);
 
-    const where: any = {};
+    const where: any = {}; // no listingStatus restriction
 
     const q = String(req.query.q || "").trim();
     const county = String(req.query.county || "").trim();
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
-    const statusRaw = String(req.query.listingStatus || "").trim(); // optional filter
+
+    // UI might send listingStatus=PENDING, but DB uses SUBMITTED
+    const statusRaw = String(req.query.listingStatus || "").trim().toUpperCase();
+    const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw; // ✅ normalize
 
     if (q) {
       where.OR = [
@@ -123,17 +145,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     if (county) where.county = { contains: county, mode: "insensitive" };
     if (city) where.city = { contains: city, mode: "insensitive" };
     if (type) where.propertyType = type;
-
-    // ✅ status filter with backward compatibility
-    if (statusRaw) {
-      const status = normalizeListingStatus(statusRaw);
-      if (status === "PENDING") {
-        // include legacy SUBMITTED too so old rows still show under Pending
-        where.listingStatus = { in: ["PENDING", "SUBMITTED"] };
-      } else {
-        where.listingStatus = status;
-      }
-    }
+    if (status) where.listingStatus = status;
 
     const [total, items] = await Promise.all([
       prisma.property.count({ where }),
@@ -211,9 +223,7 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
     const property = await prisma.property.findUnique({ where: { slug } });
     if (!property) return res.status(404).json({ ok: false, message: "Not found" });
 
-    const normalized = normalizeListingStatus(property.listingStatus);
-
-    if (normalized !== "PUBLISHED") {
+    if (property.listingStatus !== "PUBLISHED") {
       if (!user || !isOwnerOrAdmin(user, property.userId)) {
         return res.status(404).json({ ok: false, message: "Not found" });
       }
@@ -295,18 +305,13 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
     if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    const normalized = normalizeListingStatus(existing.listingStatus);
-
-    if (normalized === "PUBLISHED") {
+    if (existing.listingStatus === "PUBLISHED") {
       return res.status(400).json({ ok: false, message: "Published listings cannot be edited directly." });
     }
-
-    // ✅ Lock anything pending review (old SUBMITTED counts as PENDING)
-    if (normalized === "PENDING") {
-      return res.status(409).json({ ok: false, message: "Listing is pending review and locked." });
+    if (existing.listingStatus === "SUBMITTED") {
+      return res.status(409).json({ ok: false, message: "Listing is submitted and locked." });
     }
-
-    if (normalized === "ARCHIVED") {
+    if (existing.listingStatus === "ARCHIVED") {
       return res.status(409).json({ ok: false, message: "Listing is archived." });
     }
 
@@ -343,10 +348,13 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 });
 
 /**
- * ✅ Canonical Submit handler:
- * DRAFT -> PENDING (and old SUBMITTED treated as PENDING)
+ * POST /api/properties/:id/submit
+ * Owner/admin: move DRAFT -> SUBMITTED (locks listing)
+ *
+ * NOTE: UI can label SUBMITTED as "Pending"
+ * Prisma enum does NOT include "PENDING"
  */
-async function submitHandler(req: any, res: any) {
+router.post("/:id/submit", requireAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
@@ -358,9 +366,7 @@ async function submitHandler(req: any, res: any) {
 
     if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    const normalized = normalizeListingStatus(existing.listingStatus);
-
-    if (normalized !== "DRAFT" && normalized !== "REJECTED") {
+    if (existing.listingStatus !== "DRAFT") {
       return res.status(409).json({
         ok: false,
         message: `Cannot submit from status ${existing.listingStatus}`,
@@ -370,27 +376,16 @@ async function submitHandler(req: any, res: any) {
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        listingStatus: "PENDING",
+        listingStatus: "SUBMITTED", // ✅ correct enum value
         submittedAt: new Date(),
       },
     });
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
-    console.error("Submit handler error", err);
+    console.error("POST /properties/:id/submit error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
-}
-
-/**
- * ✅ Submit endpoints (ALL supported shapes)
- * Your frontend tries these — we now support them all:
- * - POST /api/properties/draft/:id/submit
- * - POST /api/properties/:id/submit
- * - POST /api/properties/submit/:id
- */
-router.post("/draft/:id/submit", requireAuth, submitHandler);
-router.post("/:id/submit", requireAuth, submitHandler);
-router.post("/submit/:id", requireAuth, submitHandler);
+});
 
 export default router;
