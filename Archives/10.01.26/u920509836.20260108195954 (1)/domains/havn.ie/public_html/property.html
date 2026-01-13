@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HAVN.ie • Property</title>
+
+  <style>
+    :root{
+      --bg:#f6f8fc;
+      --card:#ffffff;
+      --ink:#0f172a;
+      --muted:#64748b;
+      --line:#e5e7eb;
+      --shadow:0 10px 30px rgba(15,23,42,.08);
+      --radius:18px;
+      --heroH: 380px; /* hard lock; JS reinforces */
+      --maxW: 1180px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color:var(--ink);
+      background:var(--bg);
+    }
+    a{color:inherit}
+    .wrap{max-width:var(--maxW); margin:0 auto; padding:18px 14px 60px;}
+    .topbar{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:999px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .brand{display:flex; align-items:center; gap:10px; text-decoration:none;}
+    .logo{
+      width:28px;height:28px;border-radius:9px;
+      background:linear-gradient(135deg,#2563eb,#0ea5e9);
+      display:grid; place-items:center;
+      color:#fff; font-weight:900;
+      box-shadow:0 10px 25px rgba(37,99,235,.25);
+    }
+    .brandTxt{display:flex; flex-direction:column; line-height:1.05}
+    .brandTxt strong{font-size:14px}
+    .brandTxt span{font-size:12px; color:var(--muted)}
+    .topActions{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end;}
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      padding:9px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:800;
+      font-size:13px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .btn.primary{
+      background:#0f172a;
+      color:#fff;
+      border-color:#0f172a;
+    }
+    .btn:active{transform:translateY(1px)}
+
+    .debug{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      color:#0f172a;
+      font-size:12px;
+      opacity:.9;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#fff;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      overflow:hidden;
+      white-space:nowrap;
+    }
+    .debug b{font-weight:900}
+    .debug .left{display:flex; gap:10px; align-items:center; min-width:0;}
+    .debug .left span{min-width:0; overflow:hidden; text-overflow:ellipsis}
+    .debug .right{color:var(--muted)}
+
+    .headlineCard{
+      margin-top:14px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:16px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .price{font-weight:900; font-size:20px; letter-spacing:-0.01em}
+    h1{
+      margin:4px 0 6px;
+      font-size:30px;
+      line-height:1.12;
+      letter-spacing:-0.02em;
+    }
+    .subline{color:var(--muted); font-size:13px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+    .dot{width:6px;height:6px;border-radius:50%; background:#94a3b8; display:inline-block}
+    .actionsRow{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    .pill{
+      padding:9px 12px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-weight:900;
+      font-size:13px;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+    }
+    .pill svg{width:16px;height:16px}
+    .pill:active{transform:translateY(1px)}
+
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap:14px;
+      align-items:start;
+    }
+    @media (max-width: 820px){
+      .grid{grid-template-columns:1fr;}
+      h1{font-size:26px;}
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .gallery{
+      display:grid;
+      grid-template-columns: 72px 1fr;
+      gap:12px;
+      padding:12px;
+    }
+    @media (max-width: 820px){
+      .gallery{grid-template-columns: 64px 1fr;}
+    }
+    .thumbRail{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      overflow:auto;
+      max-height: calc(var(--heroH) + 12px);
+      padding-right:4px;
+    }
+    .thumb{
+      width:64px; height:64px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      overflow:hidden;
+      cursor:pointer;
+      flex:0 0 auto;
+      background:#0b1220;
+      position:relative;
+    }
+    .thumb img{width:100%;height:100%;object-fit:cover;display:block;opacity:.92}
+    .thumb.active{outline:3px solid rgba(37,99,235,.35); border-color:#bfdbfe;}
+    .hero{
+      border-radius:18px;
+      overflow:hidden;
+      border:1px solid var(--line);
+      position:relative;
+      height: var(--heroH) !important;
+      background:#0b1220;
+    }
+    .hero img{
+      width:100%;
+      height:100% !important;
+      object-fit:cover;
+      display:block;
+      user-select:none;
+      -webkit-user-drag:none;
+    }
+    .heroTag{
+      position:absolute;
+      left:12px; top:12px;
+      background:rgba(255,255,255,.92);
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:7px 10px;
+      font-weight:900;
+      font-size:12px;
+      box-shadow:0 10px 25px rgba(15,23,42,.10);
+    }
+    .noPhotoBig{
+      display:grid;
+      place-items:center;
+      height: var(--heroH);
+      color:#94a3b8;
+      font-weight:900;
+      font-size:14px;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:#0b1220;
+    }
+
+    .sideStack{display:flex; flex-direction:column; gap:14px;}
+    .sideCard{padding:14px;}
+    .sideTitle{font-weight:900; font-size:14px; margin:0 0 10px;}
+    .glanceGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+    .glanceBox{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px;
+      background:#fff;
+    }
+    .glanceLabel{color:var(--muted); font-size:12px; font-weight:800;}
+    .glanceVal{margin-top:6px; font-size:16px; font-weight:900;}
+    .ctaBtn{
+      width:100%;
+      padding:12px 14px;
+      border-radius:14px;
+      font-weight:900;
+      border:1px solid #2563eb;
+      background:#2563eb;
+      color:#fff;
+      cursor:pointer;
+      box-shadow:0 14px 35px rgba(37,99,235,.22);
+    }
+    .ghostBtn{
+      width:100%;
+      padding:12px 14px;
+      border-radius:14px;
+      font-weight:900;
+      border:1px solid var(--line);
+      background:#fff;
+      cursor:pointer;
+    }
+
+    .pad{padding:14px;}
+    .secTitle{margin:0 0 10px; font-weight:900; font-size:14px;}
+    .text{color:#0f172a; font-size:14px; line-height:1.55;}
+    .muted{color:var(--muted);}
+    .chips{display:flex; flex-wrap:wrap; gap:8px;}
+    .chip{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:999px;
+      padding:7px 10px;
+      font-weight:900;
+      font-size:12px;
+    }
+
+    .lb{
+      position:fixed; inset:0;
+      background:rgba(2,6,23,.78);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      padding:18px;
+    }
+    .lb.on{display:flex;}
+    .lbInner{
+      width:min(1100px, 96vw);
+      background:#0b1220;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:22px;
+      overflow:hidden;
+      box-shadow:0 30px 80px rgba(0,0,0,.55);
+      position:relative;
+    }
+    .lbImg{
+      width:100%;
+      height:min(74vh, 760px);
+      object-fit:contain;
+      display:block;
+      background:#0b1220;
+    }
+    .lbTop{
+      position:absolute;
+      top:10px; left:10px; right:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      pointer-events:none;
+    }
+    .lbPill{
+      pointer-events:auto;
+      background:rgba(255,255,255,.92);
+      border:1px solid rgba(255,255,255,.45);
+      padding:8px 10px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      cursor:pointer;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <a class="brand" href="/index.html" aria-label="HAVN home">
+        <div class="logo">⌂</div>
+        <div class="brandTxt">
+          <strong>havn.ie</strong>
+          <span>Ireland’s most curated property marketplace.</span>
+        </div>
+      </a>
+
+      <div class="topActions">
+        <a class="btn primary" href="/properties.html">Browse listings</a>
+        <a class="btn" href="/login.html" id="loginBtn">Login</a>
+      </div>
+    </div>
+
+    <div class="debug" id="debugBar">
+      <div class="left">
+        <b id="dbgVersion">vA.5-PROP-UNIFIED-SCROLL</b>
+        <span id="dbgSlug">slug=—</span>
+      </div>
+      <div class="right" id="dbgStatus">Loading…</div>
+    </div>
+
+    <div class="headlineCard">
+      <div>
+        <div class="price" id="priceTxt">—</div>
+        <h1 id="titleTxt">Loading…</h1>
+        <div class="subline">
+          <span class="dot"></span>
+          <span id="addrTxt" class="muted">—</span>
+        </div>
+      </div>
+
+      <div class="actionsRow">
+        <button class="pill" type="button" id="saveBtn" title="Save">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Save
+        </button>
+
+        <button class="pill" type="button" id="shareBtn" title="Share">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <path d="M8.6 13.5l6.8 3.9M15.4 6.6L8.6 10.5"></path>
+          </svg>
+          Share
+        </button>
+
+        <button class="pill" type="button" id="contactBtn" title="Contact">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16v16H4z"></path>
+            <path d="M22 6l-10 7L2 6"></path>
+          </svg>
+          Contact
+        </button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="leftStack" style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card">
+          <div class="gallery">
+            <div class="thumbRail" id="thumbRail"></div>
+
+            <div>
+              <div class="hero" id="heroBox">
+                <div class="heroTag">Listing</div>
+                <img id="heroImg" alt="" />
+              </div>
+              <div class="noPhotoBig" id="noPhotoBig" style="display:none;">No photo</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card pad">
+          <div class="secTitle">Description</div>
+          <div class="text" id="descTxt">—</div>
+        </div>
+
+        <div class="card pad">
+          <div class="secTitle">Details</div>
+          <div class="text muted" id="detailsTxt">—</div>
+        </div>
+      </div>
+
+      <div class="sideStack">
+        <div class="card sideCard">
+          <div class="sideTitle">At a glance</div>
+          <div class="glanceGrid">
+            <div class="glanceBox">
+              <div class="glanceLabel">Type</div>
+              <div class="glanceVal" id="glType">—</div>
+            </div>
+            <div class="glanceBox">
+              <div class="glanceLabel">Status</div>
+              <div class="glanceVal" id="glStatus">—</div>
+            </div>
+            <div class="glanceBox">
+              <div class="glanceLabel">Beds</div>
+              <div class="glanceVal" id="glBeds">—</div>
+            </div>
+            <div class="glanceBox">
+              <div class="glanceLabel">Baths</div>
+              <div class="glanceVal" id="glBaths">—</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">
+            <button class="ctaBtn" type="button" id="contactSellerBtn">Contact seller</button>
+            <button class="ghostBtn" type="button" id="backBtn">Back to listings</button>
+          </div>
+        </div>
+
+        <div class="card sideCard">
+          <div class="sideTitle">Highlights</div>
+          <div class="text muted" id="highlightsTxt">No highlights listed.</div>
+        </div>
+
+        <div class="card sideCard">
+          <div class="sideTitle">Features</div>
+          <div class="chips" id="featuresChips"></div>
+          <div class="text muted" id="featuresEmpty" style="display:none;">No features listed.</div>
+        </div>
+
+        <div class="card sideCard">
+          <div class="sideTitle">Location</div>
+          <div class="text muted" id="locTxt">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lb" id="lightbox" aria-hidden="true">
+    <div class="lbInner">
+      <div class="lbTop">
+        <div class="lbPill" id="lbCount">1 / 1</div>
+        <div class="lbPill" id="lbClose">Close ✕</div>
+      </div>
+      <img class="lbImg" id="lbImg" alt="" />
+    </div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+
+    function qs(name) {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    }
+
+    function safeStr(v) {
+      if (v === null || v === undefined) return "";
+      return String(v);
+    }
+
+    function euro(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "—";
+      try {
+        return n.toLocaleString("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+      } catch {
+        return "€" + Math.round(n).toLocaleString("en-IE");
+      }
+    }
+
+    function setTxt(el, v, fallback="—") {
+      if (!el) return;
+      const s = safeStr(v).trim();
+      el.textContent = s ? s : fallback;
+    }
+
+    function titleCase(s) {
+      return safeStr(s).toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function normalizeStatus(s) {
+      const u = safeStr(s).toUpperCase().trim();
+      if (!u) return "";
+      if (u === "PUBLISHED") return "Published";
+      if (u === "SUBMITTED") return "Submitted";
+      if (u === "DRAFT") return "Draft";
+      if (u === "REJECTED") return "Rejected";
+      if (u === "ARCHIVED") return "Archived";
+      return titleCase(u);
+    }
+
+    function lockHero() {
+      const root = document.documentElement;
+      const h = getComputedStyle(root).getPropertyValue("--heroH").trim() || "380px";
+      const hero = $("#heroBox");
+      const img = $("#heroImg");
+      if (hero) hero.style.setProperty("height", h, "important");
+      if (img) img.style.setProperty("height", "100%", "important");
+    }
+
+    const API = "https://api.havn.ie";
+    const slug = qs("slug") || "";
+
+    $("#dbgSlug").textContent = "slug=" + (slug || "—");
+
+    function dbgRight(txt) {
+      $("#dbgStatus").textContent = txt;
+    }
+
+    async function fetchJson(path) {
+      const url = API + path;
+      const res = await fetch(url, { method: "GET" });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch {}
+      return { ok: res.ok, status: res.status, url, json, text };
+    }
+
+    // ✅ Unwrap property payloads safely
+    function unwrapProperty(payload) {
+      if (!payload) return null;
+      if (payload.property && typeof payload.property === "object") return payload.property;
+      if (payload.data && typeof payload.data === "object") return payload.data;
+      if (payload.item && typeof payload.item === "object") return payload.item;
+      // Some APIs return { ok:true, result:{...} }
+      if (payload.result && typeof payload.result === "object") return payload.result;
+      // Otherwise assume payload is already the property
+      return payload;
+    }
+
+    function pickPhotos(p) {
+      if (Array.isArray(p?.photos) && p.photos.length) return p.photos;
+      if (Array.isArray(p?.images) && p.images.length) return p.images;
+      if (Array.isArray(p?.photoUrls) && p.photoUrls.length) return p.photoUrls;
+      return [];
+    }
+
+    function computeGlance(p) {
+      const type =
+        p?.propertyType ??
+        p?.type ??
+        p?.listingType ??
+        p?.homeType ??
+        p?.category ??
+        "";
+
+      const status =
+        p?.listingStatus ??
+        p?.status ??
+        p?.state ??
+        "";
+
+      const beds =
+        p?.bedrooms ??
+        p?.beds ??
+        p?.bedCount ??
+        p?.numBeds ??
+        null;
+
+      const baths =
+        p?.bathrooms ??
+        p?.baths ??
+        p?.bathCount ??
+        p?.numBaths ??
+        null;
+
+      return {
+        type: type ? titleCase(type) : "",
+        status: normalizeStatus(status),
+        beds: (beds === 0 || beds) ? String(beds) : "",
+        baths: (baths === 0 || baths) ? String(baths) : "",
+      };
+    }
+
+    function render(property, meta) {
+      setTxt($("#priceTxt"), euro(property?.price ?? property?.askingPrice ?? property?.rent));
+      setTxt($("#titleTxt"), property?.title ?? property?.headline ?? "Untitled listing");
+
+      const addrBits = [
+        property?.address1,
+        property?.address2,
+        property?.city,
+        property?.county,
+        property?.eircode
+      ].filter(Boolean);
+      setTxt($("#addrTxt"), addrBits.join(" • "));
+
+      setTxt($("#descTxt"), property?.description ?? property?.desc ?? "", "No description provided.");
+      setTxt($("#detailsTxt"), property?.details ?? "", "No details provided.");
+
+      const highlights = Array.isArray(property?.highlights) ? property.highlights : [];
+      set noted = highlights.length ? highlights.join(" • ") : "";
+      setTxt($("#highlightsTxt"), noted, "No highlights listed.");
+
+      const features =
+        Array.isArray(property?.features) ? property.features :
+        (typeof property?.features === "string" ? [property.features] : []);
+
+      const chips = $("#featuresChips");
+      chips.innerHTML = "";
+      if (features.length) {
+        $("#featuresEmpty").style.display = "none";
+        features.forEach(f => {
+          const d = document.createElement("div");
+          d.className = "chip";
+          d.textContent = safeStr(f);
+          chips.appendChild(d);
+        });
+      } else {
+        $("#featuresEmpty").style.display = "block";
+      }
+
+      const loc = [property?.city, property?.county, property?.eircode].filter(Boolean).join(" • ");
+      setTxt($("#locTxt"), loc, "Location not provided.");
+
+      // ✅ At a glance
+      const g = computeGlance(property);
+      setTxt($("#glType"), g.type, "—");
+      setTxt($("#glStatus"), g.status, "—");
+      setTxt($("#glBeds"), g.beds, "—");
+      setTxt($("#glBaths"), g.baths, "—");
+
+      const photos = pickPhotos(property);
+      buildGallery(photos);
+
+      if (meta?.loadedFrom) dbgRight(`Loaded (${meta.loadedFrom})`);
+      else dbgRight("Loaded");
+
+      lockHero();
+      setTimeout(lockHero, 50);
+      setTimeout(lockHero, 250);
+      setTimeout(lockHero, 900);
+    }
+
+    // Gallery + Lightbox
+    let G_PHOTOS = [];
+    let G_INDEX = 0;
+
+    function buildGallery(photos) {
+      G_PHOTOS = Array.isArray(photos) ? photos : [];
+      G_INDEX = 0;
+
+      const rail = $("#thumbRail");
+      rail.innerHTML = "";
+
+      const hero = $("#heroBox");
+      const heroImg = $("#heroImg");
+      const noBig = $("#noPhotoBig");
+
+      if (!G_PHOTOS.length) {
+        hero.style.display = "none";
+        noBig.style.display = "grid";
+        return;
+      }
+
+      hero.style.display = "block";
+      noBig.style.display = "none";
+
+      G_PHOTOS.forEach((url, i) => {
+        const t = document.createElement("div");
+        t.className = "thumb" + (i === 0 ? " active" : "");
+        const im = document.createElement("img");
+        im.src = url;
+        im.alt = "";
+        t.appendChild(im);
+        t.addEventListener("click", () => setActive(i));
+        rail.appendChild(t);
+      });
+
+      heroImg.src = G_PHOTOS[0];
+      heroImg.alt = "";
+      heroImg.addEventListener("load", lockHero, { once:false });
+
+      hero.addEventListener("click", () => openLightbox(G_INDEX));
+      lockHero();
+    }
+
+    function setActive(i) {
+      G_INDEX = i;
+      $("#heroImg").src = G_PHOTOS[i];
+
+      const thumbs = Array.from(document.querySelectorAll(".thumb"));
+      thumbs.forEach((t, idx) => t.classList.toggle("active", idx === i));
+
+      lockHero();
+      setTimeout(lockHero, 40);
+    }
+
+    function openLightbox(i) {
+      if (!G_PHOTOS.length) return;
+      G_INDEX = Math.max(0, Math.min(i, G_PHOTOS.length - 1));
+      $("#lbImg").src = G_PHOTOS[G_INDEX];
+      $("#lbCount").textContent = `${G_INDEX + 1} / ${G_PHOTOS.length}`;
+      $("#lightbox").classList.add("on");
+      $("#lightbox").setAttribute("aria-hidden", "false");
+    }
+
+    function closeLightbox() {
+      $("#lightbox").classList.remove("on");
+      $("#lightbox").setAttribute("aria-hidden", "true");
+    }
+
+    $("#lbClose").addEventListener("click", closeLightbox);
+    $("#lightbox").addEventListener("click", (e) => {
+      if (e.target && e.target.id === "lightbox") closeLightbox();
+    });
+    window.addEventListener("keydown", (e) => {
+      if (!$("#lightbox").classList.contains("on")) return;
+      if (e.key === "Escape") closeLightbox();
+      if (e.key === "ArrowRight") openLightbox(Math.min(G_INDEX + 1, G_PHOTOS.length - 1));
+      if (e.key === "ArrowLeft") openLightbox(Math.max(G_INDEX - 1, 0));
+    });
+
+    // Buttons
+    $("#backBtn").addEventListener("click", () => (window.location.href = "/properties.html"));
+    $("#contactSellerBtn").addEventListener("click", () => alert("Contact flow coming next (email/phone)."));
+    $("#contactBtn").addEventListener("click", () => $("#contactSellerBtn").click());
+    $("#shareBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        alert("Link copied ✅");
+      } catch {
+        prompt("Copy link:", window.location.href);
+      }
+    });
+    $("#saveBtn").addEventListener("click", () => alert("Save flow coming next (requires account)."));
+
+    // Boot
+    (async function boot() {
+      lockHero();
+
+      if (!slug) {
+        dbgRight("Missing slug");
+        $("#titleTxt").textContent = "Missing slug";
+        $("#descTxt").textContent = "Open a listing via property.html?slug=…";
+        return;
+      }
+
+      dbgRight("Loading…");
+      const r1 = await fetchJson(`/api/properties/${encodeURIComponent(slug)}`);
+
+      if (r1.ok && r1.json) {
+        const prop = unwrapProperty(r1.json);
+        if (prop && typeof prop === "object") {
+          render(prop, { loadedFrom: `/api/properties/${slug}` });
+          return;
+        }
+      }
+
+      const r2 = await fetchJson(`/api/properties/latest`);
+      if (r2.ok && r2.json) {
+        const payload = r2.json;
+        const items = Array.isArray(payload) ? payload : (Array.isArray(payload.items) ? payload.items : []);
+        const hit = items.find(x => safeStr(x?.slug) === slug);
+        if (hit) {
+          render(hit, { loadedFrom: `/api/properties/latest (matched slug)` });
+          return;
+        }
+      }
+
+      dbgRight(`Load failed (${r1.status})`);
+      $("#titleTxt").textContent = "Listing not found";
+      $("#descTxt").textContent = "This listing may be unpublished or the link is incorrect.";
+      $("#detailsTxt").textContent = r1.text || "";
+    })();
+  </script>
+</body>
+</html>

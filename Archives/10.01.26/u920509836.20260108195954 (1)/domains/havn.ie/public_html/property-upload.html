@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>List a Property – HAVN.ie</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- ✅ Stable direct CSS (no loader) -->
+  <link rel="stylesheet" href="/styles.css?v=20260103-final1">
+
+  <style>
+    :root{
+      --bg:#f5f7fa;
+      --card:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --accent:#2563eb;
+      --good:#16a34a;
+      --bad:#dc2626;
+      --warn:#f59e0b;
+      --line:rgba(15,23,42,.10);
+      --shadow:0 18px 50px rgba(15,23,42,.10);
+      --r-xl:18px;
+      --r-lg:14px;
+      --r-md:12px;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap{
+      max-width: 1150px;
+      margin: 22px auto 90px;
+      padding: 0 16px;
+    }
+    .topbar{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom: 14px;
+      flex-wrap:wrap;
+    }
+    h1{ margin:0; font-size: 22px; }
+    .sub{
+      margin:6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 760px;
+    }
+    .pillRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .pill{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:12px;
+      font-weight:800;
+      color:#334155;
+      box-shadow: 0 8px 22px rgba(15,23,42,.06);
+      white-space:nowrap;
+    }
+    .dot{
+      width:10px; height:10px; border-radius:50%;
+      background: #cbd5e1;
+      box-shadow: inset 0 0 0 2px rgba(15,23,42,.10);
+    }
+    .dot.ok{ background: var(--good); }
+    .dot.bad{ background: var(--bad); }
+
+    .badge{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:12px;
+      font-weight:900;
+      border:1px solid rgba(15,23,42,.10);
+      background:#fff;
+      color:#334155;
+    }
+    .badge.published{ background: rgba(22,163,74,.08); border-color: rgba(22,163,74,.22); color:#166534; }
+    .badge.pending{ background: rgba(59,130,246,.10); border-color: rgba(59,130,246,.25); color:#1e40af; }
+    .badge.draft{ background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.30); color:#92400e; }
+    .badge.archived{ background: rgba(148,163,184,.25); border-color: rgba(100,116,139,.30); color:#334155; }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 14px;
+      align-items:start;
+    }
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--r-xl);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .cardHd{
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .cardHd h2{
+      margin:0;
+      font-size: 14px;
+      letter-spacing:.2px;
+    }
+    .cardBd{ padding: 14px; }
+
+    .statusBox{
+      border:1px solid var(--line);
+      background:#f8fafc;
+      border-radius: var(--r-lg);
+      padding: 10px 12px;
+      font-size: 13px;
+      color:#334155;
+      min-height: 42px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .statusBox strong{ font-weight:900; }
+    .statusBox.good{ border-color: rgba(22,163,74,.25); background: rgba(22,163,74,.06); }
+    .statusBox.bad{ border-color: rgba(220,38,38,.25); background: rgba(220,38,38,.06); }
+    .statusBox.warn{ border-color: rgba(245,158,11,.30); background: rgba(245,158,11,.08); }
+
+    .modeRow{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .row{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    @media (max-width: 720px){
+      .row{ grid-template-columns: 1fr; }
+    }
+
+    label{
+      font-weight: 800;
+      display:block;
+      margin: 0 0 6px;
+      font-size: 12px;
+      color:#0f172a;
+    }
+    input, select, textarea{
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 10px 11px;
+      font-size: 14px;
+      outline: none;
+      background:#fff;
+    }
+    textarea{ min-height: 110px; resize: vertical; }
+    input:focus, select:focus, textarea:focus{
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 3px rgba(59,130,246,.16);
+    }
+    input:disabled, select:disabled, textarea:disabled{
+      background:#f1f5f9;
+      color:#64748b;
+    }
+
+    .help{
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .btnRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .btn{
+      border:none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 900;
+      cursor:pointer;
+      font-size: 13px;
+      white-space:nowrap;
+    }
+    .btnPrimary{ background: var(--accent); color:#fff; }
+    .btnPrimary:hover{ background:#1d4ed8; }
+    .btnGhost{ background:#eef2ff; color:#1e40af; border:1px solid rgba(37,99,235,.20); }
+    .btnDanger{ background:#fee2e2; color:#991b1b; border:1px solid rgba(220,38,38,.22); }
+    .btnGray{ background:#e2e8f0; color:#0f172a; border:1px solid rgba(100,116,139,.25); }
+    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+    .drop{
+      border: 2px dashed #94a3b8;
+      border-radius: 14px;
+      padding: 16px;
+      text-align:center;
+      background: #f1f5f9;
+      cursor:pointer;
+    }
+    .drop strong{ display:block; font-weight: 900; margin-bottom: 4px; }
+    .drop .small{ font-size: 12px; color: var(--muted); }
+
+    .photoMeta{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:10px;
+      align-items:center;
+      color:#334155;
+      font-size:12px;
+      font-weight:800;
+    }
+    .photoGrid{
+      margin-top:10px;
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap:10px;
+    }
+    .tile{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow:hidden;
+      background:#fff;
+      position:relative;
+      box-shadow: 0 10px 26px rgba(15,23,42,.06);
+    }
+    .tile img{
+      width:100%;
+      height: 110px;
+      object-fit: cover;
+      display:block;
+      background:#0b1220;
+    }
+    .tileBar{
+      padding: 8px;
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:center;
+    }
+    .mini{
+      border:1px solid var(--line);
+      background:#f8fafc;
+      border-radius:999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .mini:hover{ background:#eef2ff; }
+    .mini:disabled{ opacity:.6; cursor:not-allowed; }
+    .coverTag{
+      position:absolute;
+      left:10px;
+      top:10px;
+      background: rgba(37,99,235,.92);
+      color:#fff;
+      border-radius:999px;
+      padding: 6px 10px;
+      font-weight:900;
+      font-size:12px;
+      box-shadow: 0 10px 24px rgba(15,23,42,.25);
+    }
+
+    .prog{
+      margin-top:10px;
+      height: 10px;
+      border-radius: 999px;
+      background:#e2e8f0;
+      overflow:hidden;
+      display:none;
+    }
+    .prog > div{
+      height:100%;
+      width:0%;
+      background: var(--accent);
+      transition: width .12s ease;
+    }
+
+    .mapWrap{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow:hidden;
+      background:#eef2ff;
+      margin-top:10px;
+    }
+    .mapWrap iframe{
+      width:100%;
+      height: 220px;
+      border:0;
+      display:block;
+      background:#eef2ff;
+    }
+
+    details{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius: 14px;
+      padding: 10px 12px;
+    }
+    details summary{
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      color:#0f172a;
+    }
+    pre{
+      margin:10px 0 0;
+      background:#0b1220;
+      color:#e2e8f0;
+      border-radius: 12px;
+      padding: 10px;
+      overflow:auto;
+      font-size: 12px;
+      line-height:1.35;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ✅ Header is injected by /havn-auth.js -->
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1 id="pageTitle">List a property</h1>
+        <p class="sub" id="pageSub">
+          Draft → Submit → Submitted (locked) → Approved (Published). Submitted listings are locked.
+        </p>
+      </div>
+
+      <div class="pillRow">
+        <div class="pill"><span class="dot" id="dotAuth"></span>Auth</div>
+        <div class="pill"><span class="dot" id="dotSig"></span>Signature</div>
+        <div class="pill"><span class="dot" id="dotPhotos"></span>Photos</div>
+        <div class="pill"><span class="dot" id="dotForm"></span>Form</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="cardBd">
+        <div class="statusBox" id="statusBox">
+          <div class="modeRow">
+            <strong>Status:</strong> <span id="statusText">Ready.</span>
+            <span id="modeBadge" class="badge draft" style="display:none;">DRAFT</span>
+            <span id="modeMeta" class="help" style="margin:0;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="cardHd">
+          <h2>Property details</h2>
+          <div class="btnRow">
+            <button class="btn btnGhost" id="btnPreviewPayload" type="button">Update preview</button>
+          </div>
+        </div>
+
+        <div class="cardBd">
+          <form id="propertyForm">
+            <div class="row">
+              <div>
+                <label>Title *</label>
+                <input id="title" required placeholder="e.g. Stunning 3-bed home in Galway" />
+              </div>
+              <div>
+                <label>Status *</label>
+                <select id="status" required>
+                  <option value="for-sale">for-sale</option>
+                  <option value="sale-agreed">sale-agreed</option>
+                  <option value="sold">sold</option>
+                  <option value="to-rent">to-rent</option>
+                  <option value="share">share</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>Property type *</label>
+                <select id="propertyType" required>
+                  <option value="house">house</option>
+                  <option value="apartment">apartment</option>
+                  <option value="duplex">duplex</option>
+                  <option value="studio">studio</option>
+                </select>
+              </div>
+              <div>
+                <label>Price (€) *</label>
+                <input id="price" type="number" min="0" step="1" required />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>Address line 1 *</label>
+                <input id="address1" required />
+              </div>
+              <div>
+                <label>Address line 2</label>
+                <input id="address2" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>City *</label>
+                <input id="city" required />
+              </div>
+              <div>
+                <label>County *</label>
+                <input id="county" required />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>Eircode *</label>
+                <input id="eircode" required />
+              </div>
+              <div>
+                <label>Bedrooms</label>
+                <input id="bedrooms" type="number" min="0" step="1" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>Bathrooms</label>
+                <input id="bathrooms" type="number" min="0" step="1" />
+              </div>
+              <div>
+                <label>Size</label>
+                <input id="size" type="number" min="0" step="1" placeholder="e.g. 120" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>Size units</label>
+                <select id="sizeUnits">
+                  <option value="sqm">sqm</option>
+                  <option value="sqft">sqft</option>
+                </select>
+              </div>
+              <div></div>
+            </div>
+
+            <div style="margin-bottom:10px;">
+              <label>Features (one per line)</label>
+              <textarea id="features" placeholder="Balcony&#10;Parking&#10;Near DART"></textarea>
+            </div>
+
+            <div style="margin-bottom:10px;">
+              <label>Description</label>
+              <textarea id="description" placeholder="Describe the property."></textarea>
+            </div>
+
+            <div class="mapWrap">
+              <iframe id="mapFrame" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+
+            <div style="margin-top:12px;">
+              <div class="btnRow" style="justify-content:flex-start;">
+                <button class="btn btnPrimary" type="submit" id="btnSave">Create draft</button>
+                <button class="btn btnGhost" type="button" id="btnSubmit" disabled>Submit for approval</button>
+                <button class="btn btnGray" type="button" id="btnView" disabled>View listing</button>
+                <button class="btn btnDanger" type="button" id="btnExit">Exit</button>
+              </div>
+              <div class="help" id="actionHelp">
+                Create a draft first. Then you can save draft anytime. Submit sends it to admin review.
+              </div>
+            </div>
+          </form>
+
+          <div style="margin-top:12px;">
+            <details>
+              <summary>Debug / payload preview</summary>
+              <pre id="payloadPreview">{}</pre>
+              <pre id="sigDebug" style="margin-top:10px;">(signature response will appear here)</pre>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardHd">
+          <h2>Photos</h2>
+          <div class="btnRow">
+            <button class="btn btnGhost" id="btnSelectPhotos" type="button">Select photos</button>
+            <button class="btn btnDanger" id="btnClearPhotos" type="button">Clear</button>
+          </div>
+        </div>
+
+        <div class="cardBd">
+          <div class="drop" id="dropzone" role="button" tabindex="0" aria-label="Upload photos">
+            <strong>Click to choose photos</strong>
+            <div class="small">or drag & drop here · Cover is first photo</div>
+            <input type="file" id="photoInput" multiple accept="image/*" style="display:none;">
+          </div>
+
+          <div class="prog" id="progress"><div id="progressInner"></div></div>
+
+          <div class="photoMeta">
+            <div id="photoCount">0 photos</div>
+            <div id="photoHint">Tip: set a cover photo for best listing cards.</div>
+          </div>
+
+          <div class="photoGrid" id="photoGrid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ Stable direct JS (no loader) -->
+  <script defer src="/havn-auth.js?v=20260103-final1"></script>
+
+  <!-- ✅ Page logic (your original inline logic) -->
+  <script>
+    (function () {
+      "use strict";
+
+      document.addEventListener("DOMContentLoaded", function () {
+
+        try {
+          const API_BASE = "https://api.havn.ie";
+          const SIGNATURE_ENDPOINT = `${API_BASE}/api/uploads/cloudinary-signature`;
+          const PROPS_ENDPOINT = `${API_BASE}/api/properties`;
+
+          let current = null;
+          const MAX_UPLOAD_COUNT = 70;
+          const $ = (id) => document.getElementById(id);
+
+          const setDot = (id, state) => {
+            const el = $(id);
+            if (!el) return;
+            el.classList.remove("ok", "bad");
+            if (state === "ok") el.classList.add("ok");
+            if (state === "bad") el.classList.add("bad");
+          };
+
+          const setStatus = (msg, kind="") => {
+            const box = $("statusBox");
+            box.classList.remove("good","bad","warn");
+            if (kind === "good") box.classList.add("good");
+            if (kind === "bad") box.classList.add("bad");
+            if (kind === "warn") box.classList.add("warn");
+            $("statusText").textContent = String(msg || "");
+          };
+
+          const safeJson = async (res) => {
+            const text = await res.text();
+            try { return JSON.parse(text); } catch { return { raw: text }; }
+          };
+
+          // ✅ Auth enforcement
+          if (!window.HAVN_AUTH || !window.HAVN_AUTH.requireAuth) {
+            alert("Auth system failed to load. Hard refresh.");
+            return;
+          }
+          if (!HAVN_AUTH.requireAuth()) return;
+          setDot("dotAuth", "ok");
+
+          const token = HAVN_AUTH.getToken();
+          const authHeaders = () => ({ "Authorization": "Bearer " + token });
+
+          const apiJson = async (url, opts={}) => {
+            const res = await fetch(url, {
+              ...opts,
+              headers: {
+                ...(opts.headers || {}),
+                ...authHeaders(),
+                "Content-Type": "application/json"
+              }
+            });
+            const data = await safeJson(res);
+            return { res, data };
+          };
+
+          const updateMapPreview = () => {
+            const e = $("eircode").value.trim();
+            const a1 = $("address1").value.trim();
+            const a2 = $("address2").value.trim();
+            const c = $("city").value.trim();
+            const co = $("county").value.trim();
+            const query = e || [a1, a2, c, co].filter(Boolean).join(", ");
+            $("mapFrame").src = query
+              ? `https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`
+              : "about:blank";
+          };
+
+          const uploadedPhotos = [];
+          const escapeHtml = (s) =>
+            String(s ?? "").replace(/[&<>"']/g, c => ({
+              "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+            }[c]));
+
+          const renderPhotos = () => {
+            const root = $("photoGrid");
+            root.innerHTML = "";
+
+            uploadedPhotos.forEach((url, idx) => {
+              const tile = document.createElement("div");
+              tile.className = "tile";
+              tile.innerHTML = `
+                ${idx === 0 ? `<div class="coverTag">Cover</div>` : ``}
+                <img src="${escapeHtml(url)}" alt="Photo ${idx+1}">
+                <div class="tileBar">
+                  <button class="mini" type="button" data-act="remove">Remove</button>
+                </div>
+              `;
+              tile.querySelector('[data-act="remove"]').onclick = () => {
+                uploadedPhotos.splice(idx, 1);
+                renderPhotos();
+                updatePreview();
+                validate(false);
+              };
+              root.appendChild(tile);
+            });
+
+            $("photoCount").textContent = `${uploadedPhotos.length} photo${uploadedPhotos.length===1?"":"s"} (cover = first)`;
+            setDot("dotPhotos", uploadedPhotos.length ? "ok" : "bad");
+          };
+
+          const normalizeSignature = (raw) => {
+            const s = raw?.data || raw?.payload || raw?.result || raw;
+            return {
+              cloudName: s?.cloudName || s?.cloud_name,
+              apiKey: s?.apiKey || s?.api_key,
+              timestamp: s?.timestamp,
+              signature: s?.signature,
+              folder: s?.folder || "havn/properties"
+            };
+          };
+
+          const setProgress = (pct) => {
+            const wrap = $("progress");
+            const bar = $("progressInner");
+            wrap.style.display = "block";
+            bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+            if (pct >= 100) setTimeout(() => (wrap.style.display = "none"), 450);
+          };
+
+          const getSignature = async () => {
+            setDot("dotSig", "");
+            setStatus("Fetching upload signature...");
+            const res = await fetch(SIGNATURE_ENDPOINT, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...authHeaders()
+              },
+              body: JSON.stringify({ folder: "havn/properties" })
+            });
+
+            const raw = await safeJson(res);
+            $("sigDebug").textContent = JSON.stringify(raw, null, 2);
+
+            if (!res.ok) {
+              setDot("dotSig", "bad");
+              const msg = raw?.message || raw?.error || raw?.raw || `Signature endpoint failed (${res.status}).`;
+              throw new Error(String(msg));
+            }
+
+            const sig = normalizeSignature(raw);
+            if (!sig.cloudName || !sig.apiKey || !sig.timestamp || !sig.signature) {
+              setDot("dotSig", "bad");
+              throw new Error("Signature response missing required fields.");
+            }
+
+            setDot("dotSig", "ok");
+            return sig;
+          };
+
+          const uploadFiles = async (files) => {
+            if (!files.length) return;
+
+            if (uploadedPhotos.length + files.length > MAX_UPLOAD_COUNT) {
+              setStatus(`Too many photos. Max ${MAX_UPLOAD_COUNT}.`, "bad");
+              return;
+            }
+
+            try {
+              const sig = await getSignature();
+              let i = 0;
+
+              for (const file of files) {
+                i++;
+                setStatus(`Uploading ${file.name} (${i}/${files.length})…`);
+
+                const form = new FormData();
+                form.append("file", file);
+                form.append("api_key", sig.apiKey);
+                form.append("timestamp", String(sig.timestamp));
+                form.append("signature", sig.signature);
+                form.append("folder", sig.folder);
+
+                const upRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
+                  method: "POST",
+                  body: form
+                });
+
+                const upJson = await safeJson(upRes);
+                if (!upRes.ok) throw new Error(upJson?.error?.message || `Upload failed`);
+
+                const url = upJson.secure_url || upJson.url;
+                uploadedPhotos.push(url);
+                renderPhotos();
+                setProgress(Math.round((i / files.length) * 100));
+              }
+
+              setStatus("Uploads complete ✅", "good");
+            } catch (err) {
+              console.error(err);
+              setStatus(err?.message || "Upload failed", "bad");
+            } finally {
+              setProgress(100);
+            }
+          };
+
+          const photoInput = $("photoInput");
+          const dropzone = $("dropzone");
+
+          $("btnSelectPhotos").onclick = () => photoInput.click();
+          dropzone.addEventListener("click", () => photoInput.click());
+
+          photoInput.onchange = async () => {
+            const files = Array.from(photoInput.files || []);
+            photoInput.value = "";
+            await uploadFiles(files);
+            updatePreview();
+            validate(false);
+          };
+
+          $("btnClearPhotos").onclick = () => {
+            uploadedPhotos.length = 0;
+            renderPhotos();
+            updatePreview();
+            validate(false);
+            setStatus("Photos cleared.", "bad");
+          };
+
+          const parseFeatures = () => {
+            const raw = $("features").value || "";
+            return raw.split("\n").map(s => s.trim()).filter(Boolean);
+          };
+
+          const readPayload = () => ({
+            title: $("title").value.trim(),
+            address1: $("address1").value.trim(),
+            address2: $("address2").value.trim() || null,
+            city: $("city").value.trim(),
+            county: $("county").value.trim(),
+            eircode: $("eircode").value.trim(),
+            price: $("price").value ? Number($("price").value) : null,
+            propertyType: $("propertyType").value,
+            marketStatus: $("status").value,
+            bedrooms: $("bedrooms").value ? Number($("bedrooms").value) : null,
+            bathrooms: $("bathrooms").value ? Number($("bathrooms").value) : null,
+            features: parseFeatures(),
+            description: ($("description").value || "").trim(),
+            photos: [...uploadedPhotos],
+            slug: undefined
+          });
+
+          const updatePreview = () => {
+            $("payloadPreview").textContent = JSON.stringify(readPayload(), null, 2);
+            updateMapPreview();
+          };
+
+          $("btnPreviewPayload").onclick = () => updatePreview();
+
+          const validate = () => {
+            const p = readPayload();
+            const required = ["title","address1","city","county","eircode","price","propertyType","marketStatus"];
+            const missing = required.filter(k => !p[k] && p[k] !== 0);
+
+            const okForm = missing.length === 0;
+            setDot("dotForm", okForm ? "ok" : "bad");
+            setDot("dotPhotos", p.photos.length ? "ok" : "bad");
+
+            $("btnSubmit").disabled = !current || !okForm || !p.photos.length;
+            return okForm && p.photos.length;
+          };
+
+          const createDraft = async (payload) => {
+            setStatus("Creating draft…");
+            const { res, data } = await apiJson(PROPS_ENDPOINT, {
+              method: "POST",
+              body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+              setStatus(data?.message || "Create failed", "bad");
+              return null;
+            }
+            return data?.item || data?.property || data;
+          };
+
+          const patchDraft = async (id, payload) => {
+            setStatus("Saving draft…");
+            const { res, data } = await apiJson(`${PROPS_ENDPOINT}/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+              setStatus(data?.message || "Save failed", "bad");
+              return null;
+            }
+            return data?.item || data?.property || data;
+          };
+
+          const submitDraft = async (id) => {
+            setStatus("Submitting…");
+            const { res, data } = await apiJson(`${PROPS_ENDPOINT}/${id}/submit`, { method: "POST" });
+            if (!res.ok) {
+              setStatus(data?.message || "Submit failed", "bad");
+              return null;
+            }
+            return data?.item || data?.property || data;
+          };
+
+          $("propertyForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            updatePreview();
+            if (!validate()) return;
+
+            const payload = readPayload();
+
+            if (!current) {
+              const created = await createDraft(payload);
+              if (!created) return;
+              current = created;
+              $("btnSave").textContent = "Save draft";
+              setStatus("Draft created ✅", "good");
+              validate();
+              return;
+            }
+
+            const updated = await patchDraft(current.id, payload);
+            if (!updated) return;
+            current = updated;
+            setStatus("Draft saved ✅", "good");
+            validate();
+          });
+
+          $("btnSubmit").onclick = async () => {
+            if (!current) return;
+            if (!validate()) return;
+
+            const ok = confirm("Submit this draft for admin review?\n\nYou won't be able to edit while submitted.");
+            if (!ok) return;
+
+            const updated = await submitDraft(current.id);
+            if (!updated) return;
+
+            current = updated;
+            setStatus("Submitted ✅", "good");
+            $("btnSubmit").disabled = true;
+          };
+
+          $("btnExit").onclick = () => location.href = "my-listings.html";
+
+          const init = () => {
+            renderPhotos();
+            updatePreview();
+            validate();
+            setStatus("Ready.", "");
+          };
+
+          init();
+
+        } catch (e) {
+          console.error(e);
+          alert("Property upload page failed to initialize. Check console.");
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

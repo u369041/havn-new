@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<!-- HAVN.ie — My Listings (Stable Baseline + Debug + Never Blank) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>havn.ie — My Listings</title>
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --card:rgba(255,255,255,0.86);
+      --card2:rgba(255,255,255,0.92);
+      --text:#0b1220;
+      --muted:#5c6b86;
+      --line:rgba(15,23,42,0.10);
+      --shadow:0 18px 55px rgba(15,23,42,0.12);
+      --shadow2:0 10px 26px rgba(15,23,42,0.08);
+      --radius:26px;
+      --blue:#2563eb;
+      --blue2:#0ea5e9;
+      --ok:#22c55e;
+      --warn:#f59e0b;
+      --danger:#ef4444;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(1200px 700px at 15% -10%, rgba(37,99,235,0.07), transparent 55%),
+        radial-gradient(900px 550px at 85% -10%, rgba(14,165,233,0.08), transparent 50%),
+        var(--bg);
+      color:var(--text);
+      letter-spacing:-0.01em;
+    }
+
+    .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 90px;}
+
+    /* NAV */
+    .nav{
+      position:sticky;top:12px;z-index:20;
+      display:flex;align-items:center;justify-content:space-between;gap:14px;
+      padding:14px 16px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(10px);
+      border-radius:22px;
+      box-shadow: var(--shadow2);
+    }
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+    .logo{
+      width:34px;height:34px;border-radius:12px;
+      background:linear-gradient(135deg, rgba(37,99,235,0.95), rgba(14,165,233,0.95));
+      box-shadow:0 12px 28px rgba(37,99,235,0.18);
+      position:relative;
+      flex:0 0 auto;
+    }
+    .logo:before{
+      content:""; position:absolute; inset:9px 10px 10px 10px;
+      border:2px solid rgba(255,255,255,0.92);
+      border-bottom-left-radius:7px;border-bottom-right-radius:7px;
+      border-top-left-radius:3px;border-top-right-radius:3px;
+      transform: skewY(-2deg);
+    }
+    .brand .name{font-weight:950;font-size:18px;line-height:1}
+    .brand .tag{font-size:12px;color:var(--muted);margin-top:2px}
+    .navActions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    .btn{
+      text-decoration:none;
+      border:1px solid var(--line);
+      background:#fff;color:var(--text);
+      border-radius:14px;padding:10px 12px;
+      font-weight:900;font-size:14px;
+      display:inline-flex;align-items:center;gap:8px;
+      box-shadow:0 1px 0 rgba(15,23,42,0.04);
+      transition:all .15s ease;
+      white-space:nowrap;
+      cursor:pointer;
+    }
+    .btn:hover{transform:translateY(-1px);box-shadow:var(--shadow2);}
+    .btn.primary{
+      background:linear-gradient(135deg, rgba(11,18,32,0.96), rgba(17,24,39,0.96));
+      color:#fff;border-color:rgba(255,255,255,0.14);
+      box-shadow:0 14px 32px rgba(11,18,32,0.18);
+    }
+    .btn.ghost{
+      background:rgba(255,255,255,0.72);
+    }
+
+    /* HEADER */
+    .hero{
+      margin-top:14px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(255,255,255,0.76);
+      backdrop-filter: blur(10px);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow2);
+      padding:16px 16px 14px;
+      overflow:hidden;
+    }
+    .heroTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+    h1{margin:0;font-size:34px;font-weight:950;letter-spacing:-0.03em;}
+    .sub{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.6;max-width:70ch;}
+    .toolbar{
+      margin-top:14px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .search{
+      flex:1 1 320px;
+      min-width:220px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:16px;
+      padding:12px 14px;
+      font-size:14px;
+      outline:none;
+      box-shadow:0 1px 0 rgba(15,23,42,0.04);
+    }
+    .pill{
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.88);
+      border-radius:999px;
+      padding:10px 12px;
+      font-weight:950;
+      font-size:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      box-shadow:0 6px 14px rgba(15,23,42,0.06);
+      user-select:none;
+    }
+    .pill strong{font-weight:950;color:rgba(11,18,32,0.92);}
+    .pillDot{
+      width:10px;height:10px;border-radius:50%;
+      background:rgba(15,23,42,0.20);
+      box-shadow:0 0 0 4px rgba(15,23,42,0.06);
+    }
+
+    /* DEBUG BAR */
+    .debugBar{
+      margin-top:10px;
+      display:flex;align-items:center;justify-content:space-between;
+      gap:10px;padding:10px 14px;
+      border-radius:999px;border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(10px);
+      box-shadow:var(--shadow2);
+      font-size:12px;color:rgba(11,18,32,0.75);
+      overflow:hidden;
+    }
+    .debugLeft{display:flex;align-items:center;gap:10px;min-width:0;}
+    .dotLive{
+      width:10px;height:10px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 0 4px rgba(34,197,94,0.18);
+      flex:0 0 auto;
+    }
+    .debugText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:820px;}
+    .debugTag{font-weight:950;color:rgba(11,18,32,0.88);}
+
+    /* GRID */
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:14px;
+    }
+    @media (max-width: 980px){ .grid{grid-template-columns:repeat(2, minmax(0, 1fr));} }
+    @media (max-width: 620px){ .grid{grid-template-columns:1fr;} h1{font-size:28px;} .brand .tag{display:none;} }
+
+    .card{
+      border:1px solid rgba(15,23,42,0.10);
+      background:var(--card);
+      border-radius:22px;
+      box-shadow:var(--shadow2);
+      overflow:hidden;
+      transition:all .15s ease;
+      display:flex;
+      flex-direction:column;
+      min-height:240px;
+    }
+    .card:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
+    .thumb{
+      height:150px;
+      background:#0b1220;
+      position:relative;
+    }
+    .thumb img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .statusPill{
+      position:absolute;
+      left:12px;top:12px;
+      padding:7px 10px;
+      border-radius:999px;
+      font-weight:950;
+      font-size:12px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(255,255,255,0.86);
+      backdrop-filter: blur(10px);
+      color:rgba(11,18,32,0.90);
+    }
+    .statusPill.draft{background:rgba(245,158,11,0.14);border-color:rgba(245,158,11,0.25);color:rgba(146,64,14,0.95);}
+    .statusPill.pending{background:rgba(14,165,233,0.14);border-color:rgba(14,165,233,0.25);color:rgba(3,105,161,0.95);}
+    .statusPill.published{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.25);color:rgba(20,83,45,0.95);}
+
+    .content{
+      padding:14px 14px 16px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+    }
+    .price{font-weight:950;font-size:16px;margin:0;}
+    .title{font-weight:950;font-size:15px;margin:0;line-height:1.3;}
+    .meta{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .dot{width:6px;height:6px;border-radius:999px;background:rgba(14,165,233,0.95);box-shadow:0 0 0 3px rgba(14,165,233,0.12);}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;}
+    .chip{
+      display:inline-flex;align-items:center;
+      padding:5px 9px;border-radius:999px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(15,23,42,0.04);
+      color:var(--muted);
+      font-size:11px;font-weight:950;line-height:1;
+    }
+    .chip.blue{background:rgba(37,99,235,0.10);border-color:rgba(37,99,235,0.16);color:#1d4ed8;}
+    .chip.dark{background:rgba(11,18,32,0.88);border-color:rgba(255,255,255,0.14);color:#fff;}
+
+    .cardActions{
+      margin-top:auto;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .miniBtn{
+      flex:1 1 140px;
+      border-radius:16px;
+      padding:11px 12px;
+      font-weight:950;
+      font-size:13px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      cursor:pointer;
+      transition:all .15s ease;
+      text-align:center;
+      user-select:none;
+      text-decoration:none;
+      color:rgba(11,18,32,0.92);
+    }
+    .miniBtn:hover{transform:translateY(-1px);box-shadow:var(--shadow2);}
+    .miniBtn.primary{
+      border:0;
+      color:#fff;
+      background: linear-gradient(135deg, rgba(37,99,235,0.98), rgba(14,165,233,0.98));
+      box-shadow: 0 14px 34px rgba(37,99,235,0.18);
+    }
+
+    /* EMPTY STATE */
+    .empty{
+      margin-top:14px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.86);
+      border-radius:26px;
+      box-shadow:var(--shadow2);
+      padding:26px 18px;
+      text-align:center;
+    }
+    .empty h2{margin:0;font-size:18px;font-weight:950;}
+    .empty p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.7;}
+    .emptyActions{margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <header class="nav">
+      <a class="brand" href="/index.html">
+        <div class="logo"></div>
+        <div>
+          <div class="name">havn.ie</div>
+          <div class="tag">Ireland’s most curated property marketplace.</div>
+        </div>
+      </a>
+
+      <div class="navActions">
+        <a class="btn ghost" href="/properties.html">Browse listings</a>
+        <a class="btn primary" href="/property-upload.html">Create new</a>
+        <button class="btn" id="logoutBtn" type="button">Logout</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="heroTop">
+        <div>
+          <h1>My Listings</h1>
+          <div class="sub">Drafts, submitted, and published listings associated with your account.</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <input class="search" id="search" placeholder="Filter by title, town, county, status..." />
+        <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        <div class="pill"><span class="pillDot"></span> Count: <strong id="countAll">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(245,158,11,0.55)"></span> Drafts: <strong id="countDrafts">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(14,165,233,0.55)"></span> Submitted: <strong id="countSubmitted">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(34,197,94,0.55)"></span> Published: <strong id="countPublished">—</strong></div>
+      </div>
+    </section>
+
+    <div class="debugBar">
+      <div class="debugLeft">
+        <span class="dotLive"></span>
+        <span class="debugTag">vLISTINGS.1-STABLE</span>
+        <span class="debugText" id="debugText">Loading…</span>
+      </div>
+      <div class="debugRight" id="debugRight">—</div>
+    </div>
+
+    <div id="grid" class="grid" style="display:none;"></div>
+
+    <div id="empty" class="empty" style="display:none;">
+      <h2>No listings yet</h2>
+      <p>Create your first listing to see it here. Drafts and published properties will appear in this dashboard.</p>
+      <div class="emptyActions">
+        <a class="btn primary" href="/property-upload.html">Create listing</a>
+        <a class="btn" href="/properties.html">Browse listings</a>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const API = "https://api.havn.ie";
+    const token = localStorage.getItem("token");
+
+    const $ = (id) => document.getElementById(id);
+
+    function setDebug(text, right=""){
+      $("debugText").textContent = text;
+      $("debugRight").textContent = right || "";
+    }
+
+    function safeStr(v, fallback=""){
+      if(v === null || v === undefined) return fallback;
+      const s = String(v).trim();
+      return s ? s : fallback;
+    }
+
+    function eur(n){
+      if(n === null || n === undefined || n === "") return "—";
+      const num = Number(n);
+      if(!isFinite(num)) return String(n);
+      return new Intl.NumberFormat("en-IE",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num);
+    }
+
+    function toTitleCase(s){
+      return safeStr(s,"").replace(/_/g," ").toLowerCase().replace(/\b\w/g, m => m.toUpperCase()) || "—";
+    }
+
+    function normalizeStatus(s){
+      const v = safeStr(s, "").toUpperCase();
+      if(v === "DRAFT") return "draft";
+      if(v === "PENDING" || v === "SUBMITTED") return "pending";
+      if(v === "PUBLISHED") return "published";
+      return v ? v.toLowerCase() : "draft";
+    }
+
+    function firstImage(p){
+      const imgs = p.images || p.photos || p.imageUrls || [];
+      if(Array.isArray(imgs) && imgs.length) return imgs.find(Boolean) || "";
+      return p.heroImage || p.coverImage || p.image || "";
+    }
+
+    async function apiGet(path){
+      const res = await fetch(API + path, {
+        headers: token ? { "Authorization": "Bearer " + token } : {}
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+    function extractItems(payload){
+      if(!payload) return [];
+      if(Array.isArray(payload)) return payload;
+      if(Array.isArray(payload.items)) return payload.items;
+      if(Array.isArray(payload.data)) return payload.data;
+      if(payload.items && Array.isArray(payload.items.items)) return payload.items.items;
+      if(payload.data && Array.isArray(payload.data.items)) return payload.data.items;
+      return [];
+    }
+
+    function updateCounts(items){
+      $("countAll").textContent = items.length;
+
+      const draft = items.filter(x => normalizeStatus(x.status) === "draft").length;
+      const pending = items.filter(x => normalizeStatus(x.status) === "pending").length;
+      const pub = items.filter(x => normalizeStatus(x.status) === "published").length;
+
+      $("countDrafts").textContent = draft;
+      $("countSubmitted").textContent = pending;
+      $("countPublished").textContent = pub;
+    }
+
+    function cardHTML(p){
+      const status = normalizeStatus(p.status);
+      const statusLabel =
+        status === "draft" ? "Draft" :
+        status === "pending" ? "Submitted" :
+        status === "published" ? "Published" :
+        toTitleCase(status);
+
+      const img = firstImage(p);
+      const title = safeStr(p.title || p.address || p.headline || p.slug, "Untitled listing");
+      const price = eur(p.price || p.askingPrice || p.listPrice);
+      const county = safeStr(p.county || p.region || p.city, "—");
+      const eir = safeStr(p.eircode, "");
+      const slug = safeStr(p.slug, "");
+      const beds = p.beds != null ? `${p.beds} bed` : "";
+      const baths = p.baths != null ? `${p.baths} bath` : "";
+      const type = p.type ? toTitleCase(p.type) : "";
+
+      // Drafts should open the editor
+      const editHref = "/property-upload.html" + (p.id ? `?id=${encodeURIComponent(p.id)}` : "");
+      const viewHref = slug ? ("/property.html?slug=" + encodeURIComponent(slug)) : editHref;
+
+      const primaryHref = (status === "published" && slug) ? viewHref : editHref;
+      const primaryLabel = (status === "published" && slug) ? "View" : "Edit";
+
+      return `
+        <div class="card">
+          <div class="thumb">
+            ${img ? `<img src="${img}" alt="">` : ``}
+            <div class="statusPill ${status}">${statusLabel}</div>
+          </div>
+          <div class="content">
+            <div class="price">${price}</div>
+            <div class="title">${title}</div>
+            <div class="meta"><span class="dot"></span><span>${county}${eir ? " • " + eir : ""}</span></div>
+            <div class="chips">
+              ${type ? `<span class="chip blue">${type}</span>` : ``}
+              ${beds ? `<span class="chip">${beds}</span>` : ``}
+              ${baths ? `<span class="chip">${baths}</span>` : ``}
+              ${slug ? `<span class="chip dark">SLUG</span>` : ``}
+            </div>
+
+            <div class="cardActions">
+              <a class="miniBtn primary" href="${primaryHref}">${primaryLabel}</a>
+              <a class="miniBtn" href="${editHref}">Open editor</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function applyFilter(items){
+      const q = safeStr($("search").value, "").toLowerCase();
+      if(!q) return items;
+
+      return items.filter(p => {
+        const hay = [
+          p.title, p.address, p.headline, p.slug,
+          p.county, p.city, p.region, p.eircode,
+          p.status, p.type
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        return hay.includes(q);
+      });
+    }
+
+    function render(items){
+      updateCounts(items);
+
+      const filtered = applyFilter(items);
+
+      if(!filtered.length){
+        $("grid").style.display = "none";
+        $("empty").style.display = "block";
+        return;
+      }
+
+      $("empty").style.display = "none";
+      $("grid").style.display = "grid";
+      $("grid").innerHTML = filtered.map(cardHTML).join("");
+    }
+
+    async function load(){
+      if(!token){
+        setDebug("Missing token — redirecting to login", "401");
+        location.href = "/login.html?next=/my-listings.html";
+        return;
+      }
+
+      setDebug("Fetching /api/properties/mine…", "…");
+
+      const r = await apiGet("/api/properties/mine");
+      if(!r.ok){
+        setDebug("API error: " + r.status + " — redirecting to login", "ERR");
+        if(r.status === 401){
+          localStorage.removeItem("token");
+          location.href = "/login.html?next=/my-listings.html";
+          return;
+        }
+        $("empty").style.display = "block";
+        $("empty").innerHTML = `
+          <h2>Could not load your listings</h2>
+          <p class="muted">API returned <strong>${r.status}</strong>. Check the debug bar above.</p>
+          <div class="emptyActions">
+            <button class="btn primary" onclick="location.reload()">Try again</button>
+            <a class="btn" href="/index.html">Home</a>
+          </div>
+        `;
+        return;
+      }
+
+      const items = extractItems(r.json) || [];
+      setDebug("Loaded " + items.length + " listings", "200");
+
+      render(items);
+
+      // Live filter
+      $("search").addEventListener("input", () => render(items));
+    }
+
+    $("refreshBtn").addEventListener("click", () => location.reload());
+    $("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      location.href = "/login.html";
+    });
+
+    load();
+  </script>
+</body>
+</html>

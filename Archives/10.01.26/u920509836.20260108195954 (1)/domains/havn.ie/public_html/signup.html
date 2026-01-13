@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sign Up – HAVN.ie</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="header.css" />
+  <style>
+    :root {
+      --bg-page: #f3f4f6;
+      --bg-card: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #6b7280;
+      --accent: #2563eb;
+      --radius-lg: 18px;
+      --radius-pill: 999px;
+      --shadow-soft: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --transition-fast: 0.18s ease-out;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, #dbeafe 0, transparent 55%),
+        radial-gradient(circle at bottom right, #fee2ff 0, transparent 60%),
+        var(--bg-page);
+      color: var(--text-main);
+    }
+
+    main {
+      max-width: 420px;
+      margin: 60px auto 40px;
+      padding: 0 16px;
+    }
+
+    .card {
+      width: 100%;
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-soft);
+      padding: 24px 24px 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .brand-name {
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+
+    p.sub {
+      margin: 0 0 18px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    input {
+      width: 100%;
+      padding: 9px 11px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      font-size: 14px;
+      outline: none;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+    }
+
+    input:focus {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.4);
+      background: #ffffff;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .btn {
+      width: 100%;
+      border: none;
+      border-radius: var(--radius-pill);
+      background: var(--accent);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 10px 14px;
+      cursor: pointer;
+      margin-top: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition:
+        background var(--transition-fast),
+        transform var(--transition-fast),
+        box-shadow var(--transition-fast);
+      box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
+    }
+
+    .btn:hover {
+      background: #1d4ed8;
+      transform: translateY(-1px);
+      box-shadow: 0 16px 36px rgba(37, 99, 235, 0.45);
+    }
+
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .footer {
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .error {
+      font-size: 13px;
+      color: #b91c1c;
+      margin-bottom: 6px;
+      display: none;
+    }
+
+    .success {
+      font-size: 13px;
+      color: #15803d;
+      margin-bottom: 6px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+<div id="havn-header"></div>
+
+<main>
+  <div class="card">
+    <div class="brand">
+      <span class="brand-name">HAVN</span>
+    </div>
+
+    <h1>Create your HAVN account</h1>
+    <p class="sub">Sign up to list, manage and update properties on HAVN.ie.</p>
+
+    <div id="errorBox" class="error"></div>
+    <div id="successBox" class="success"></div>
+
+    <form id="signupForm">
+      <div class="field">
+        <label for="name">Full name</label>
+        <input id="name" type="text" placeholder="Your name" />
+      </div>
+
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" type="email" placeholder="you@example.com" required />
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" placeholder="At least 8 characters" required />
+      </div>
+
+      <div class="hint">
+        Use a secure password – you’ll need this to access your listings.
+      </div>
+
+      <button id="signupBtn" class="btn" type="submit">
+        <span>Create account</span>
+      </button>
+    </form>
+
+    <div class="footer">
+      <span>Already have an account?</span>
+      <a href="login.html">Sign in instead</a>
+    </div>
+  </div>
+</main>
+
+<script src="header.js"></script>
+<script>
+  const API_BASE = "https://api.havn.ie";
+
+  const form = document.getElementById("signupForm");
+  const nameInput = document.getElementById("name");
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+  const errorBox = document.getElementById("errorBox");
+  const successBox = document.getElementById("successBox");
+  const signupBtn = document.getElementById("signupBtn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorBox.style.display = "none";
+    successBox.style.display = "none";
+
+    const name = nameInput.value.trim();
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+
+    if (!email || !password) {
+      errorBox.textContent = "Please enter an email and password.";
+      errorBox.style.display = "block";
+      return;
+    }
+
+    signupBtn.disabled = true;
+    signupBtn.textContent = "Creating account…";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        const message =
+          (data && data.error) ||
+          `Signup failed (status ${res.status})`;
+        errorBox.textContent = message;
+        errorBox.style.display = "block";
+        signupBtn.disabled = false;
+        signupBtn.textContent = "Create account";
+        return;
+      }
+
+      // Save token and basic user info
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
+      if (data.user) {
+        localStorage.setItem("havnUser", JSON.stringify(data.user));
+      }
+
+      successBox.textContent = "Account created! Redirecting…";
+      successBox.style.display = "block";
+
+      setTimeout(() => {
+        window.location.href = "property-upload.html";
+      }, 900);
+    } catch (err) {
+      console.error(err);
+      errorBox.textContent = "Something went wrong while creating your account.";
+      errorBox.style.display = "block";
+      signupBtn.disabled = false;
+      signupBtn.textContent = "Create account";
+    }
+  });
+</script>
+</body>
+</html>

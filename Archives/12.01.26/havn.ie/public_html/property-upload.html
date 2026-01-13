@@ -1,0 +1,1517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>List a property • HAVN.ie</title>
+
+  <style>
+    :root{
+      --bg:#f6f8fc;
+      --card:#ffffff;
+      --ink:#0f172a;
+      --muted:#64748b;
+      --line:#e5e7eb;
+      --shadow:0 12px 30px rgba(15,23,42,.08);
+      --radius:18px;
+
+      --blue:#2563eb;
+      --navy:#0f172a;
+      --green:#16a34a;
+      --red:#ef4444;
+      --amber:#f59e0b;
+
+      /* thumbs */
+      --thumb: 128px;
+      --thumbGap: 12px;
+
+      /* organizer thumbs */
+      --orgThumb: 180px;
+      --orgGap: 14px;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color:var(--ink);
+      background:var(--bg);
+    }
+    a{color:inherit}
+    .wrap{max-width:1180px; margin:0 auto; padding:18px 14px 60px;}
+
+    .topbar{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      flex-wrap:wrap;
+    }
+    .brand{display:flex; align-items:center; gap:10px; text-decoration:none;}
+    .logo{
+      width:28px;height:28px;border-radius:9px;
+      background:linear-gradient(135deg,#2563eb,#0ea5e9);
+      display:grid;place-items:center;
+      color:#fff;font-weight:900;
+      box-shadow:0 10px 25px rgba(37,99,235,.25);
+    }
+    .brandTxt{display:flex; flex-direction:column; line-height:1.05}
+    .brandTxt strong{font-size:14px}
+    .brandTxt span{font-size:12px;color:var(--muted)}
+    .navLinks{display:flex; gap:16px; align-items:center; color:var(--muted); font-weight:800; font-size:13px; flex-wrap:wrap;}
+    .navLinks a{text-decoration:none}
+    .navActions{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      padding:9px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      user-select:none;
+      white-space:nowrap;
+    }
+    .btn.primary{background:var(--navy); color:#fff; border-color:var(--navy);}
+    .btn.blue{background:var(--blue); color:#fff; border-color:var(--blue);}
+    .btn.danger{border-color:rgba(239,68,68,.25); background:rgba(239,68,68,.06);}
+    .btn[disabled]{opacity:.55; cursor:not-allowed}
+
+    h1{margin:18px 0 6px; font-size:22px; letter-spacing:-.02em}
+    .sub{color:var(--muted); font-size:13px; margin-bottom:14px; font-weight:800}
+
+    .statusRow{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .statusLeft{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+    .badge{
+      padding:6px 10px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+    }
+    .badge.draft{background:rgba(245,158,11,.10); border-color:rgba(245,158,11,.25); color:#92400e;}
+    .badge.submitted{background:rgba(37,99,235,.10); border-color:rgba(37,99,235,.20); color:#1d4ed8;}
+    .badge.published{background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.22); color:#15803d;}
+    .badge.rejected{background:rgba(239,68,68,.10); border-color:rgba(239,68,68,.22); color:#b91c1c;}
+    .statusMsg{color:var(--muted); font-weight:800; font-size:13px}
+    .statusRight{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+
+    .pills{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-weight:900;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dot.g{background:var(--green)}
+    .dot.r{background:var(--red)}
+    .dot.y{background:var(--amber)}
+    .dot.n{background:#94a3b8}
+
+    .err{
+      margin-top:12px;
+      border:1px solid rgba(239,68,68,.25);
+      background:rgba(239,68,68,.06);
+      border-radius:var(--radius);
+      padding:12px 14px;
+      display:none;
+    }
+    .err h3{margin:0 0 6px; font-size:14px}
+    .err .msg{color:#991b1b; font-weight:900; font-size:13px}
+    .err pre{
+      margin:8px 0 0;
+      padding:10px 12px;
+      border-radius:14px;
+      background:#0b1220;
+      color:#e5e7eb;
+      overflow:auto;
+      font-size:12px;
+      line-height:1.45;
+      border:1px solid rgba(255,255,255,.10);
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: 1.05fr 1.15fr;
+      gap:14px;
+      align-items:start;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns:1fr;}
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .cardHd{
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .cardHd h2{margin:0; font-size:13px; font-weight:900}
+    .cardBd{padding:14px;}
+    .hint{color:var(--muted); font-size:12px; font-weight:800}
+
+    .formGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    @media (max-width: 520px){
+      .formGrid{grid-template-columns:1fr;}
+    }
+    label{display:block; font-size:12px; font-weight:900; color:var(--ink); margin:0 0 6px;}
+    input, select, textarea{
+      width:100%;
+      border:1px solid #cbd5e1;
+      border-radius:10px;
+      padding:10px 10px;
+      font-size:14px;
+      outline:none;
+      background:#fff;
+    }
+    textarea{min-height:110px; resize:vertical}
+    input[disabled],select[disabled],textarea[disabled]{background:#f1f5f9;color:#64748b}
+
+    .help{font-size:11px; color:var(--muted); font-weight:800; margin-top:6px}
+
+    /* Map preview */
+    .mapWrap{
+      border-radius:14px;
+      border:1px solid #dbeafe;
+      overflow:hidden;
+      background:linear-gradient(180deg, #eef2ff, #eff6ff);
+    }
+    .mapTop{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(37,99,235,.15);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background:rgba(255,255,255,.55);
+    }
+    .mapTop .label{font-weight:900; font-size:12px; color:#0f172a}
+    .mapTop .small{font-weight:900; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70%;}
+    .mapIfr{
+      width:100%;
+      height:220px;
+      border:0;
+      display:block;
+      background:#eef2ff;
+    }
+
+    .photoTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      width:100%;
+    }
+    .photoTopRight{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+
+    .uploadZone{
+      margin-top:10px;
+      border:1.5px dashed #cbd5e1;
+      border-radius:14px;
+      padding:16px;
+      display:grid;
+      place-items:center;
+      color:#0f172a;
+      background:#f8fafc;
+      cursor:pointer;
+    }
+    .uploadZone strong{font-size:14px}
+    .uploadZone span{margin-top:6px; color:var(--muted); font-weight:800; font-size:12px; text-align:center}
+
+    .photoBar{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:10px 12px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#fff;
+    }
+    .photoBar .left{font-weight:900; font-size:12px}
+    .photoBar .right{display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:var(--muted); font-weight:800; font-size:12px}
+
+    .range{
+      display:flex; align-items:center; gap:8px;
+      padding:6px 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:#fff;
+    }
+    .range input[type="range"]{
+      width:160px;
+      --pct: 50%;
+      -webkit-appearance:none;
+      appearance:none;
+      background:transparent;
+      margin:0;
+      padding:0;
+      height:28px;
+      cursor:pointer;
+    }
+    .range input[type="range"]::-webkit-slider-runnable-track{
+      height:8px;
+      border-radius:999px;
+      background:
+        linear-gradient(to right,
+          var(--blue) 0%,
+          var(--blue) var(--pct),
+          #e5e7eb var(--pct),
+          #e5e7eb 100%
+        );
+      border:1px solid #e5e7eb;
+    }
+    .range input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance:none;
+      appearance:none;
+      width:18px;
+      height:18px;
+      border-radius:999px;
+      background: var(--blue);
+      border:3px solid #ffffff;
+      box-shadow: 0 6px 14px rgba(37,99,235,.30);
+      margin-top:-6px;
+    }
+    .range input[type="range"]::-moz-range-track{
+      height:8px;
+      border-radius:999px;
+      background:#e5e7eb;
+      border:1px solid #e5e7eb;
+    }
+    .range input[type="range"]::-moz-range-progress{
+      height:8px;
+      border-radius:999px;
+      background: var(--blue);
+    }
+    .range input[type="range"]::-moz-range-thumb{
+      width:18px;
+      height:18px;
+      border-radius:999px;
+      background: var(--blue);
+      border:3px solid #ffffff;
+      box-shadow: 0 6px 14px rgba(37,99,235,.30);
+    }
+
+    .toggle{
+      display:flex; align-items:center; gap:8px;
+      padding:6px 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:#fff;
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .thumbGrid{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--thumbGap);
+    }
+    @media (max-width: 900px){ .thumbGrid{grid-template-columns: repeat(3, minmax(0, 1fr));} }
+    @media (max-width: 480px){ .thumbGrid{grid-template-columns: repeat(2, minmax(0, 1fr));} }
+
+    .tile{
+      position:relative;
+      border-radius:16px;
+      border:1px solid var(--line);
+      overflow:hidden;
+      background:#0b1220;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      height: var(--thumb);
+    }
+    .tile img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+      opacity:.98;
+    }
+    .tile .x{
+      position:absolute;
+      top:8px; right:8px;
+      width:28px;height:28px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(255,255,255,.92);
+      font-weight:900;
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      line-height:1;
+    }
+    .tile .coverBadge{
+      position:absolute;
+      left:8px; top:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(22,163,74,.92);
+      color:#052e16;
+      font-weight:900;
+      font-size:12px;
+      display:none;
+    }
+    .tile.cover0 .coverBadge{display:inline-flex}
+    .tile .idx{
+      position:absolute;
+      left:8px; bottom:8px;
+      width:28px;height:28px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(15,23,42,.72);
+      color:#fff;
+      font-weight:900;
+      font-size:12px;
+      display:grid;
+      place-items:center;
+    }
+    .tile .actions{
+      position:absolute;
+      right:8px; bottom:8px;
+      display:flex;
+      gap:8px;
+    }
+    .miniBtn{
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(255,255,255,.92);
+      font-weight:900;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+    }
+
+    .padBottom{
+      padding-bottom:18px;
+      background:linear-gradient(180deg, rgba(22,163,74,.05), rgba(22,163,74,.02));
+      border-top:1px solid rgba(22,163,74,.10);
+    }
+
+    .miniDebug{
+      margin-top:10px;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:800;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .miniDebug code{
+      background:#fff;
+      border:1px solid var(--line);
+      padding:4px 8px;
+      border-radius:999px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      color:#0f172a;
+      font-weight:900;
+    }
+
+    /* Organizer modal */
+    .modal{
+      position:fixed; inset:0;
+      background:rgba(2,6,23,.72);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      padding:14px;
+    }
+    .modal.on{display:flex;}
+    .modalInner{
+      width:min(1200px, 96vw);
+      height:min(86vh, 860px);
+      background:#ffffff;
+      border:1px solid rgba(255,255,255,.25);
+      border-radius:22px;
+      box-shadow:0 30px 90px rgba(0,0,0,.45);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .modalTop{
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background:#fff;
+    }
+    .modalTop .ttl{
+      font-weight:900;
+      font-size:14px;
+      color:#0f172a;
+      display:flex;
+      flex-direction:column;
+      line-height:1.15;
+    }
+    .modalTop .ttl span{font-weight:800; font-size:12px; color:var(--muted)}
+    .modalTop .actions{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    .modalBody{
+      padding:14px;
+      overflow:auto;
+      background:linear-gradient(180deg, rgba(37,99,235,.04), rgba(255,255,255,1));
+    }
+    .orgGrid{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--orgGap);
+    }
+    @media (max-width: 980px){ .orgGrid{grid-template-columns: repeat(3, minmax(0, 1fr));} }
+    @media (max-width: 640px){ .orgGrid{grid-template-columns: repeat(2, minmax(0, 1fr));} }
+
+    .orgTile{
+      position:relative;
+      border-radius:18px;
+      border:1px solid var(--line);
+      overflow:hidden;
+      background:#0b1220;
+      height: var(--orgThumb);
+      box-shadow:0 16px 40px rgba(15,23,42,.10);
+    }
+    .orgTile img{width:100%; height:100%; object-fit:cover; display:block;}
+    .orgTile .tag{
+      position:absolute; left:10px; top:10px;
+      padding:7px 11px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:12px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(255,255,255,.92);
+      color:#0f172a;
+      display:none;
+    }
+    .orgTile.cover0 .tag{display:inline-flex}
+    .orgTile .idx{
+      position:absolute; left:10px; bottom:10px;
+      width:32px; height:32px;
+      display:grid; place-items:center;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(15,23,42,.72);
+      color:#fff;
+      font-weight:900;
+      font-size:12px;
+    }
+    .orgTile .x{
+      position:absolute; right:10px; top:10px;
+      width:32px; height:32px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.35);
+      background:rgba(255,255,255,.92);
+      font-weight:900;
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+    }
+    .orgTile .act{
+      position:absolute; right:10px; bottom:10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .orgTile.dragover{outline:4px solid rgba(37,99,235,.38); border-color:#bfdbfe}
+    .orgTile.dragging{opacity:.85}
+    .orgHint{
+      margin-top:10px;
+      color:var(--muted);
+      font-weight:900;
+      font-size:12px;
+      text-align:center;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <a class="brand" href="/index.html">
+        <div class="logo">H</div>
+        <div class="brandTxt">
+          <strong>HAVN.ie</strong>
+          <span>Ireland’s most curated property marketplace.</span>
+        </div>
+      </a>
+
+      <div class="navLinks">
+        <a href="/index.html">Home</a>
+        <a href="/properties.html">Browse</a>
+        <a href="/my-listings.html">My Listings</a>
+        <a href="/admin.html">Admin</a>
+      </div>
+
+      <div class="navActions">
+        <a class="btn blue" href="/property-upload.html">List a property</a>
+        <button class="btn" id="logoutBtn" type="button">Logout</button>
+      </div>
+    </div>
+
+    <h1>List a property</h1>
+    <div class="sub">Draft → Submit → Pending (Submitted) → Approved (Published). Submitted listings are locked.</div>
+
+    <div class="statusRow">
+      <div class="statusLeft">
+        <div class="badge draft" id="statusBadge">DRAFT</div>
+        <div class="statusMsg" id="statusMsg">New listing (not saved yet).</div>
+      </div>
+
+      <div class="pills" aria-label="health">
+        <div class="pill"><span class="dot y" id="dotAuth"></span>Auth</div>
+        <div class="pill"><span class="dot y" id="dotApi"></span>API</div>
+        <div class="pill"><span class="dot y" id="dotPhotos"></span>Photos</div>
+        <div class="pill"><span class="dot y" id="dotForm"></span>Form</div>
+      </div>
+
+      <div class="statusRight">
+        <button class="btn" id="previewBtn" type="button">Update preview</button>
+        <button class="btn primary" id="saveBtn" type="button">Save draft</button>
+        <button class="btn blue" id="submitBtn" type="button">Submit</button>
+      </div>
+    </div>
+
+    <div class="miniDebug">
+      <span>Editor ID:</span>
+      <code id="idHint">—</code>
+      <span>API:</span>
+      <code>https://api.havn.ie</code>
+    </div>
+
+    <div class="err" id="errBox">
+      <h3>Request failed</h3>
+      <div class="msg" id="errMsg">Something went wrong.</div>
+      <pre id="errPre"></pre>
+    </div>
+
+    <div class="grid">
+      <!-- LEFT -->
+      <div class="card">
+        <div class="cardHd">
+          <h2>Property details</h2>
+          <div class="hint">Slug is generated after first save</div>
+        </div>
+
+        <div class="cardBd">
+          <div class="formGrid">
+
+            <div style="grid-column: 1 / -1;">
+              <label for="title">Title *</label>
+              <input id="title" placeholder="e.g. Stunning 3-bed home in Galway" />
+            </div>
+
+            <div>
+              <label for="marketStatus">Market status *</label>
+              <select id="marketStatus">
+                <option value="for-sale">for-sale</option>
+                <option value="sale-agreed">sale-agreed</option>
+                <option value="sold">sold</option>
+                <option value="to-rent">to-rent</option>
+                <option value="share">share</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="typeSel">Property type *</label>
+              <select id="typeSel">
+                <option value="house">house</option>
+                <option value="apartment">apartment</option>
+                <option value="duplex">duplex</option>
+                <option value="studio">studio</option>
+                <option value="cottage">cottage</option>
+                <option value="site">site</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="address1">Address line 1 *</label>
+              <input id="address1" placeholder="Railway House" />
+            </div>
+
+            <div>
+              <label for="address2">Address line 2</label>
+              <input id="address2" placeholder="Arklow Road" />
+            </div>
+
+            <div>
+              <label for="city">City *</label>
+              <input id="city" placeholder="Gorey" />
+            </div>
+
+            <div>
+              <label for="county">County *</label>
+              <input id="county" placeholder="Co. Wexford" />
+            </div>
+
+            <div>
+              <label for="eircode">Eircode *</label>
+              <input id="eircode" placeholder="Y25E6H3" />
+              <div class="help">Map preview uses Eircode first, then address fallback.</div>
+            </div>
+
+            <div>
+              <label for="price">Price (€) *</label>
+              <input id="price" type="number" inputmode="numeric" placeholder="900000" />
+            </div>
+
+            <div>
+              <label for="beds">Bedrooms</label>
+              <input id="beds" type="number" inputmode="numeric" placeholder="3" />
+            </div>
+
+            <div>
+              <label for="baths">Bathrooms</label>
+              <input id="baths" type="number" inputmode="numeric" placeholder="2" />
+            </div>
+
+            <div>
+              <label for="size">Size</label>
+              <input id="size" type="number" inputmode="numeric" placeholder="e.g. 120" />
+            </div>
+
+            <div>
+              <label for="sizeUnit">Size units</label>
+              <select id="sizeUnit">
+                <option value="sqm">sqm</option>
+                <option value="sqft">sqft</option>
+                <option value="acres">acres</option>
+              </select>
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label for="features">Features (one per line)</label>
+              <textarea id="features" placeholder="Balcony&#10;Parking&#10;Near DART"></textarea>
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label for="description">Description (paragraphs supported)</label>
+              <textarea id="description" placeholder="Write in paragraphs (press Enter twice between paragraphs)."></textarea>
+              <div class="help">We preserve line breaks so paragraphs render properly.</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT -->
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <!-- MAP ABOVE PHOTOS (as requested) -->
+        <div class="card">
+          <div class="cardHd">
+            <h2>Map preview</h2>
+          </div>
+          <div class="cardBd">
+            <div class="mapWrap">
+              <div class="mapTop">
+                <div class="label">Google Maps</div>
+                <div class="small" id="mapQueryLabel">—</div>
+              </div>
+              <iframe
+                id="mapFrame"
+                class="mapIfr"
+                loading="lazy"
+                referrerpolicy="no-referrer-when-downgrade"
+                src="about:blank"></iframe>
+            </div>
+            <div class="help">Uses Eircode first, then address fallback.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardHd">
+            <div class="photoTop">
+              <h2>Photos</h2>
+              <div class="photoTopRight">
+                <button class="btn" id="selectBtn" type="button">Select Photos</button>
+                <button class="btn" id="organizerBtn" type="button">Open Photo Organizer</button>
+                <button class="btn danger" id="clearBtn" type="button">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="cardBd padBottom">
+            <input id="fileInput" type="file" accept="image/*" multiple style="display:none" />
+
+            <div class="uploadZone" id="dropZone">
+              <div>
+                <strong>Click to choose photos</strong>
+                <span>or drag &amp; drop here • Drag tiles to reorder • Cover is first photo</span>
+              </div>
+            </div>
+
+            <div class="photoBar">
+              <div class="left" id="photoCount">0 photos (cover = first)</div>
+              <div class="right">
+                <div class="range" title="Make thumbnails bigger">
+                  Size
+                  <input id="thumbRange" type="range" min="128" max="240" value="128" />
+                </div>
+                <div class="toggle" id="toggleNumbers" title="Show/hide numbering">
+                  <input id="showNumbers" type="checkbox" checked style="width:auto; margin:0;" />
+                  Numbers
+                </div>
+              </div>
+            </div>
+
+            <div class="hint" style="margin-top:10px;">
+              Tip: click “Make cover” on the right photo. Cover is always photo #1.
+            </div>
+
+            <div class="thumbGrid" id="thumbGrid"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Organizer Modal -->
+  <div class="modal" id="orgModal" aria-hidden="true">
+    <div class="modalInner">
+      <div class="modalTop">
+        <div class="ttl">
+          Photo Organizer
+          <span>Drag to reorder • “Make cover” sets photo #1 • Bigger thumbnails</span>
+        </div>
+        <div class="actions">
+          <div class="range" title="Organizer size">
+            Size
+            <input id="orgRange" type="range" min="160" max="300" value="180" />
+          </div>
+          <button class="btn" id="orgClose" type="button">Close</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="orgGrid" id="orgGrid"></div>
+        <div class="orgHint">Tip: cover is always photo #1 (left-most in your order).</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/havn-auth.js"></script>
+
+  <script>
+    (function(){
+      const API = "https://api.havn.ie";
+      const $ = (s) => document.querySelector(s);
+
+      const els = {
+        statusBadge: $("#statusBadge"),
+        statusMsg: $("#statusMsg"),
+        idHint: $("#idHint"),
+        errBox: $("#errBox"),
+        errMsg: $("#errMsg"),
+        errPre: $("#errPre"),
+        dotAuth: $("#dotAuth"),
+        dotApi: $("#dotApi"),
+        dotPhotos: $("#dotPhotos"),
+        dotForm: $("#dotForm"),
+
+        previewBtn: $("#previewBtn"),
+        saveBtn: $("#saveBtn"),
+        submitBtn: $("#submitBtn"),
+        logoutBtn: $("#logoutBtn"),
+
+        title: $("#title"),
+        marketStatus: $("#marketStatus"),
+        typeSel: $("#typeSel"),
+        address1: $("#address1"),
+        address2: $("#address2"),
+        city: $("#city"),
+        county: $("#county"),
+        eircode: $("#eircode"),
+        price: $("#price"),
+        beds: $("#beds"),
+        baths: $("#baths"),
+        size: $("#size"),
+        sizeUnit: $("#sizeUnit"),
+        features: $("#features"),
+        description: $("#description"),
+
+        mapQueryLabel: $("#mapQueryLabel"),
+        mapFrame: $("#mapFrame"),
+
+        selectBtn: $("#selectBtn"),
+        organizerBtn: $("#organizerBtn"),
+        clearBtn: $("#clearBtn"),
+        fileInput: $("#fileInput"),
+        dropZone: $("#dropZone"),
+        thumbGrid: $("#thumbGrid"),
+        photoCount: $("#photoCount"),
+        thumbRange: $("#thumbRange"),
+        toggleNumbers: $("#toggleNumbers"),
+        showNumbers: $("#showNumbers"),
+
+        orgModal: $("#orgModal"),
+        orgGrid: $("#orgGrid"),
+        orgClose: $("#orgClose"),
+        orgRange: $("#orgRange")
+      };
+
+      function setDot(el, state){
+        el.classList.remove("g","y","r","n");
+        el.classList.add(state);
+      }
+
+      function showErr(title, msg, details){
+        els.errBox.style.display = "block";
+        els.errBox.querySelector("h3").textContent = title || "Error";
+        els.errMsg.textContent = msg || "Something went wrong.";
+        els.errPre.textContent = details || "";
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      function clearErr(){
+        els.errBox.style.display = "none";
+        els.errMsg.textContent = "";
+        els.errPre.textContent = "";
+      }
+
+      function qs(name){
+        const u = new URL(window.location.href);
+        return u.searchParams.get(name);
+      }
+
+      function fmtStatus(kind, msg){
+        els.statusBadge.className = "badge " + (kind || "draft");
+        els.statusBadge.textContent = (kind || "draft").toUpperCase();
+        els.statusMsg.textContent = msg || "";
+      }
+
+      function lockForm(locked){
+        const inputs = [
+          els.title, els.marketStatus, els.typeSel, els.address1, els.address2,
+          els.city, els.county, els.eircode, els.price, els.beds, els.baths,
+          els.size, els.sizeUnit, els.features, els.description
+        ];
+        inputs.forEach(i => i.disabled = !!locked);
+
+        // photos locked as well
+        els.selectBtn.disabled = !!locked;
+        els.organizerBtn.disabled = !!locked;
+        els.clearBtn.disabled = !!locked;
+        els.dropZone.style.opacity = locked ? "0.6" : "1";
+        els.dropZone.style.pointerEvents = locked ? "none" : "auto";
+      }
+
+      async function apiFetch(path, opts = {}){
+        if (window.HAVN_AUTH && typeof HAVN_AUTH.apiFetch === "function") {
+          return HAVN_AUTH.apiFetch(`${API}${path}`, opts);
+        }
+        const token = localStorage.getItem("token") || "";
+        const headers = Object.assign(
+          { "Content-Type": "application/json" },
+          opts.headers || {},
+          token ? { Authorization: `Bearer ${token}` } : {}
+        );
+        return fetch(`${API}${path}`, Object.assign({}, opts, { headers }));
+      }
+
+      async function readJsonSafe(res){
+        const text = await res.text().catch(()=> "");
+        try{ return { text, json: JSON.parse(text) }; } catch { return { text, json: null }; }
+      }
+
+      // ---- STATE ----
+      let PROPERTY_ID = qs("id") || "";
+      let PHOTOS = [];
+      let CURRENT_STATUS = "DRAFT"; // DRAFT | SUBMITTED | PUBLISHED | REJECTED
+
+      els.idHint.textContent = PROPERTY_ID || "—";
+
+      function buildMapQuery(){
+        const e = (els.eircode.value || "").trim();
+        if (e) return e;
+
+        const bits = [
+          (els.address1.value || "").trim(),
+          (els.address2.value || "").trim(),
+          (els.city.value || "").trim(),
+          (els.county.value || "").trim()
+        ].filter(Boolean);
+
+        return bits.join(", ");
+      }
+
+      function updateMapPreview(){
+        const q = buildMapQuery();
+        els.mapQueryLabel.textContent = q || "—";
+        els.mapFrame.src = q ? ("https://www.google.com/maps?q=" + encodeURIComponent(q) + "&output=embed") : "about:blank";
+      }
+
+      function parseLines(v){
+        return String(v || "").replace(/\r\n/g,"\n").split("\n").map(s=>s.trim()).filter(Boolean);
+      }
+
+      function buildPayload(){
+        const payload = {
+          title: (els.title.value || "").trim(),
+          marketStatus: els.marketStatus.value,
+          propertyType: els.typeSel.value,
+
+          address1: (els.address1.value || "").trim(),
+          address2: (els.address2.value || "").trim() || null,
+          city: (els.city.value || "").trim(),
+          county: (els.county.value || "").trim(),
+          eircode: (els.eircode.value || "").trim(),
+
+          price: els.price.value ? Number(els.price.value) : null,
+          bedrooms: els.beds.value ? Number(els.beds.value) : null,
+          bathrooms: els.baths.value ? Number(els.baths.value) : null,
+
+          size: els.size.value ? Number(els.size.value) : null,
+          sizeUnit: els.sizeUnit.value,
+
+          features: parseLines(els.features.value),
+          description: String(els.description.value || "").replace(/\r\n/g,"\n"),
+
+          photos: PHOTOS.slice(0, 70),
+        };
+
+        Object.keys(payload).forEach(k => {
+          if (payload[k] === null) delete payload[k];
+        });
+
+        return payload;
+      }
+
+      function validate(){
+        const p = buildPayload();
+        const required = ["title","marketStatus","propertyType","address1","city","county","eircode","price"];
+        const missing = required.filter(k => !p[k] && p[k] !== 0);
+
+        setDot(els.dotForm, missing.length ? "y" : "g");
+        setDot(els.dotPhotos, p.photos.length ? "g" : "y");
+
+        // You can submit only after you have an id AND photos AND form ok AND still draft
+        const canSubmit = !!PROPERTY_ID && !missing.length && p.photos.length && (CURRENT_STATUS === "DRAFT");
+        els.submitBtn.disabled = !canSubmit;
+
+        return { ok: !missing.length, missing };
+      }
+
+      function setBusy(on){
+        els.saveBtn.disabled = !!on;
+        els.submitBtn.disabled = !!on || els.submitBtn.disabled;
+        els.previewBtn.disabled = !!on;
+      }
+
+      // ---- Cloudinary ----
+      async function getCloudinarySignature(){
+        // Your backend expects POST; keep it simple and accept multiple shapes.
+        const res = await apiFetch("/api/uploads/cloudinary-signature", { method:"POST" });
+        const out = await readJsonSafe(res);
+        if (!res.ok){
+          throw new Error(out.text || "Signature request failed");
+        }
+        const s = out.json || {};
+        return {
+          cloudName: s.cloudName || s.cloud_name || s.cloudinaryCloudName || s.cloud || "",
+          apiKey: s.apiKey || s.api_key || "",
+          timestamp: s.timestamp,
+          signature: s.signature,
+          folder: s.folder || "havn/properties",
+          uploadPreset: s.uploadPreset || s.upload_preset || ""
+        };
+      }
+
+      async function uploadOneToCloudinary(file, sig){
+        const fd = new FormData();
+        fd.append("file", file);
+        if (sig.folder) fd.append("folder", sig.folder);
+        if (sig.uploadPreset) fd.append("upload_preset", sig.uploadPreset);
+        fd.append("api_key", sig.apiKey);
+        fd.append("timestamp", String(sig.timestamp));
+        fd.append("signature", sig.signature);
+
+        const url = `https://api.cloudinary.com/v1_1/${encodeURIComponent(sig.cloudName)}/auto/upload`;
+        const res = await fetch(url, { method:"POST", body: fd });
+        const j = await res.json().catch(()=> null);
+        if (!res.ok || !j) throw new Error("Cloudinary upload failed");
+        return j.secure_url || j.url;
+      }
+
+      async function uploadFiles(files){
+        clearErr();
+        if (!files || !files.length) return;
+
+        if (PHOTOS.length + files.length > 70){
+          showErr("Upload blocked", "Maximum 70 photos.", `You tried to add ${files.length}, but you already have ${PHOTOS.length}.`);
+          return;
+        }
+
+        try{
+          setDot(els.dotApi, "y");
+          const sig = await getCloudinarySignature();
+          if (!sig.cloudName || !sig.apiKey || !sig.timestamp || !sig.signature){
+            throw new Error("Signature response missing required fields.");
+          }
+
+          for (const f of files){
+            const url = await uploadOneToCloudinary(f, sig);
+            if (url) PHOTOS.push(url);
+            renderPhotos();
+          }
+
+          setDot(els.dotApi, "g");
+        }catch(err){
+          setDot(els.dotApi, "r");
+          showErr("Photo upload failed", "Could not upload photos.", String(err && err.message ? err.message : err));
+        }
+      }
+
+      // ---- Photos UI ----
+      function applyThumbSize(px){ document.documentElement.style.setProperty("--thumb", px + "px"); }
+      function applyOrgThumb(px){ document.documentElement.style.setProperty("--orgThumb", px + "px"); }
+      function setRangeFill(rangeEl){
+        const min = Number(rangeEl.min || 0);
+        const max = Number(rangeEl.max || 100);
+        const val = Number(rangeEl.value || 0);
+        const pct = ((val - min) * 100) / (max - min || 1);
+        rangeEl.style.setProperty("--pct", pct.toFixed(2) + "%");
+      }
+
+      function renderPhotos(){
+        els.photoCount.textContent = `${PHOTOS.length} photos (cover = first)`;
+        const showNums = els.showNumbers.checked;
+        els.thumbGrid.innerHTML = "";
+
+        PHOTOS.forEach((url, idx) => {
+          const tile = document.createElement("div");
+          tile.className = "tile" + (idx===0 ? " cover0" : "");
+          tile.draggable = true;
+
+          const img = document.createElement("img");
+          img.src = url;
+          tile.appendChild(img);
+
+          const cover = document.createElement("div");
+          cover.className = "coverBadge";
+          cover.textContent = "Cover";
+          tile.appendChild(cover);
+
+          const x = document.createElement("button");
+          x.className = "x";
+          x.type = "button";
+          x.textContent = "×";
+          x.onclick = (e) => { e.stopPropagation(); removePhoto(idx); };
+          tile.appendChild(x);
+
+          const idxEl = document.createElement("div");
+          idxEl.className = "idx";
+          idxEl.textContent = String(idx + 1);
+          idxEl.style.display = showNums ? "grid" : "none";
+          tile.appendChild(idxEl);
+
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          const makeCover = document.createElement("button");
+          makeCover.className = "miniBtn";
+          makeCover.type = "button";
+          makeCover.textContent = "Make cover";
+          makeCover.onclick = (e) => { e.stopPropagation(); makeCoverPhoto(idx); };
+          actions.appendChild(makeCover);
+          tile.appendChild(actions);
+
+          tile.addEventListener("dragstart", (e) => {
+            e.dataTransfer.setData("text/plain", String(idx));
+            e.dataTransfer.effectAllowed = "move";
+          });
+          tile.addEventListener("dragover", (e) => e.preventDefault());
+          tile.addEventListener("drop", (e) => {
+            e.preventDefault();
+            const from = Number(e.dataTransfer.getData("text/plain"));
+            const to = idx;
+            if (Number.isFinite(from) && from !== to) movePhoto(from, to);
+          });
+
+          els.thumbGrid.appendChild(tile);
+        });
+
+        setDot(els.dotPhotos, PHOTOS.length ? "g" : "y");
+        renderOrganizer();
+        validate();
+      }
+
+      function renderOrganizer(){
+        els.orgGrid.innerHTML = "";
+        PHOTOS.forEach((url, idx) => {
+          const t = document.createElement("div");
+          t.className = "orgTile" + (idx===0 ? " cover0" : "");
+          t.draggable = true;
+
+          const img = document.createElement("img");
+          img.src = url;
+          t.appendChild(img);
+
+          const tag = document.createElement("div");
+          tag.className = "tag";
+          tag.textContent = "Cover";
+          t.appendChild(tag);
+
+          const x = document.createElement("button");
+          x.className = "x";
+          x.type = "button";
+          x.textContent = "×";
+          x.onclick = (e) => { e.stopPropagation(); removePhoto(idx); };
+          t.appendChild(x);
+
+          const idxEl = document.createElement("div");
+          idxEl.className = "idx";
+          idxEl.textContent = String(idx + 1);
+          t.appendChild(idxEl);
+
+          const act = document.createElement("div");
+          act.className = "act";
+          const coverBtn = document.createElement("button");
+          coverBtn.className = "miniBtn";
+          coverBtn.type = "button";
+          coverBtn.textContent = "Make cover";
+          coverBtn.onclick = (e) => { e.stopPropagation(); makeCoverPhoto(idx); };
+          act.appendChild(coverBtn);
+          t.appendChild(act);
+
+          t.addEventListener("dragstart", (e) => {
+            t.classList.add("dragging");
+            e.dataTransfer.setData("text/plain", String(idx));
+            e.dataTransfer.effectAllowed = "move";
+          });
+          t.addEventListener("dragend", () => t.classList.remove("dragging"));
+          t.addEventListener("dragover", (e) => { e.preventDefault(); t.classList.add("dragover"); });
+          t.addEventListener("dragleave", () => t.classList.remove("dragover"));
+          t.addEventListener("drop", (e) => {
+            e.preventDefault();
+            t.classList.remove("dragover");
+            const from = Number(e.dataTransfer.getData("text/plain"));
+            const to = idx;
+            if (Number.isFinite(from) && from !== to) movePhoto(from, to);
+          });
+
+          els.orgGrid.appendChild(t);
+        });
+      }
+
+      function removePhoto(i){ PHOTOS.splice(i, 1); renderPhotos(); }
+      function movePhoto(from, to){
+        const item = PHOTOS.splice(from,1)[0];
+        PHOTOS.splice(to,0,item);
+        renderPhotos();
+      }
+      function makeCoverPhoto(i){
+        if (i<=0) return;
+        const item = PHOTOS.splice(i,1)[0];
+        PHOTOS.unshift(item);
+        renderPhotos();
+      }
+
+      // ---- API actions ----
+      async function createDraft(){
+        clearErr();
+        setBusy(true);
+
+        try{
+          const payload = buildPayload();
+
+          const res = await apiFetch("/api/properties", {
+            method:"POST",
+            body: JSON.stringify(payload)
+          });
+
+          const out = await readJsonSafe(res);
+          if (!res.ok){
+            setDot(els.dotApi, "r");
+            showErr("Save failed", "Could not create draft.", `POST /api/properties\nStatus: ${res.status}\n\n${out.text || ""}`);
+            fmtStatus("draft", "Could not create draft.");
+            return;
+          }
+
+          const item = (out.json && (out.json.item || out.json.property || out.json)) || null;
+          if (!item || item.id === undefined || item.id === null){
+            setDot(els.dotApi, "r");
+            showErr("Save failed", "Draft created but response missing id.", out.text || "");
+            return;
+          }
+
+          PROPERTY_ID = String(item.id);
+          CURRENT_STATUS = (item.listingStatus || "DRAFT").toUpperCase();
+
+          els.idHint.textContent = PROPERTY_ID;
+
+          const u = new URL(window.location.href);
+          u.searchParams.set("id", PROPERTY_ID);
+          window.history.replaceState({}, "", u.toString());
+
+          setDot(els.dotApi, "g");
+          fmtStatus("draft", "Draft created ✅");
+          validate();
+
+        }catch(err){
+          setDot(els.dotApi, "r");
+          showErr("Save failed", "Unexpected error while creating draft.", String(err && err.message ? err.message : err));
+        }finally{
+          setBusy(false);
+        }
+      }
+
+      async function saveDraft(){
+        clearErr();
+        setBusy(true);
+
+        try{
+          const payload = buildPayload();
+
+          if (!PROPERTY_ID){
+            await createDraft();
+            return;
+          }
+
+          const res = await apiFetch(`/api/properties/${encodeURIComponent(PROPERTY_ID)}`, {
+            method:"PATCH",
+            body: JSON.stringify(payload)
+          });
+
+          const out = await readJsonSafe(res);
+          if (!res.ok){
+            setDot(els.dotApi, "r");
+            showErr("Save failed", "Could not save draft.", `PATCH /api/properties/${PROPERTY_ID}\nStatus: ${res.status}\n\n${out.text || ""}`);
+            fmtStatus("draft", "Could not save draft.");
+            return;
+          }
+
+          const item = (out.json && (out.json.item || out.json.property || out.json)) || null;
+          if (item && item.listingStatus) CURRENT_STATUS = String(item.listingStatus).toUpperCase();
+
+          setDot(els.dotApi, "g");
+          fmtStatus("draft", "Draft saved ✅");
+          validate();
+
+        }catch(err){
+          setDot(els.dotApi, "r");
+          showErr("Save failed", "Unexpected error while saving.", String(err && err.message ? err.message : err));
+        }finally{
+          setBusy(false);
+        }
+      }
+
+      async function submit(){
+        clearErr();
+        setBusy(true);
+
+        try{
+          if (!PROPERTY_ID){
+            await createDraft();
+            if (!PROPERTY_ID){ setBusy(false); return; }
+          }
+
+          // ensure latest changes saved before submit
+          await saveDraft();
+
+          if (!confirm("Submit this listing for admin review?\n\nIt will be locked while pending.")){
+            setBusy(false);
+            return;
+          }
+
+          const res = await apiFetch(`/api/properties/${encodeURIComponent(PROPERTY_ID)}/submit`, {
+            method:"POST"
+          });
+
+          const out = await readJsonSafe(res);
+          if (!res.ok){
+            setDot(els.dotApi, "r");
+            showErr("Submit failed", "Could not submit for approval.", `POST /api/properties/${PROPERTY_ID}/submit\nStatus: ${res.status}\n\n${out.text || ""}`);
+            fmtStatus("draft", "Submit failed.");
+            return;
+          }
+
+          const item = (out.json && (out.json.item || out.json.property || out.json)) || null;
+          CURRENT_STATUS = String((item && item.listingStatus) || "SUBMITTED").toUpperCase();
+
+          // show as pending/submitted in UI
+          fmtStatus("submitted", "Submitted ✅ (now pending admin review)");
+          lockForm(true);
+          els.saveBtn.disabled = true;
+          els.submitBtn.disabled = true;
+
+          setDot(els.dotApi, "g");
+
+        }catch(err){
+          setDot(els.dotApi, "r");
+          showErr("Submit failed", "Unexpected error while submitting.", String(err && err.message ? err.message : err));
+        }finally{
+          setBusy(false);
+        }
+      }
+
+      // ---- Wire UI ----
+      function bindMapLive(){
+        ["eircode","address1","address2","city","county"].forEach(id=>{
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("input", () => {
+            clearTimeout(window.__mapT);
+            window.__mapT = setTimeout(updateMapPreview, 120);
+          });
+        });
+      }
+
+      function openOrganizer(){
+        els.orgModal.classList.add("on");
+        els.orgModal.setAttribute("aria-hidden","false");
+        renderOrganizer();
+      }
+      function closeOrganizer(){
+        els.orgModal.classList.remove("on");
+        els.orgModal.setAttribute("aria-hidden","true");
+      }
+
+      function boot(){
+        // auth guard
+        if (window.HAVN_AUTH && typeof HAVN_AUTH.requireAuth === "function") {
+          HAVN_AUTH.requireAuth({ next: "/property-upload.html" });
+        } else {
+          const t = localStorage.getItem("token");
+          if (!t) location.href = "/login.html?next=" + encodeURIComponent("/property-upload.html");
+        }
+
+        setDot(els.dotAuth, "g");
+        setDot(els.dotApi, "n");
+        setDot(els.dotPhotos, "y");
+        setDot(els.dotForm, "y");
+
+        // sliders
+        function onThumbRange(){
+          const v = Number(els.thumbRange.value || 128);
+          if (Number.isFinite(v)) applyThumbSize(v);
+          setRangeFill(els.thumbRange);
+        }
+        els.thumbRange.addEventListener("input", onThumbRange);
+        onThumbRange();
+
+        function onOrgRange(){
+          const v = Number(els.orgRange.value || 180);
+          if (Number.isFinite(v)) applyOrgThumb(v);
+          setRangeFill(els.orgRange);
+        }
+        els.orgRange.addEventListener("input", onOrgRange);
+        onOrgRange();
+
+        els.toggleNumbers.addEventListener("click", (e) => {
+          if (e.target && e.target.id === "showNumbers") return;
+          els.showNumbers.checked = !els.showNumbers.checked;
+          renderPhotos();
+        });
+        els.showNumbers.addEventListener("change", renderPhotos);
+
+        // buttons
+        els.logoutBtn.onclick = () => {
+          try{ localStorage.removeItem("token"); }catch{}
+          window.location.href = "/login.html";
+        };
+
+        els.previewBtn.onclick = () => { updateMapPreview(); validate(); };
+
+        els.saveBtn.onclick = async () => { await saveDraft(); };
+        els.submitBtn.onclick = async () => { await submit(); };
+
+        // photo input
+        els.selectBtn.onclick = () => els.fileInput.click();
+        els.fileInput.addEventListener("change", async (e) => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          await uploadFiles(files);
+        });
+
+        els.clearBtn.onclick = () => {
+          if (!PHOTOS.length) return;
+          if (!confirm("Clear all photos?")) return;
+          PHOTOS = [];
+          renderPhotos();
+        };
+
+        els.dropZone.addEventListener("click", () => els.fileInput.click());
+        els.dropZone.addEventListener("dragover", (e) => { e.preventDefault(); els.dropZone.style.borderColor = "#60a5fa"; });
+        els.dropZone.addEventListener("dragleave", () => { els.dropZone.style.borderColor = "#cbd5e1"; });
+        els.dropZone.addEventListener("drop", async (e) => {
+          e.preventDefault();
+          els.dropZone.style.borderColor = "#cbd5e1";
+          const files = Array.from(e.dataTransfer.files || []).filter(f => (f.type || "").startsWith("image/"));
+          await uploadFiles(files);
+        });
+
+        // organizer
+        els.organizerBtn.onclick = () => openOrganizer();
+        els.orgClose.onclick = () => closeOrganizer();
+        els.orgModal.addEventListener("click", (e) => { if (e.target && e.target.id === "orgModal") closeOrganizer(); });
+        window.addEventListener("keydown", (e) => { if (e.key === "Escape" && els.orgModal.classList.contains("on")) closeOrganizer(); });
+
+        bindMapLive();
+        updateMapPreview();
+        renderPhotos();
+
+        // initial status
+        if (PROPERTY_ID){
+          fmtStatus("draft", "Editing draft (ID loaded). Click Save draft to persist changes.");
+        } else {
+          fmtStatus("draft", "New listing (not saved yet).");
+        }
+
+        validate();
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>

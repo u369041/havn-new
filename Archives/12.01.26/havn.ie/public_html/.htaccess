@@ -1,0 +1,16 @@
+# Serve index.html first (then index.php if present)
+DirectoryIndex index.html index.php
+
+# Avoid content-negotiation weirdness
+<IfModule mod_negotiation.c>
+  Options -MultiViews
+</IfModule>
+
+# Disable caching for HTML so you see the new dark UI immediately
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|htm)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+</IfModule>

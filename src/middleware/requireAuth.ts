@@ -98,3 +98,11 @@ requireAuth.optional = (req: any, res: Response, next: NextFunction) => {
 };
 
 export default requireAuth;
+
+
+
+
+curl.exe -i -H "Authorization: Bearer YOUR_TOKEN" "https://api.havn.ie/api/properties/mine"
+
+
+

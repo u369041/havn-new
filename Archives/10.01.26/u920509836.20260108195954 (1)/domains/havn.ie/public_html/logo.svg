@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64" viewBox="0 0 600 160" fill="none">
+  <g>
+    <path d="M40 10 L80 40 L80 90 L10 90 L10 40 Z" stroke="#187BFF" stroke-width="10" fill="#187BFF"/>
+    <path d="M10 40 L45 15 L80 40" fill="#187BFF"/>
+    <rect x="38" y="60" width="22" height="30" rx="6" fill="#FFFFFF"/>
+    <text x="110" y="90" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="700" fill="#187BFF">havn.ie</text>
+    <text x="112" y="120" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="400" fill="#6B7280">Find Your Haven</text>
+  </g>
+</svg>

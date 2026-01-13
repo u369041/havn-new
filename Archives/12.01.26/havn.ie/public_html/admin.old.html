@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HAVN Admin</title>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#111a2e; --muted:#9fb0d0; --text:#eaf0ff;
+      --ok:#2dd4bf; --bad:#fb7185; --warn:#fbbf24; --line:rgba(255,255,255,.08);
+      --btn:#2563eb; --btn2:#0ea5e9; --input:#0f1a33; --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:14px; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    }
+
+    *{box-sizing:border-box; min-width:0;}
+    html, body { height:100%; }
+    body{
+      margin:0; font-family:var(--sans);
+      background:
+        radial-gradient(1200px 700px at 20% 0%, rgba(37,99,235,.25), transparent 60%),
+        radial-gradient(1000px 700px at 90% 10%, rgba(14,165,233,.18), transparent 55%),
+        var(--bg);
+      color:var(--text);
+      overflow-x:hidden; /* ✅ stops page drifting right */
+    }
+
+    .wrap{max-width:1180px;margin:0 auto;padding:22px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+    h1{font-size:22px;margin:0 0 6px 0}
+    .sub{color:var(--muted);font-size:13px;line-height:1.35}
+
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.04), transparent 40%), var(--card);
+      border:1px solid var(--line); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow);
+      max-width:100%;
+    }
+    .card h2{margin:0 0 10px 0;font-size:15px}
+
+    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+    @media (max-width:980px){.grid{grid-template-columns:1fr}}
+
+    label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
+    input,select,textarea{
+      width:100%;padding:10px 11px;background:var(--input);border:1px solid var(--line);
+      color:var(--text);border-radius:12px;outline:none;font-size:14px
+    }
+    textarea{min-height:110px;resize:vertical}
+
+    .inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width:640px){.inline{grid-template-columns:1fr}}
+
+    .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    button{
+      appearance:none;border:none;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer;color:white;background:var(--btn)
+    }
+    button.secondary{background:rgba(255,255,255,.08)}
+    button.alt{background:var(--btn2)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+
+    .pill{
+      display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);
+      background:rgba(255,255,255,.03);color:var(--muted);font-size:12px;white-space:nowrap
+    }
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 4px rgba(251,191,36,.12)}
+    .dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(45,212,191,.12)}
+    .dot.bad{background:var(--bad);box-shadow:0 0 0 4px rgba(251,113,133,.12)}
+    .statusbar{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+
+    .muted{color:var(--muted)}
+    .mono{font-family:var(--mono);font-size:12px}
+
+    .hr{height:1px;background:var(--line);margin:12px 0}
+
+    .list{display:grid;gap:10px}
+    .item{border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(255,255,255,.03)}
+    .item .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .item .title{font-weight:700;font-size:14px;margin:0 0 4px 0}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .chip{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted)}
+
+    .help{color:var(--muted);font-size:12px;margin-top:6px;line-height:1.35}
+
+    /* ✅ Prevent pre from expanding width due to long URLs */
+    pre{
+      margin:0;
+      padding:10px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:rgba(0,0,0,.25);
+      max-height:260px;
+      max-width:100%;
+      overflow:auto;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      word-break:break-word;
+    }
+
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width:900px){.two{grid-template-columns:1fr}}
+
+    /* Map preview */
+    .mapFrame{
+      width:100%;
+      height:260px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      overflow:hidden;
+      background:rgba(0,0,0,.18);
+    }
+    iframe{border:0;width:100%;height:100%}
+
+    /* ✅ Photo area contained */
+    .photoWrap{
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:rgba(255,255,255,.02);
+      padding:10px;
+      max-height:280px;
+      overflow:auto;
+    }
+    .photo-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));
+      gap:10px;
+      align-items:start;
+    }
+
+    .photo{
+      position:relative;
+      border:1px solid var(--line);
+      border-radius:12px;
+      overflow:hidden;
+      background:rgba(255,255,255,.03);
+      user-select:none;
+    }
+    .photo.dragging{opacity:.55}
+    .photo.dropTarget{outline:2px dashed rgba(45,212,191,.6); outline-offset:2px}
+    .photo img{width:100%;height:95px;object-fit:cover;display:block}
+
+    .photoBar{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-content:space-between;
+      padding:8px 8px 9px;
+      border-top:1px solid var(--line);
+      background:rgba(0,0,0,.12);
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    .photoBtns{display:flex;gap:6px;align-items:center}
+    .miniBtn{
+      width:28px;height:28px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.06);
+      color:#fff;
+      cursor:pointer;
+      font-weight:900;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      line-height:1;
+    }
+    .miniBtn:hover{background:rgba(255,255,255,.10)}
+    .miniBtn.star{color:#ffd54a}
+    .miniBtn.star.off{color:rgba(255,255,255,.55)}
+    .badgeCover{
+      position:absolute;
+      left:8px; top:8px;
+      background:rgba(255,213,74,.15);
+      border:1px solid rgba(255,213,74,.35);
+      color:#ffd54a;
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:800;
+      backdrop-filter: blur(6px);
+    }
+
+    .smallRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>HAVN Admin</h1>
+      <div class="sub">Base API: <span class="mono" id="apiBaseLabel"></span></div>
+    </div>
+    <div class="statusbar">
+      <span class="pill"><span class="dot" id="dotHealth"></span>Health: <span id="healthText">unknown</span></span>
+      <span class="pill"><span class="dot" id="dotAuth"></span>Auth: <span id="authText">no token</span></span>
+      <button class="secondary" id="btnRefresh">Refresh listings</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Create Listing</h2>
+
+      <div class="inline">
+        <div>
+          <label>Admin Token</label>
+          <input id="adminToken" type="password" placeholder="Paste ADMIN_TOKEN here" />
+          <div class="btns">
+            <button class="alt" id="btnSaveToken" type="button">Save token</button>
+            <button class="secondary" id="btnClearToken" type="button">Clear token</button>
+            <button class="secondary" id="btnHealth" type="button">Health check</button>
+          </div>
+        </div>
+        <div>
+          <label>Quick Actions</label>
+          <div class="btns">
+            <button class="secondary" id="btnFillDemo" type="button">Fill demo payload</button>
+            <button class="secondary" id="btnCopyPayload" type="button">Copy JSON payload</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="inline">
+        <div>
+          <label>Slug *</label>
+          <input id="slug" />
+          <div class="smallRow" style="margin-top:8px">
+            <button class="secondary" id="btnRegenSlug" type="button">Regenerate slug</button>
+            <span class="pill"><span class="dot" id="dotSlug"></span>Slug: <span id="slugMode">auto</span></span>
+          </div>
+          <div class="help">Auto-generated from Title + City unless you edit it manually.</div>
+        </div>
+        <div>
+          <label>Status *</label>
+          <select id="status">
+            <option value="rent">rent</option>
+            <option value="sale">sale</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Title *</label><input id="title" />
+
+      <div class="inline">
+        <div><label>Address1 *</label><input id="address1" /></div>
+        <div><label>Address2</label><input id="address2" /></div>
+      </div>
+
+      <div class="inline">
+        <div><label>City *</label><input id="city" /></div>
+        <div><label>County *</label><input id="county" /></div>
+      </div>
+
+      <div class="inline">
+        <div><label>Eircode</label><input id="eircode" /></div>
+        <div><label>BER</label><input id="ber" placeholder="e.g. B2" /></div>
+      </div>
+
+      <div class="inline">
+        <div><label>Price *</label><input id="price" type="number" min="0" step="1" /></div>
+        <div>
+          <label>Property Type</label>
+          <select id="propertyType">
+            <option value="">(optional)</option>
+            <option value="apartment">apartment</option>
+            <option value="house">house</option>
+            <option value="studio">studio</option>
+            <option value="duplex">duplex</option>
+            <option value="townhouse">townhouse</option>
+            <option value="other">other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="inline">
+        <div><label>Bedrooms</label><input id="bedrooms" type="number" min="0" step="1" /></div>
+        <div><label>Bathrooms</label><input id="bathrooms" type="number" min="0" step="1" /></div>
+      </div>
+
+      <div class="inline">
+        <div><label>Size</label><input id="size" type="number" min="0" step="1" /></div>
+        <div>
+          <label>Size Units</label>
+          <select id="sizeUnits">
+            <option value="">(optional)</option>
+            <option value="sqm">sqm</option>
+            <option value="sqft">sqft</option>
+          </select>
+        </div>
+      </div>
+
+      <label>Description</label>
+      <textarea id="description" placeholder="Describe the property..."></textarea>
+
+      <label>Features (one per line)</label>
+      <textarea id="features" placeholder="Balcony&#10;Parking&#10;Near DART"></textarea>
+      <div class="help">Each line becomes an item in <span class="mono">features[]</span>.</div>
+
+      <div class="hr"></div>
+
+      <h2>Map Preview (Eircode-first)</h2>
+      <div class="help">No API key required. Uses Eircode if present, otherwise falls back to address.</div>
+      <div class="mapFrame"><iframe id="mapFrame" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>
+
+      <div class="hr"></div>
+
+      <h2>Photos</h2>
+      <div class="help">
+        Uploads use signed Cloudinary uploads via <span class="mono">/api/uploads/cloudinary-signature</span>.
+        <br/>Tip: Drag thumbnails to reorder. ⭐ sets the cover (first photo).
+      </div>
+
+      <label>Select images</label>
+      <input type="file" id="photoInput" accept="image/*" multiple />
+
+      <div class="btns">
+        <button type="button" class="alt" id="uploadPhotosBtn">Upload selected photos</button>
+        <button type="button" class="secondary" id="clearPhotosBtn">Clear uploaded photos</button>
+      </div>
+
+      <div class="smallRow" style="margin-top:10px">
+        <span class="pill"><span class="dot" id="dotPhotos"></span>Photos: <span id="photoCount">0</span></span>
+        <span class="pill">Cover: <span id="coverLabel" class="mono">(none)</span></span>
+      </div>
+
+      <div class="hr"></div>
+
+      <h2>Signature Debug</h2>
+      <pre class="mono" id="sigDebug">{}</pre>
+
+      <div class="hr"></div>
+
+      <h2>Uploaded Photos</h2>
+      <div class="help">Scrollable container prevents the page layout from stretching when you upload many photos.</div>
+      <div class="photoWrap">
+        <div id="photoPreview" class="photo-grid"></div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="btns">
+        <button id="btnSubmit" type="button">Create listing</button>
+        <button class="secondary" id="btnValidate" type="button">Validate</button>
+        <span class="pill"><span class="dot" id="dotForm"></span>Form: <span id="formText">unknown</span></span>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="two">
+        <div><h2>Payload Preview</h2><pre class="mono" id="payloadPreview">{}</pre></div>
+        <div><h2>Status</h2><pre class="mono" id="statusBox">Ready</pre></div>
+      </div>
+    </section>
+
+    <aside class="card">
+      <h2>Existing Listings</h2>
+      <div class="hr"></div>
+      <div class="list" id="listings"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const API_BASE = "https://api.havn.ie";
+  const SIGNATURE_ENDPOINT = `${API_BASE}/api/uploads/cloudinary-signature`;
+  const HEALTH_ENDPOINT = `${API_BASE}/api/health`;
+  const PROPS_ENDPOINT = `${API_BASE}/api/properties`;
+
+  // Photo safeguards
+  const WARN_UPLOAD_COUNT = 30; // ✅ warn if uploading lots at once
+  const MAX_UPLOAD_COUNT = 70;  // ✅ hard cap
+
+  const uploadedPhotos = []; // array of urls (cover is index 0)
+  let dragFromIndex = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  $("apiBaseLabel").textContent = API_BASE;
+
+  const dotHealth = $("dotHealth");
+  const dotAuth = $("dotAuth");
+  const dotForm = $("dotForm");
+  const dotSlug = $("dotSlug");
+  const dotPhotos = $("dotPhotos");
+
+  const healthText = $("healthText");
+  const authText = $("authText");
+  const formText = $("formText");
+  const statusBox = $("statusBox");
+  const slugModeEl = $("slugMode");
+
+  const setDot = (dotEl, state) => {
+    dotEl.classList.remove("ok", "bad");
+    if (state === "ok") dotEl.classList.add("ok");
+    if (state === "bad") dotEl.classList.add("bad");
+  };
+
+  const setStatus = (t) => statusBox.textContent = t;
+
+  const getToken = () => sessionStorage.getItem("HAVN_ADMIN_TOKEN") || "";
+  const setToken = (t) => sessionStorage.setItem("HAVN_ADMIN_TOKEN", t);
+  const clearToken = () => sessionStorage.removeItem("HAVN_ADMIN_TOKEN");
+
+  const authHeaders = () => {
+    const t = getToken();
+    return t ? { "x-admin-token": t } : {};
+  };
+
+  const safeJson = async (res) => {
+    const text = await res.text();
+    try { return JSON.parse(text); } catch { return { raw: text }; }
+  };
+
+  const escapeHtml = (s) =>
+    String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const escapeAttr = (s) => escapeHtml(s).replace(/`/g, "&#96;");
+
+  // -------------------------
+  // Slug auto-generation
+  // -------------------------
+  let slugDirty = false;
+
+  const slugify = (s) => {
+    return String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+  };
+
+  const buildAutoSlug = () => {
+    const title = $("title").value.trim();
+    const city = $("city").value.trim();
+    const base = [title, city].filter(Boolean).join(" ");
+    const s = slugify(base);
+    // include small suffix to avoid collisions if you want, but keep readable:
+    return s ? `${s}-v1` : "";
+  };
+
+  const applyAutoSlugIfAllowed = () => {
+    if (slugDirty) return;
+    const auto = buildAutoSlug();
+    if (auto) $("slug").value = auto;
+  };
+
+  const setSlugModeUI = () => {
+    if (slugDirty) {
+      setDot(dotSlug, "bad");
+      slugModeEl.textContent = "manual";
+    } else {
+      setDot(dotSlug, "ok");
+      slugModeEl.textContent = "auto";
+    }
+  };
+
+  // -------------------------
+  // Map preview (Eircode-first)
+  // -------------------------
+  const updateMapPreview = () => {
+    const e = $("eircode").value.trim();
+    const a1 = $("address1").value.trim();
+    const a2 = $("address2").value.trim();
+    const c = $("city").value.trim();
+    const co = $("county").value.trim();
+
+    const query = e || [a1, a2, c, co].filter(Boolean).join(", ");
+    $("mapFrame").src = query
+      ? `https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`
+      : "about:blank";
+  };
+
+  // -------------------------
+  // Payload
+  // -------------------------
+  const parseFeatures = () => {
+    const raw = $("features").value || "";
+    const lines = raw.split("\n").map(s => s.trim()).filter(Boolean);
+    return lines.length ? lines : undefined;
+  };
+
+  const readPayload = () => {
+    const p = {
+      slug: $("slug").value.trim(),
+      title: $("title").value.trim(),
+      address1: $("address1").value.trim(),
+      address2: $("address2").value.trim() || undefined,
+      city: $("city").value.trim(),
+      county: $("county").value.trim(),
+      eircode: $("eircode").value.trim() || undefined,
+      price: $("price").value ? Number($("price").value) : undefined,
+      status: $("status").value,
+
+      propertyType: $("propertyType").value || undefined,
+      ber: $("ber").value.trim() || undefined,
+      bedrooms: $("bedrooms").value ? Number($("bedrooms").value) : undefined,
+      bathrooms: $("bathrooms").value ? Number($("bathrooms").value) : undefined,
+      size: $("size").value ? Number($("size").value) : undefined,
+      sizeUnits: $("sizeUnits").value || undefined,
+
+      features: parseFeatures(),
+      description: $("description").value.trim() || undefined,
+      photos: [...uploadedPhotos],
+    };
+
+    Object.keys(p).forEach(k => p[k] === undefined && delete p[k]);
+    return p;
+  };
+
+  const updatePreview = () => {
+    $("payloadPreview").textContent = JSON.stringify(readPayload(), null, 2);
+    updateMapPreview();
+    validateForm(false);
+    updatePhotoMeta();
+  };
+
+  const validateForm = (loud=true) => {
+    const p = readPayload();
+    const required = ["slug","title","address1","city","county","price","status"];
+    const missing = required.filter(k => !p[k] || (typeof p[k]==="string" && !p[k].trim()));
+
+    if (missing.length) {
+      setDot(dotForm, "bad");
+      formText.textContent = "invalid";
+      if (loud) setStatus("Missing required: " + missing.join(", "));
+      return false;
+    }
+
+    setDot(dotForm, "ok");
+    formText.textContent = "valid";
+    if (loud) setStatus("Form valid ✅");
+    return true;
+  };
+
+  // -------------------------
+  // Photos: render / reorder / cover
+  // -------------------------
+  const updatePhotoMeta = () => {
+    $("photoCount").textContent = String(uploadedPhotos.length);
+    if (uploadedPhotos.length) {
+      setDot(dotPhotos, "ok");
+      const u = uploadedPhotos[0];
+      $("coverLabel").textContent = u.length > 34 ? (u.slice(0, 34) + "…") : u;
+    } else {
+      setDot(dotPhotos, "bad");
+      $("coverLabel").textContent = "(none)";
+    }
+  };
+
+  const moveItem = (arr, from, to) => {
+    if (from === to) return;
+    const item = arr.splice(from, 1)[0];
+    arr.splice(to, 0, item);
+  };
+
+  const setCover = (idx) => {
+    if (idx < 0 || idx >= uploadedPhotos.length) return;
+    moveItem(uploadedPhotos, idx, 0);
+    renderPhotos();
+    setStatus("Cover photo set ⭐ (first in list)");
+  };
+
+  const removePhoto = (idx) => {
+    uploadedPhotos.splice(idx, 1);
+    renderPhotos();
+  };
+
+  const renderPhotos = () => {
+    const root = $("photoPreview");
+    root.innerHTML = "";
+
+    if (!uploadedPhotos.length) {
+      root.innerHTML = `<div class="muted">No uploaded photos yet.</div>`;
+      updatePreview();
+      return;
+    }
+
+    uploadedPhotos.forEach((url, idx) => {
+      const tile = document.createElement("div");
+      tile.className = "photo";
+      tile.draggable = true;
+      tile.dataset.idx = String(idx);
+
+      tile.innerHTML = `
+        ${idx === 0 ? `<div class="badgeCover">Cover</div>` : ``}
+        <img src="${escapeAttr(url)}" alt="photo ${idx+1}" />
+        <div class="photoBar">
+          <div class="mono">${idx+1}/${uploadedPhotos.length}</div>
+          <div class="photoBtns">
+            <button type="button" class="miniBtn star ${idx === 0 ? "" : "off"}" title="Set as cover">★</button>
+            <button type="button" class="miniBtn" title="Remove">×</button>
+          </div>
+        </div>
+      `;
+
+      // Buttons
+      const btnStar = tile.querySelector(".miniBtn.star");
+      const btnRemove = tile.querySelectorAll(".miniBtn")[1];
+
+      btnStar.onclick = () => setCover(idx);
+      btnRemove.onclick = () => removePhoto(idx);
+
+      // Drag handlers
+      tile.addEventListener("dragstart", (e) => {
+        dragFromIndex = idx;
+        tile.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", String(idx)); } catch {}
+      });
+
+      tile.addEventListener("dragend", () => {
+        tile.classList.remove("dragging");
+        dragFromIndex = null;
+        Array.from(root.children).forEach(el => el.classList.remove("dropTarget"));
+      });
+
+      tile.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        tile.classList.add("dropTarget");
+      });
+
+      tile.addEventListener("dragleave", () => {
+        tile.classList.remove("dropTarget");
+      });
+
+      tile.addEventListener("drop", (e) => {
+        e.preventDefault();
+        tile.classList.remove("dropTarget");
+        const toIndex = idx;
+
+        let fromIndex = dragFromIndex;
+        // fallback if needed
+        if (fromIndex == null) {
+          const t = e.dataTransfer.getData("text/plain");
+          fromIndex = t ? Number(t) : null;
+        }
+        if (fromIndex == null || !Number.isFinite(fromIndex)) return;
+
+        moveItem(uploadedPhotos, fromIndex, toIndex);
+        renderPhotos();
+        setStatus("Photos reordered ✅");
+      });
+
+      root.appendChild(tile);
+    });
+
+    updatePreview();
+  };
+
+  // -------------------------
+  // Signature + Upload
+  // -------------------------
+  const normalizeSignature = (raw) => {
+    const s = raw?.data || raw?.payload || raw?.result || raw;
+    return {
+      cloudName: s?.cloudName || s?.cloud_name,
+      apiKey: s?.apiKey || s?.api_key,
+      timestamp: s?.timestamp,
+      signature: s?.signature
+    };
+  };
+
+  const uploadSelectedPhotos = async () => {
+    const files = Array.from($("photoInput").files || []);
+    if (!files.length) { setStatus("Select photos first."); return; }
+
+    // ✅ hard cap protection
+    if (uploadedPhotos.length + files.length > MAX_UPLOAD_COUNT) {
+      setStatus(`Too many photos. Max allowed is ${MAX_UPLOAD_COUNT}. You currently have ${uploadedPhotos.length}.`);
+      return;
+    }
+
+    // ✅ warn protection
+    if (files.length >= WARN_UPLOAD_COUNT) {
+      const ok = confirm(`You selected ${files.length} photos.\n\nThis will take a while and may slow the page.\n\nContinue?`);
+      if (!ok) { setStatus("Upload cancelled."); return; }
+    }
+
+    $("uploadPhotosBtn").disabled = true;
+
+    try {
+      setStatus("Fetching signature...");
+      const sigRes = await fetch(SIGNATURE_ENDPOINT, { headers: { ...authHeaders() } });
+      const sigRaw = await safeJson(sigRes);
+      $("sigDebug").textContent = JSON.stringify(sigRaw, null, 2);
+
+      if (!sigRes.ok) { setStatus(`Signature endpoint failed (${sigRes.status})`); return; }
+
+      const sig = normalizeSignature(sigRaw);
+      if (!sig.cloudName || !sig.apiKey || !sig.timestamp || !sig.signature) {
+        setStatus("Signature response missing required fields (cloudName/apiKey/timestamp/signature).");
+        return;
+      }
+
+      let i = 0;
+      for (const file of files) {
+        i++;
+        setStatus(`Uploading ${file.name} (${i}/${files.length})...`);
+
+        const form = new FormData();
+        form.append("file", file);
+        form.append("api_key", sig.apiKey);
+        form.append("timestamp", String(sig.timestamp));
+        form.append("signature", sig.signature);
+        form.append("folder", "havn/properties");
+
+        const upRes = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
+          method: "POST",
+          body: form
+        });
+
+        const data = await safeJson(upRes);
+        if (!upRes.ok || !data.secure_url) {
+          setStatus(`Upload failed for ${file.name}`);
+          return;
+        }
+
+        uploadedPhotos.push(data.secure_url);
+        // Keep cover as first; if this is the first ever photo, it becomes cover automatically.
+        renderPhotos();
+      }
+
+      $("photoInput").value = "";
+      setStatus(`Uploaded ${files.length} photo(s) ✅`);
+    } finally {
+      $("uploadPhotosBtn").disabled = false;
+    }
+  };
+
+  // -------------------------
+  // Auth + Health
+  // -------------------------
+  const refreshAuthUI = () => {
+    const t = getToken();
+    if (t) { setDot(dotAuth, "ok"); authText.textContent = "token set"; $("adminToken").value = t; }
+    else { setDot(dotAuth, "bad"); authText.textContent = "no token"; $("adminToken").value = ""; }
+  };
+
+  const checkHealth = async () => {
+    healthText.textContent = "checking...";
+    try {
+      const res = await fetch(HEALTH_ENDPOINT);
+      const data = await safeJson(res);
+      if (res.ok && data?.ok === true) { setDot(dotHealth, "ok"); healthText.textContent = "ok"; }
+      else { setDot(dotHealth, "bad"); healthText.textContent = "not ok"; }
+    } catch {
+      setDot(dotHealth, "bad"); healthText.textContent = "error";
+    }
+  };
+
+  // -------------------------
+  // Listings
+  // -------------------------
+  const refreshListings = async () => {
+    try {
+      const res = await fetch(PROPS_ENDPOINT);
+      const data = await safeJson(res);
+      const items = Array.isArray(data) ? data : (data.items || data.properties || []);
+      const root = $("listings");
+      root.innerHTML = items.length ? "" : `<div class="item"><div class="muted">No listings returned.</div></div>`;
+
+      for (const it of items) {
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `
+          <div class="top">
+            <div>
+              <div class="title">${escapeHtml(it.title || "(untitled)")}</div>
+              <div class="muted"><span class="mono">${escapeHtml(it.slug || "")}</span></div>
+            </div>
+          </div>
+          <div class="chips">
+            <span class="chip">${escapeHtml(it.status || "")}</span>
+            <span class="chip">${escapeHtml(it.propertyType || "")}</span>
+            <span class="chip">${(it.photos || []).length} photos</span>
+          </div>
+        `;
+        root.appendChild(el);
+      }
+    } catch {
+      $("listings").innerHTML = `<div class="item"><div class="muted">Failed to load listings.</div></div>`;
+    }
+  };
+
+  // -------------------------
+  // Submit
+  // -------------------------
+  const submit = async () => {
+    const token = getToken();
+    if (!token) { setStatus("No admin token set."); return; }
+
+    if (!validateForm(true)) return;
+
+    const payload = readPayload();
+
+    setStatus("Posting listing...");
+    const res = await fetch(PROPS_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type":"application/json", ...authHeaders() },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.status === 409) { setStatus("Slug duplicate (409)."); return; }
+    if (!res.ok) { setStatus(`POST failed (${res.status}).`); return; }
+
+    setStatus("Listing created ✅");
+    await refreshListings();
+  };
+
+  // -------------------------
+  // Events / Wiring
+  // -------------------------
+  $("btnSaveToken").onclick = () => { const t = $("adminToken").value.trim(); if (t) setToken(t); refreshAuthUI(); };
+  $("btnClearToken").onclick = () => { clearToken(); refreshAuthUI(); };
+  $("btnHealth").onclick = checkHealth;
+  $("btnRefresh").onclick = refreshListings;
+
+  $("uploadPhotosBtn").onclick = uploadSelectedPhotos;
+  $("clearPhotosBtn").onclick = () => { uploadedPhotos.length = 0; renderPhotos(); setStatus("Photos cleared."); };
+
+  $("btnSubmit").onclick = (e) => { e.preventDefault(); submit(); };
+  $("btnValidate").onclick = () => validateForm(true);
+
+  // Slug behavior
+  $("slug").addEventListener("input", () => {
+    // If user starts typing something different than our auto-slug, mark dirty
+    const current = $("slug").value.trim();
+    const auto = buildAutoSlug();
+    slugDirty = !!current && current !== auto;
+    setSlugModeUI();
+    updatePreview();
+  });
+
+  $("btnRegenSlug").onclick = () => {
+    slugDirty = false;
+    setSlugModeUI();
+    applyAutoSlugIfAllowed();
+    updatePreview();
+    setStatus("Slug regenerated ✅");
+  };
+
+  // When Title/City changes, update auto slug if not dirty
+  const onTitleCity = () => {
+    applyAutoSlugIfAllowed();
+    setSlugModeUI();
+    updatePreview();
+  };
+  $("title").addEventListener("input", onTitleCity);
+  $("city").addEventListener("input", onTitleCity);
+
+  // Live update on other fields
+  [
+    "address1","address2","county","eircode","price","status",
+    "propertyType","ber","bedrooms","bathrooms","size","sizeUnits","features","description"
+  ].forEach(id => {
+    const el = $(id);
+    el.addEventListener("input", updatePreview);
+    el.addEventListener("change", updatePreview);
+  });
+
+  // Demo fill
+  $("btnFillDemo").onclick = () => {
+    slugDirty = false;
+
+    $("title").value = "Dalkey 4-bed with sea views & private garden";
+    $("address1").value = "Coliemore Road";
+    $("address2").value = "Dalkey Village";
+    $("city").value = "Dalkey";
+    $("county").value = "Dublin";
+    $("eircode").value = "A96 XXXX";
+    $("price").value = 4250;
+    $("status").value = "rent";
+    $("propertyType").value = "house";
+    $("ber").value = "B2";
+    $("bedrooms").value = 4;
+    $("bathrooms").value = 3;
+    $("size").value = 186;
+    $("sizeUnits").value = "sqm";
+    $("features").value =
+`Sea views
+Private garden
+Off-street parking
+Underfloor heating
+South-facing patio
+Utility room
+Home office / study
+EV charger ready
+Walk to DART
+High-speed fibre available`;
+    $("description").value =
+`A beautifully finished 4-bedroom home in the heart of Dalkey, featuring panoramic sea views, a private south-facing garden, and high-spec interiors throughout.
+
+Highlights:
+• Bright open-plan kitchen / dining with sliding doors to patio
+• Separate snug + dedicated home office
+• Principal suite with ensuite + fitted wardrobes
+• Quiet rear garden with lawn + terrace
+
+Available immediately. References required.`;
+
+    applyAutoSlugIfAllowed();
+    setSlugModeUI();
+    updatePreview();
+    setStatus("Demo filled. Upload photos next.");
+  };
+
+  $("btnCopyPayload").onclick = async () => {
+    try { await navigator.clipboard.writeText($("payloadPreview").textContent); setStatus("Copied payload ✅"); }
+    catch { setStatus("Copy failed."); }
+  };
+
+  // Init
+  setSlugModeUI();
+  refreshAuthUI();
+  renderPhotos();
+  applyAutoSlugIfAllowed();
+  updatePreview();
+  checkHealth();
+  refreshListings();
+})();
+</script>
+</body>
+</html>

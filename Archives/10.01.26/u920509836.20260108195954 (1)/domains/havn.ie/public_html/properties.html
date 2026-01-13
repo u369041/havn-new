@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>havn.ie — Browse</title>
+  <link rel="stylesheet" href="/styles.css?v=20260103-final1">
+</head>
+<body>
+  <main class="container page">
+    <div class="hero">
+      <div>
+        <h1>Browse properties</h1>
+        <p class="sub" id="subText">All published listings. Use the search to filter locally.</p>
+      </div>
+      <div class="row">
+        <input id="search" class="input" type="search" placeholder="Search town, county, title..." />
+        <a class="btn" href="/property-upload.html">List a property</a>
+      </div>
+    </div>
+
+    <div id="notice" class="notice" style="display:none;"></div>
+
+    <div class="row" style="gap: 8px; margin-top: 14px;">
+      <span class="chip" id="modeChip">Mode: buy</span>
+      <span class="chip" id="countChip">Count: —</span>
+      <a class="chip" href="/index.html">← Back to home</a>
+    </div>
+
+    <div id="grid" class="grid" aria-live="polite"></div>
+  </main>
+
+  <script defer src="/havn-auth.js?v=20260103-final1"></script>
+  <script defer src="/properties.js?v=20260103-final1"></script>
+</body>
+</html>

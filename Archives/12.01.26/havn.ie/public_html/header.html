@@ -1,0 +1,54 @@
+<!-- header.html (FULL FILE) -->
+<header class="havn-header">
+  <div class="havn-header-inner">
+    <a class="havn-brand" href="index.html" aria-label="HAVN home">
+      <img class="havn-logo" src="havn-logo.png" alt="HAVN.ie" />
+    </a>
+
+    <!-- Desktop nav (Admin injected by JS only if token is present) -->
+    <nav class="havn-nav" id="desktopNav" aria-label="Primary navigation">
+      <a class="havn-nav-link" href="index.html">Home</a>
+      <a class="havn-nav-link" href="properties.html">Browse</a>
+    </nav>
+
+    <!-- Desktop actions (CTA first, auth as subtle link) -->
+    <div class="havn-actions">
+      <a class="havn-btn-primary" id="listPropertyBtn" href="property-upload.html">List a property</a>
+      <a class="havn-btn-text" id="authBtn" href="login.html">Login</a>
+    </div>
+
+    <!-- Mobile hamburger -->
+    <button
+      class="havn-burger"
+      id="havnMenuBtn"
+      type="button"
+      aria-label="Open menu"
+      aria-expanded="false"
+      aria-controls="havnMobileMenu"
+    >
+      <span class="havn-burger-lines" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <!-- Mobile overlay + sheet: hidden by default (prevents “second Login/List a property” on desktop even if CSS glitches) -->
+  <div class="havn-menu-backdrop" id="havnMenuBackdrop" aria-hidden="true" hidden></div>
+
+  <div class="havn-mobile-menu" id="havnMobileMenu" aria-hidden="true" hidden>
+    <div class="havn-mobile-top">
+      <span class="havn-mobile-title">Menu</span>
+      <button class="havn-menu-close" id="havnMenuClose" type="button" aria-label="Close menu">✕</button>
+    </div>
+
+    <!-- Mobile actions FIRST -->
+    <div class="havn-mobile-actions-top">
+      <a class="havn-btn-primary havn-mobile-action" id="listPropertyBtnMobile" href="property-upload.html">List a property</a>
+      <a class="havn-btn-secondary havn-mobile-action" id="authBtnMobile" href="login.html">Login</a>
+    </div>
+
+    <!-- Mobile nav (NO ADMIN EVER) -->
+    <nav class="havn-mobile-nav" aria-label="Mobile navigation">
+      <a class="havn-mobile-link" href="index.html">Home</a>
+      <a class="havn-mobile-link" href="properties.html">Browse</a>
+    </nav>
+  </div>
+</header>

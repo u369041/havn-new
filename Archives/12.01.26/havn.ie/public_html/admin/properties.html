@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Havn Admin — Properties</title>
+  <meta name="robots" content="noindex, nofollow"/>
+  <style>
+    :root{--brand:#5a48ff;--text:#0f172a;--muted:#64748b;--line:#e5e7eb;--bg:#f8fafc;--radius:14px;--shadow:0 6px 24px rgba(15,23,42,.08)}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;color:var(--text);background:#fff}
+    header{border-bottom:1px solid var(--line);background:#fff;position:sticky;top:0;z-index:10}
+    .container{max-width:1200px;margin:0 auto;padding:0 16px}
+    .nav{height:60px;display:flex;align-items:center;justify-content:space-between}
+    .logo{font-weight:800}
+    main{padding:20px 0 60px}
+    h1{margin:8px 0 14px}
+
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    input,select,button{padding:.55rem .7rem;border:1px solid var(--line);border-radius:10px;background:#fff}
+    button{cursor:pointer}
+    .btn{padding:.55rem .8rem}
+    .btn.primary{background:var(--brand);color:#fff;border:none}
+    .btn.danger{background:#dc2626;color:#fff;border:none}
+    .btn.ghost{background:#fff}
+    .card{border:1px solid var(--line);border-radius:var(--radius);padding:14px;background:#fff;box-shadow:var(--shadow)}
+    .muted{color:var(--muted)}
+    .tools{display:flex;gap:10px;flex-wrap:wrap}
+
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:top}
+    th{font-weight:700;background:#fafafa}
+    tr:hover td{background:#fafcff}
+    .nowrap{white-space:nowrap}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px}
+
+    /* modal */
+    .modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;padding:16px}
+    .modal.open{display:flex}
+    .sheet{background:#fff;border-radius:14px;max-width:960px;width:100%;max-height:92vh;overflow:auto;border:1px solid var(--line)}
+    .sheet header{position:sticky;top:0;border-bottom:1px solid var(--line);background:#fff}
+    .sheet .inner{padding:14px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .grid .full{grid-column:1/-1}
+    label{display:block;font-size:13px;color:#334155;margin-bottom:6px}
+    .right{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+    .hint{font-size:12px;color:#6b7280}
+
+    /* images manager */
+    .imgs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+    @media (max-width: 980px){ .imgs{grid-template-columns:repeat(3,minmax(0,1fr));} }
+    @media (max-width: 720px){ .imgs{grid-template-columns:repeat(2,minmax(0,1fr));} }
+    .imgItem{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;box-shadow:var(--shadow);position:relative}
+    .imgItem.dragging{opacity:.5}
+    .thumb{width:100%;aspect-ratio: 220 / 150;object-fit:cover;display:block}
+    .cap{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;font-size:12px}
+    .badge{background:#eef2ff;color:#3730a3;border:1px solid #e5e7eb;border-radius:999px;padding:.1rem .5rem;font-size:11px}
+    .handle{cursor:grab;color:#64748b}
+    .imgBtns{display:flex;gap:6px}
+    .imgBtns button{font-size:12px;padding:.3rem .45rem;border-radius:8px}
+    .cover{position:absolute;left:8px;top:8px}
+    progress{height:10px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <div class="logo">havn.ie — Admin</div>
+      <div class="tools">
+        <input id="adminKey" placeholder="X-Admin-Key" style="min-width:260px"/>
+        <button id="btnSaveKey" class="btn">Save key</button>
+        <button id="btnCheckKey" class="btn">Check</button>
+        <button id="btnRefreshSitemap" class="btn">Refresh sitemap</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Properties</h1>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-end">
+        <div class="row">
+          <input id="q" placeholder="Search title, city, county, slug" style="min-width:260px"/>
+          <select id="cat">
+            <option value="">All categories</option>
+            <option value="BUY">BUY</option>
+            <option value="RENT">RENT</option>
+            <option value="SHARE">SHARE</option>
+          </select>
+          <select id="status">
+            <option value="">Any status</option>
+            <option>ACTIVE</option>
+            <option>DRAFT</option>
+            <option>SOLD</option>
+            <option>LET</option>
+          </select>
+          <select id="sort">
+            <option value="new">Newest</option>
+            <option value="old">Oldest</option>
+            <option value="plh">Price ↑</option>
+            <option value="phl">Price ↓</option>
+          </select>
+          <button id="btnApply" class="btn">Apply</button>
+        </div>
+        <div class="row">
+          <span class="muted" id="countLbl">0 results</span>
+          <select id="pageSize">
+            <option>20</option><option selected>50</option><option>100</option>
+          </select>
+        </div>
+      </div>
+
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th class="nowrap">Created</th>
+            <th>Title</th>
+            <th>Category</th>
+            <th class="nowrap">Price</th>
+            <th class="nowrap">Beds</th>
+            <th class="nowrap">Baths</th>
+            <th>Location</th>
+            <th>Slug</th>
+            <th class="nowrap">Actions</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+      </table>
+
+      <div class="right" style="margin-top:10px">
+        <button id="prev" class="btn">Prev</button>
+        <span id="pageLbl" class="muted">Page 1</span>
+        <button id="next" class="btn">Next</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Edit Modal -->
+  <div id="modal" class="modal" aria-hidden="true">
+    <div class="sheet">
+      <header class="inner">
+        <div class="row" style="justify-content:space-between">
+          <strong>Edit property</strong>
+          <div class="row">
+            <button id="btnClose" class="btn">Close</button>
+          </div>
+        </div>
+      </header>
+      <div class="inner">
+        <form id="editForm">
+          <div class="grid">
+            <div>
+              <label>Title</label>
+              <input id="f_title"/>
+            </div>
+            <div>
+              <label>Price (€)</label>
+              <input id="f_price" type="number" min="1" step="1"/>
+            </div>
+
+            <div>
+              <label>Category</label>
+              <select id="f_category">
+                <option>BUY</option><option>RENT</option><option>SHARE</option>
+              </select>
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="f_status">
+                <option>ACTIVE</option><option>DRAFT</option><option>SOLD</option><option>LET</option>
+              </select>
+            </div>
+
+            <div>
+              <label>Beds</label>
+              <input id="f_beds" type="number" min="0" step="1"/>
+            </div>
+            <div>
+              <label>Baths</label>
+              <input id="f_baths" type="number" min="0" step="1"/>
+            </div>
+
+            <div>
+              <label>Area (sqm)</label>
+              <input id="f_area" type="number" min="0" step="1"/>
+            </div>
+            <div>
+              <label>Type</label>
+              <select id="f_type">
+                <option value="">—</option>
+                <option>HOUSE</option><option>APARTMENT</option><option>DUPLEX</option><option>TOWNHOUSE</option><option>LAND</option><option>OTHER</option>
+              </select>
+            </div>
+
+            <div>
+              <label>City</label>
+              <input id="f_city"/>
+            </div>
+            <div>
+              <label>County</label>
+              <input id="f_county"/>
+            </div>
+
+            <div>
+              <label>Address</label>
+              <input id="f_address"/>
+            </div>
+            <div>
+              <label>Eircode</label>
+              <input id="f_eircode"/>
+            </div>
+
+            <div class="full">
+              <label>Description</label>
+              <textarea id="f_description" style="width:100%;min-height:120px"></textarea>
+            </div>
+          </div>
+
+          <div class="right" style="margin-top:12px">
+            <button id="btnDelete" type="button" class="btn danger">Delete</button>
+            <button id="btnSave" type="submit" class="btn primary">Save changes</button>
+          </div>
+          <div class="hint" id="editHint"></div>
+        </form>
+
+        <hr style="border:none;border-top:1px solid var(--line);margin:18px 0"/>
+
+        <section>
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h3 style="margin:0">Images</h3>
+            <div class="row">
+              <input id="fileInput" type="file" accept="image/*" multiple style="display:none"/>
+              <button id="btnAddPhotos" class="btn">Add photos</button>
+              <button id="btnMakeCover" class="btn">Make selected first</button>
+              <button id="btnDeleteSelected" class="btn danger">Delete selected</button>
+              <button id="btnSaveOrder" class="btn primary">Save photo order</button>
+            </div>
+          </div>
+          <div class="row" style="margin:8px 0 10px">
+            <progress id="upProg" max="100" value="0" style="width:220px;display:none"></progress>
+            <span id="upLbl" class="muted"></span>
+          </div>
+          <p class="muted" style="margin:6px 0 12px">
+            Drag cards to reorder. First image is the <strong>cover</strong>. Click a card to select it, then use the buttons above.
+          </p>
+          <div id="imgs" class="imgs"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const API = "https://api.havn.ie/api";
+      const euro = new Intl.NumberFormat('en-IE');
+      const $ = s => document.querySelector(s);
+      const $$ = s => Array.from(document.querySelectorAll(s));
+
+      // Persist key
+      const keyBox = $("#adminKey");
+      keyBox.value = localStorage.getItem("ADMIN_KEY") || "";
+      $("#btnSaveKey").addEventListener("click", ()=>{
+        localStorage.setItem("ADMIN_KEY", keyBox.value.trim());
+        alert("Saved.");
+      });
+      $("#btnCheckKey").addEventListener("click", async ()=>{
+        const r = await fetch(`${API}/admin/ping`, { headers: { "X-Admin-Key": keyBox.value.trim() }});
+        const j = await r.json(); alert(j.ok ? "OK" : "Not authorized");
+      });
+      $("#btnRefreshSitemap").addEventListener("click", async ()=>{
+        const r = await fetch(`${API}/admin/sitemap/refresh`, { headers: { "X-Admin-Key": keyBox.value.trim() }});
+        const j = await r.json(); alert(j.ok ? "Sitemap refreshed" : ("Failed: " + (j.error||"")));
+      });
+
+      // State
+      let all = [];          // all fetched
+      let view = [];         // filtered/sorted
+      let page = 1;
+      let pageSize = Number($("#pageSize").value);
+
+      $("#pageSize").addEventListener("change", ()=>{ pageSize = Number($("#pageSize").value); page = 1; render(); });
+      $("#btnApply").addEventListener("click", ()=>{ page = 1; filterSort(); render(); });
+
+      // Fetch
+      async function fetchAll(){
+        const r = await fetch(`${API}/properties?limit=100`);
+        const j = await r.json();
+        if(!r.ok || !j.ok){ throw new Error(j.error||"Failed to load"); }
+        all = j.properties || [];
+      }
+
+      function filterSort(){
+        const q = $("#q").value.trim().toLowerCase();
+        const cat = $("#cat").value;
+        const st = $("#status").value;
+        const sort = $("#sort").value;
+
+        view = all.filter(p=>{
+          if (cat && p.category !== cat) return false;
+          if (st && p.status !== st) return false;
+          if (q) {
+            const blob = [p.title,p.city,p.county,p.slug].filter(Boolean).join(" ").toLowerCase();
+            if (!blob.includes(q)) return false;
+          }
+          return true;
+        });
+
+        if (sort === "new") view.sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+        else if (sort === "old") view.sort((a,b)=> new Date(a.createdAt) - new Date(b.createdAt));
+        else if (sort === "plh") view.sort((a,b)=> (a.price||0) - (b.price||0));
+        else if (sort === "phl") view.sort((a,b)=> (b.price||0) - (a.price||0));
+      }
+
+      function pageItems(){
+        const start = (page-1)*pageSize;
+        return view.slice(start, start + pageSize);
+      }
+
+      function esc(s){ return String(s||"").replace(/</g,"&lt;"); }
+      function row(p){
+        const loc = [p.city,p.county].filter(Boolean).join(", ");
+        return `
+          <tr>
+            <td class="nowrap">${new Date(p.createdAt).toLocaleDateString()}</td>
+            <td>${esc(p.title)}</td>
+            <td class="nowrap">${p.category||""}</td>
+            <td class="nowrap">€${euro.format(p.price||0)}</td>
+            <td class="nowrap">${p.beds ?? ""}</td>
+            <td class="nowrap">${p.baths ?? ""}</td>
+            <td>${esc(loc)}</td>
+            <td class="mono">${p.slug}</td>
+            <td class="nowrap">
+              <a class="btn ghost" target="_blank" href="/property.html?slug=${encodeURIComponent(p.slug)}">View</a>
+              <button class="btn edit" data-slug="${p.slug}">Edit</button>
+              <button class="btn danger del" data-slug="${p.slug}">Delete</button>
+            </td>
+          </tr>
+        `;
+      }
+
+      function render(){
+        $("#countLbl").textContent = `${view.length} results`;
+        $("#pageLbl").textContent = `Page ${page} / ${Math.max(1, Math.ceil(view.length / pageSize))}`;
+        const items = pageItems();
+        $("#tbl tbody").innerHTML = items.length ? items.map(row).join("") : `<tr><td colspan="9" class="muted">No results</td></tr>`;
+
+        // bind actions
+        $$("#tbl .edit").forEach(b => b.addEventListener("click", ()=> openEdit(b.dataset.slug)));
+        $$("#tbl .del").forEach(b => b.addEventListener("click", ()=> doDelete(b.dataset.slug)));
+      }
+
+      $("#prev").addEventListener("click", ()=>{ if(page>1){page--; render();} });
+      $("#next").addEventListener("click", ()=>{ const max = Math.max(1, Math.ceil(view.length / pageSize)); if(page<max){page++; render();} });
+
+      // ===== Edit modal & IMAGES =====
+      const modal = $("#modal");
+      const form = $("#editForm");
+      $("#btnClose").addEventListener("click", ()=> modal.classList.remove("open"));
+
+      let current = null;
+      let imgOrder = [];      // [{id,url,sort,width,height,alt}, ...]
+      let selectedImgId = null;
+
+      function toThumb(url, w=220, h=150){
+        try{
+          if (!url) return "";
+          if (url.includes("/image/upload/")){
+            return url.replace("/image/upload/", `/image/upload/c_fill,w_${w},h_${h},q_auto,f_auto/`);
+          }
+          return url;
+        }catch{ return url; }
+      }
+
+      async function openEdit(slug){
+        const r = await fetch(`${API}/properties/${encodeURIComponent(slug)}`);
+        const j = await r.json();
+        if(!r.ok || !j.ok){ return alert(j.error||"Failed"); }
+        current = j.property;
+
+        // fill fields
+        $("#f_title").value = current.title || "";
+        $("#f_price").value = current.price || "";
+        $("#f_category").value = current.category || "BUY";
+        $("#f_status").value = current.status || "ACTIVE";
+        $("#f_beds").value = current.beds ?? "";
+        $("#f_baths").value = current.baths ?? "";
+        $("#f_area").value = current.areaSqm ?? "";
+        $("#f_type").value = current.type || "";
+        $("#f_city").value = current.city || "";
+        $("#f_county").value = current.county || "";
+        $("#f_address").value = current.address || "";
+        $("#f_eircode").value = current.eircode || "";
+        $("#f_description").value = current.description || "";
+        $("#editHint").textContent = `Slug: ${current.slug} • ID: ${current.id}`;
+
+        // images
+        imgOrder = (current.images || []).slice().sort((a,b)=> (a.sort??0)-(b.sort??0));
+        selectedImgId = imgOrder[0]?.id ?? null;
+        renderImages();
+
+        modal.classList.add("open");
+      }
+
+      function renderImages(){
+        const wrap = $("#imgs");
+        if (!imgOrder.length){ wrap.innerHTML = `<p class="muted">No images.</p>`; return; }
+        wrap.innerHTML = imgOrder.map((im,i)=>`
+          <div class="imgItem" data-id="${im.id}" data-index="${i}" draggable="true" title="Click to select, drag to reorder">
+            <span class="cover">${i===0?'<span class="badge">Cover</span>':''}</span>
+            <img class="thumb" src="${toThumb(im.url)}" alt="">
+            <div class="cap">
+              <span class="handle">☰</span>
+              <div class="imgBtns">
+                <button type="button" class="btn ghost btnSelect ${selectedImgId===im.id?'selected':''}" data-id="${im.id}">${selectedImgId===im.id?'Selected':'Select'}</button>
+              </div>
+            </div>
+          </div>
+        `).join("");
+
+        // Drag & drop events
+        $$("#imgs .imgItem").forEach(el=>{
+          el.addEventListener("dragstart", onDragStart);
+          el.addEventListener("dragover", onDragOver);
+          el.addEventListener("drop", onDrop);
+          el.addEventListener("dragend", onDragEnd);
+          el.addEventListener("click", ()=>{ selectedImgId = Number(el.dataset.id); renderImages(); });
+        });
+      }
+
+      let dragSrcIndex = null;
+      function onDragStart(e){
+        this.classList.add("dragging");
+        dragSrcIndex = Number(this.dataset.index);
+        e.dataTransfer.effectAllowed = "move";
+      }
+      function onDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+      function onDrop(e){
+        e.preventDefault();
+        const dstIndex = Number(this.dataset.index);
+        if (dragSrcIndex === null || dstIndex === dragSrcIndex) return;
+        const [moved] = imgOrder.splice(dragSrcIndex,1);
+        imgOrder.splice(dstIndex,0,moved);
+        dragSrcIndex = null;
+        renderImages();
+      }
+      function onDragEnd(){ this.classList.remove("dragging"); }
+
+      // Buttons
+      $("#btnMakeCover").addEventListener("click", ()=>{
+        if (!selectedImgId) return alert("Select a photo first.");
+        const idx = imgOrder.findIndex(x=>x.id===selectedImgId);
+        if (idx<0) return;
+        const [m] = imgOrder.splice(idx,1);
+        imgOrder.unshift(m);
+        renderImages();
+      });
+
+      $("#btnSaveOrder").addEventListener("click", async ()=>{
+        if (!current) return;
+        const KEY = keyBox.value.trim();
+        if (!KEY) return alert("Set your X-Admin-Key.");
+
+        const reorder = imgOrder.map((im, i)=> ({ id: im.id, sort: i }));
+        const r = await fetch(`${API}/properties/${encodeURIComponent(current.slug)}/images`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", "X-Admin-Key": KEY },
+          body: JSON.stringify({ reorder })
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) return alert(j.error || "Save failed");
+        alert("Photo order saved.");
+        current = j.property;
+        imgOrder = (current.images || []).slice().sort((a,b)=> (a.sort??0)-(b.sort??0));
+        selectedImgId = imgOrder[0]?.id ?? null;
+        renderImages();
+      });
+
+      // ===== Add photos (Cloudinary upload) =====
+      const fileInput = $("#fileInput");
+      $("#btnAddPhotos").addEventListener("click", ()=> fileInput.click());
+      fileInput.addEventListener("change", async ()=>{
+        if (!current) return;
+        const files = Array.from(fileInput.files||[]);
+        if (!files.length) return;
+        const KEY = keyBox.value.trim();
+        if (!KEY) return alert("Set your X-Admin-Key.");
+
+        const upProg = $("#upProg"), upLbl = $("#upLbl");
+        upProg.style.display = "inline-block";
+        upProg.value = 0; upLbl.textContent = "Preparing…";
+
+        // Get Cloudinary signature from API
+        const sigRes = await fetch(`${API}/uploads/cloudinary-signature`, {
+          method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"
+        });
+        const sig = await sigRes.json();
+        if (!sigRes.ok || !sig.ok) { upProg.style.display="none"; return alert(sig.error||"Signature error"); }
+
+        const added = [];
+        for (let i=0;i<files.length;i++){
+          upProg.value = Math.round(((i)/files.length)*100);
+          upLbl.textContent = `Uploading ${i+1}/${files.length}…`;
+
+          const fd = new FormData();
+          fd.append("file", files[i]);
+          fd.append("api_key", sig.apiKey);
+          fd.append("timestamp", sig.timestamp);
+          fd.append("signature", sig.signature);
+
+          const url = `https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`;
+          const r = await fetch(url, { method:"POST", body: fd });
+          const j = await r.json();
+          if (!r.ok || j.error){ upProg.style.display="none"; return alert("Cloudinary upload failed"); }
+
+          added.push({
+            url: j.secure_url || j.url,
+            width: j.width || null,
+            height: j.height || null,
+            alt: current.title || ""
+          });
+        }
+
+        upProg.value = 100; upLbl.textContent = "Saving…";
+        // Save to DB (append at end)
+        const save = await fetch(`${API}/properties/${encodeURIComponent(current.slug)}/images`, {
+          method: "POST",
+          headers: { "Content-Type":"application/json", "X-Admin-Key": KEY },
+          body: JSON.stringify({ images: added })
+        });
+        const j2 = await save.json();
+        upProg.style.display = "none"; upLbl.textContent = "";
+        if (!save.ok || !j2.ok) return alert(j2.error || "Save failed");
+
+        current = j2.property;
+        imgOrder = (current.images || []).slice().sort((a,b)=> (a.sort??0)-(b.sort??0));
+        selectedImgId = imgOrder[0]?.id ?? null;
+        renderImages();
+        fileInput.value = "";
+      });
+
+      // ===== Delete selected photo =====
+      $("#btnDeleteSelected").addEventListener("click", async ()=>{
+        if (!current) return;
+        if (!selectedImgId) return alert("Select a photo first.");
+        if (!confirm("Delete this photo? This cannot be undone.")) return;
+        const KEY = keyBox.value.trim();
+        if (!KEY) return alert("Set your X-Admin-Key.");
+
+        const r = await fetch(`${API}/properties/${encodeURIComponent(current.slug)}/images/${selectedImgId}`, {
+          method: "DELETE",
+          headers: { "X-Admin-Key": KEY }
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) return alert(j.error||"Delete failed");
+
+        current = j.property;
+        imgOrder = (current.images || []).slice().sort((a,b)=> (a.sort??0)-(b.sort??0));
+        selectedImgId = imgOrder[0]?.id ?? null;
+        renderImages();
+      });
+
+      // Save details (PUT)
+      form.addEventListener("submit", async (e)=>{
+        e.preventDefault();
+        if(!current) return;
+        const KEY = keyBox.value.trim();
+        if(!KEY) return alert("Set your X-Admin-Key.");
+
+        const payload = {
+          title: $("#f_title").value.trim(),
+          price: Number($("#f_price").value||"0"),
+          category: $("#f_category").value,
+          status: $("#f_status").value,
+          beds: $("#f_beds").value ? Number($("#f_beds").value) : undefined,
+          baths: $("#f_baths").value ? Number($("#f_baths").value) : undefined,
+          areaSqm: $("#f_area").value ? Number($("#f_area").value) : undefined,
+          type: $("#f_type").value || undefined,
+          city: $("#f_city").value.trim() || null,
+          county: $("#f_county").value.trim() || null,
+          address: $("#f_address").value.trim() || null,
+          eircode: $("#f_eircode").value.trim() || null,
+          description: $("#f_description").value
+        };
+        const r = await fetch(`${API}/properties/${encodeURIComponent(current.slug)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Admin-Key": KEY },
+          body: JSON.stringify(payload)
+        });
+        const j = await r.json();
+        if(!r.ok || !j.ok){ return alert(j.error||"Save failed"); }
+        alert("Saved.");
+        modal.classList.remove("open");
+        await bootstrap(); // reload list
+      });
+
+      async function doDelete(slug){
+        const KEY = keyBox.value.trim();
+        if(!KEY) return alert("Set your X-Admin-Key.");
+        if(!confirm("Delete this property? This cannot be undone.")) return;
+        const r = await fetch(`${API}/properties/${encodeURIComponent(slug)}`, {
+          method: "DELETE",
+          headers: { "X-Admin-Key": KEY }
+        });
+        const j = await r.json();
+        if(!r.ok || !j.ok){ return alert(j.error||"Delete failed"); }
+        alert("Deleted.");
+        await bootstrap();
+      }
+
+      $("#btnClose").addEventListener("click", ()=> modal.classList.remove("open"));
+
+      async function bootstrap(){
+        $("#tbl tbody").innerHTML = `<tr><td colspan="9" class="muted">Loading…</td></tr>`;
+        await fetchAll();
+        filterSort();
+        page = 1;
+        render();
+      }
+      bootstrap();
+    })();
+  </script>
+</body>
+</html>

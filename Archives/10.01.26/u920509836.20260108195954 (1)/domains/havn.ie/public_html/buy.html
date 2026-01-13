@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="header.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Buy Property in Ireland | Havn.ie</title>
+  <meta name="description" content="Browse homes to buy across Ireland. Filter by price and beds, view photos and details." />
+  <link rel="canonical" href="https://havn.ie/buy.html" />
+  <style>
+    :root{
+      --brand:#5a48ff; --text:#0f172a; --muted:#64748b; --line:#e5e7eb; --bg:#f8fafc;
+      --radius:14px; --gap:16px; --shadow:0 6px 24px rgba(15,23,42,.08);
+    }
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);background:#fff;margin:0}
+    a{color:inherit}
+    .container{max-width:1200px;margin:0 auto;padding:0 16px}
+    header{border-bottom:1px solid var(--line);background:#fff;position:sticky;top:0;z-index:10}
+    .nav{display:flex;align-items:center;justify-content:space-between;gap:10px;height:64px}
+    .logo{font-weight:800;letter-spacing:.2px}
+    .navlinks{display:flex;gap:14px;align-items:center}
+    .navlinks a{padding:.5rem .7rem;border-radius:10px;text-decoration:none}
+    .navlinks a:hover{background:#f3f4f6}
+    .cta{background:var(--brand);color:#fff;border-radius:12px;padding:.55rem .9rem;font-weight:600;text-decoration:none}
+
+    .hero{background:linear-gradient(135deg,#eef2ff,#ecfeff);border-bottom:1px solid var(--line)}
+    .hero-inner{padding:28px 0}
+    h1{margin:0 0 10px}
+    .muted{color:var(--muted)}
+
+    .filters{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:10px;box-shadow:var(--shadow);margin:12px 0}
+    .filters input,.filters select{padding:.7rem .8rem;border:1px solid var(--line);border-radius:12px;min-width:200px;flex:1}
+    .filters button{padding:.8rem 1rem;border:none;border-radius:12px;background:var(--brand);color:#fff;font-weight:700;cursor:pointer}
+    .filters button:hover{filter:brightness(.95)}
+
+    .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:.2rem .55rem;background:#fff}
+    .sort{padding:.55rem .7rem;border:1px solid var(--line);border-radius:10px;background:#fff}
+
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--gap)}
+    @media (max-width:1000px){ .grid{grid-template-columns:repeat(3,1fr)} }
+    @media (max-width:700px){ .grid{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width:480px){ .grid{grid-template-columns:1fr} }
+
+    .card{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff}
+    .card img{width:100%;height:180px;object-fit:cover;display:block;background:#f1f5f9}
+    .card .body{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+    .price{font-weight:800}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .pill{font-size:12px;background:#f3f4f6;border:1px solid var(--line);padding:.15rem .45rem;border-radius:999px}
+    .btn{display:inline-block;padding:.45rem .7rem;border:1px solid var(--line);border-radius:10px;text-decoration:none}
+    .btn:hover{background:#f9fafb}
+
+    .load{display:flex;justify-content:center;margin:26px 0}
+    .load button{padding:.7rem 1rem;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer}
+    .load button:hover{background:#f9fafb}
+    footer{border-top:1px solid var(--line);padding:24px 0;color:var(--muted);margin-top:28px}
+  </style>
+</head>
+<body>
+  <div id="havn-header"></div>
+  <header>
+    <div class="container nav">
+      <a class="logo" href="/">havn.ie</a>
+      <nav class="navlinks">
+        <a href="/buy.html"><strong>Buy</strong></a>
+        <a href="/rent.html">Rent</a>
+        <a href="/share.html">Share</a>
+        <a class="cta" href="/property-upload.html">+ List a property</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container hero-inner">
+      <h1>Buy property in Ireland</h1>
+      <p class="muted">Search homes for sale. Filter by price and bedrooms.</p>
+      <form id="filters" class="filters" autocomplete="off">
+        <input id="q" type="text" placeholder="Search by city, county, title…" />
+        <select id="beds">
+          <option value="">Beds (any)</option>
+          <option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option>
+        </select>
+        <select id="min">
+          <option value="">Min price</option>
+          <option value="100000">€100k</option>
+          <option value="200000">€200k</option>
+          <option value="300000">€300k</option>
+          <option value="400000">€400k</option>
+          <option value="500000">€500k</option>
+        </select>
+        <select id="max">
+          <option value="">Max price</option>
+          <option value="150000">€150k</option>
+          <option value="300000">€300k</option>
+          <option value="450000">€450k</option>
+          <option value="600000">€600k</option>
+          <option value="800000">€800k</option>
+          <option value="1000000">€1m</option>
+        </select>
+        <button type="submit">Apply</button>
+      </form>
+    </div>
+  </section>
+
+  <main class="container">
+    <div class="bar">
+      <div class="chips" id="chips"></div>
+      <select id="sort" class="sort">
+        <option value="new">Newest</option>
+        <option value="plh">Price ↑</option>
+        <option value="phl">Price ↓</option>
+      </select>
+    </div>
+
+    <div id="grid" class="grid"><p class="muted">Loading…</p></div>
+
+    <div class="load">
+      <button id="more">Load more</button>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">© <span id="y"></span> Havn.ie — All rights reserved.</div>
+  </footer>
+
+  <script>
+    (function(){
+      const API = "https://api.havn.ie/api";
+      const CATEGORY = "BUY"; // <-- PAGE CATEGORY
+      const limitStep = 24;
+      let currentLimit = limitStep;
+      const euro = new Intl.NumberFormat('en-IE');
+
+      const $ = s => document.querySelector(s);
+      $("#y").textContent = new Date().getFullYear();
+
+      // Read params → set form
+      const params = new URLSearchParams(location.search);
+      $("#q").value = params.get("q") || "";
+      $("#beds").value = params.get("beds") || "";
+      $("#min").value = params.get("min") || "";
+      $("#max").value = params.get("max") || "";
+      $("#sort").value = params.get("sort") || "new";
+
+      // Chip summary
+      function renderChips(){
+        const c = $("#chips"); c.innerHTML = "";
+        const add = (label) => { const s = document.createElement("span"); s.className="chip"; s.textContent=label; c.appendChild(s); };
+        const q=params.get("q"), beds=params.get("beds"), min=params.get("min"), max=params.get("max");
+        if(q) add(`“${q}”`);
+        if(beds) add(`${beds}+ beds`);
+        if(min) add(`≥ €${euro.format(+min)}`);
+        if(max) add(`≤ €${euro.format(+max)}`);
+        if(!c.children.length) add("All results");
+      }
+
+      function includes(hay, needle){
+        return hay.toLowerCase().includes(needle.toLowerCase());
+      }
+
+      function clientFilter(items){
+        const q = (params.get("q")||"").trim();
+        const beds = Number(params.get("beds")||"");
+        const min = Number(params.get("min")||"");
+        const max = Number(params.get("max")||"");
+        return items.filter(p => {
+          if (q) {
+            const blob = [p.title,p.city,p.county,p.eircode].filter(Boolean).join(" ").toLowerCase();
+            if (!blob.includes(q.toLowerCase())) return false;
+          }
+          if (beds && (!p.beds || p.beds < beds)) return false;
+          if (min && (!p.price || p.price < min)) return false;
+          if (max && (p.price && p.price > max)) return false;
+          return true;
+        });
+      }
+
+      function clientSort(items){
+        const mode = params.get("sort") || "new";
+        if (mode === "plh") items.sort((a,b)=>(a.price||0)-(b.price||0));
+        else if (mode === "phl") items.sort((a,b)=>(b.price||0)-(a.price||0));
+        else items.sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+        return items;
+      }
+
+      const escape = (s) => String(s||"").replace(/</g,"&lt;");
+      const card = (p) => {
+        const imgs = (p.images||[]).slice().sort((a,b)=> (a.sort??0)-(b.sort??0));
+        const cover = imgs[0]?.url || "";
+        const loc = [p.city, p.county].filter(Boolean).join(", ");
+        return `
+          <article class="card">
+            <a href="/property.html?slug=${encodeURIComponent(p.slug)}">
+              <img loading="lazy" src="${cover}" alt="${escape(p.title)}">
+            </a>
+            <div class="body">
+              <div class="row">
+                <div class="price">€${euro.format(p.price||0)}</div>
+                ${p.beds ? `<span class="pill">${p.beds} bed</span>` : ""}
+                ${p.baths ? `<span class="pill">${p.baths} bath</span>` : ""}
+                ${p.areaSqm ? `<span class="pill">${p.areaSqm} sqm</span>` : ""}
+              </div>
+              <div>${escape(p.title)}</div>
+              <div class="muted">${escape(loc)}</div>
+              <div class="row">
+                <a class="btn" href="/property.html?slug=${encodeURIComponent(p.slug)}">View</a>
+              </div>
+            </div>
+          </article>
+        `;
+      };
+
+      async function fetchData(limit){
+        const r = await fetch(`${API}/properties?category=${CATEGORY}&limit=${limit}`);
+        const data = await r.json();
+        if(!r.ok || !data.ok) throw new Error(data.error||"Failed");
+        return data.properties || [];
+      }
+
+      async function render(){
+        $("#grid").innerHTML = `<p class="muted">Loading…</p>`;
+        renderChips();
+        try{
+          const all = await fetchData(currentLimit);
+          const filtered = clientSort(clientFilter(all));
+          $("#grid").innerHTML = filtered.length
+            ? filtered.map(card).join("")
+            : `<p class="muted">No results match your filters.</p>`;
+        }catch(err){
+          $("#grid").innerHTML = `<p class="muted">Error loading listings.</p>`;
+        }
+      }
+
+      // Form submit → update URL params, re-render
+      $("#filters").addEventListener("submit", (e)=>{
+        e.preventDefault();
+        const next = new URLSearchParams();
+        const q=$("#q").value.trim(), beds=$("#beds").value, min=$("#min").value, max=$("#max").value, sort=$("#sort").value;
+        if(q) next.set("q", q);
+        if(beds) next.set("beds", beds);
+        if(min) next.set("min", min);
+        if(max) next.set("max", max);
+        if(sort && sort!=="new") next.set("sort", sort);
+        history.replaceState(null,"", location.pathname + (next.toString() ? "?"+next.toString() : ""));
+        params.set("q", q); params.set("beds", beds); params.set("min", min); params.set("max", max); params.set("sort", sort);
+        render();
+      });
+
+      // Sort change
+      $("#sort").addEventListener("change", ()=>{
+        params.set("sort", $("#sort").value || "new");
+        const s = new URLSearchParams(location.search);
+        if($("#sort").value && $("#sort").value!=="new") s.set("sort", $("#sort").value); else s.delete("sort");
+        history.replaceState(null,"", location.pathname + (s.toString() ? "?"+s.toString() : ""));
+        render();
+      });
+
+      // Load more
+      $("#more").addEventListener("click", ()=>{
+        currentLimit = Math.min(currentLimit + limitStep, 100);
+        render();
+      });
+
+      render();
+    })();
+  </script>
+<script src="header.js"></script>
+</body>
+</html>

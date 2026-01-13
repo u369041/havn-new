@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>My properties – HAVN.ie</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,follow" />
+  <link rel="stylesheet" href="header.css" />
+  <style>
+    :root{
+      --bg:#f3f4f6;--card:#fff;--text:#0f172a;--muted:#6b7280;
+      --accent:#2563eb;--danger:#dc2626;--ok:#16a34a;
+      --border:#e5e7eb;--shadow:0 18px 40px rgba(15,23,42,.12);--r:18px;--pill:999px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+    main{max-width:1100px;margin:24px auto 50px;padding:0 16px}
+    .hdr{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+    h1{margin:0 0 4px;font-size:24px}
+    .sub{margin:0;color:var(--muted);font-size:14px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .btn{border-radius:var(--pill);border:1px solid var(--border);background:#fff;padding:8px 12px;font-weight:800;font-size:13px;cursor:pointer;text-decoration:none;color:var(--text);display:inline-flex;gap:6px;align-items:center}
+    .btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+    .btn.primary:hover{background:#1d4ed8}
+    .btn.secondary{background:#e2e8f0;border-color:transparent}
+    .btn.danger{color:var(--danger);border-color:rgba(220,38,38,.35)}
+    .btn.ok{color:var(--ok);border-color:rgba(22,163,74,.35)}
+    .alert{display:none;background:#fef2f2;color:#b91c1c;border-radius:10px;padding:10px 12px;margin:10px 0 14px;font-size:14px}
+    .muted{color:#9ca3af;font-size:13px;margin-top:10px}
+    .wrap{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;margin-top:10px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    thead{background:#f9fafb}
+    th,td{padding:9px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{font-size:12px;text-transform:uppercase;color:#6b7280;letter-spacing:.06em}
+    tbody tr:hover{background:#f9fafb}
+    .pill{display:inline-block;padding:4px 9px;border-radius:var(--pill);font-size:11px;font-weight:900;border:1px solid var(--border);background:#fff}
+    .pill[data-s="PUBLISHED"]{color:var(--ok);border-color:rgba(22,163,74,.35)}
+    .pill[data-s="DRAFT"]{color:#334155;border-color:rgba(51,65,85,.25)}
+    .pill[data-s="SUBMITTED"]{color:#b45309;border-color:rgba(245,158,11,.40)}
+    .pill[data-s="REJECTED"]{color:#dc2626;border-color:rgba(220,38,38,.35)}
+    .pill[data-s="ARCHIVED"]{color:#dc2626;border-color:rgba(220,38,38,.25)}
+    .link{color:var(--accent);font-weight:900;text-decoration:none}
+    .link:hover{text-decoration:underline}
+    .row-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    @media(max-width:900px){
+      table,thead,tbody,th,td,tr{display:block}
+      thead{display:none}
+      tbody tr{padding:10px 12px;border-bottom:1px solid var(--border)}
+      td{border-bottom:none;padding:4px 0}
+      td::before{content:attr(data-label);display:block;font-size:11px;text-transform:uppercase;color:#9ca3af;margin-bottom:2px}
+    }
+    .backdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}
+    .backdrop[data-open="1"]{display:flex}
+    .modal{width:100%;max-width:520px;background:#fff;border-radius:18px;border:1px solid rgba(229,231,235,.9);box-shadow:0 30px 80px rgba(15,23,42,.28);overflow:hidden}
+    .modal header{padding:14px 14px 10px;border-bottom:1px solid var(--border)}
+    .modal h2{margin:0;font-size:16px}
+    .modal p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.35}
+    .modal .content{padding:14px}
+    .modal code{display:block;margin-top:10px;background:#f3f4f6;border:1px solid var(--border);padding:10px;border-radius:12px;font-size:12px;overflow-x:auto}
+    .modal .m-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 14px 14px;border-top:1px solid var(--border)}
+  </style>
+</head>
+
+<body>
+  <div id="havn-header"></div>
+
+  <main>
+    <div class="hdr">
+      <div>
+        <h1>My properties</h1>
+        <p class="sub">Manage your listings, including archived items.</p>
+      </div>
+      <div class="actions">
+        <a class="btn primary" href="property-upload.html">+ List a new property</a>
+        <a class="btn secondary" href="properties.html">Public search</a>
+        <button class="btn" id="refreshBtn" type="button">Refresh</button>
+      </div>
+    </div>
+
+    <div class="alert" id="alertBox"></div>
+    <div class="muted" id="metaText">Checking your account…</div>
+
+    <div class="wrap" id="tableWrapper" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Location</th>
+            <th>Status</th>
+            <th>Price</th>
+            <th>Meta</th>
+            <th>Links</th>
+            <th>Manage</th>
+          </tr>
+        </thead>
+        <tbody id="propertiesBody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <div id="modalBackdrop" class="backdrop" data-open="0" aria-hidden="true">
+    <div class="modal">
+      <header>
+        <h2 id="modalTitle">Confirm</h2>
+        <p id="modalDesc">—</p>
+      </header>
+      <div class="content">
+        <div class="muted">This will call:</div>
+        <code id="modalCode">—</code>
+      </div>
+      <div class="m-actions">
+        <button id="modalCancel" class="btn" type="button">Cancel</button>
+        <button id="modalConfirm" class="btn danger" type="button">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="header.js"></script>
+  <script src="havn-auth.js"></script>
+  <script src="my-properties.js"></script>
+</body>
+</html>
