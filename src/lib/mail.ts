@@ -47,6 +47,23 @@ async function sendMail(to: string, subject: string, html: string) {
 }
 
 /* ===========================
+   WELCOME EMAIL (signup)
+=========================== */
+
+export async function sendWelcomeEmail(p: { to: string; firstName?: string | null }) {
+  const name = (p.firstName || "").trim();
+  const subject = "Welcome to HAVN.ie";
+  const html = wrap(`
+    <h2>Welcome to HAVN.ie${name ? `, ${name}` : ""} 👋</h2>
+    <p>Your account has been created successfully.</p>
+    <p>You can now create a listing, save drafts, and submit for moderation.</p>
+    <p><a href="https://havn.ie/my-listings.html">Go to My Listings</a></p>
+  `);
+
+  await sendMail(p.to, subject, html);
+}
+
+/* ===========================
    ADMIN EMAIL
 =========================== */
 
@@ -86,9 +103,9 @@ export type ListingEmailEvent =
 
 /**
  * NOTE:
- * - `event` is optional for backward compatibility (older call sites)
- * - `to` is intentionally REQUIRED
- * - additional fields allowed (future-proof)
+ * - `event` optional for backward compatibility
+ * - `to` REQUIRED
+ * - extra fields allowed (future-proof)
  */
 export async function sendUserListingEmail(p: {
   to: string;
@@ -116,35 +133,35 @@ export async function sendUserListingEmail(p: {
 
   switch (event) {
     case "DRAFT_CREATED":
-      subject = `Congratulations — your draft listing has been created`;
-      body = `Your draft listing has been created and is ready to edit.`;
+      subject = "Congratulations — your draft listing has been created";
+      body = "Your draft listing has been created and is ready to edit.";
       break;
 
     case "DRAFT_SAVED":
-      subject = `Congratulations — your draft listing has been saved`;
-      body = `Your draft listing has been saved successfully.`;
+      subject = "Congratulations — your draft listing has been saved";
+      body = "Your draft listing has been saved successfully.";
       break;
 
     case "SUBMITTED_FOR_APPROVAL":
-      subject = `Congratulations — your listing has been sent for approval`;
-      body = `Congratulations — your listing has been sent to the HAVN.ie moderation team for approval.`;
+      subject = "Congratulations — your listing has been sent for approval";
+      body = "Congratulations — your listing has been sent to the HAVN.ie moderation team for approval.";
       break;
 
     case "APPROVED_LIVE":
-      subject = `Your listing is now live on HAVN`;
-      body = `Congratulations — your listing has been approved and is now live.`;
+      subject = "Your listing is now live on HAVN";
+      body = "Congratulations — your listing has been approved and is now live.";
       break;
 
     case "REJECTED":
-      subject = `Unfortunately — your listing was rejected`;
+      subject = "Unfortunately — your listing was rejected";
       body = `Unfortunately your listing was rejected by the HAVN.ie moderation team for the following reasons:<br/><br/>
               <em>${p.reason || "No reason provided."}</em><br/><br/>
               Please re-submit your listing taking into account this feedback.`;
       break;
 
     case "CLOSED":
-      subject = `Congratulations — Your Listing Has Been Closed`;
-      body = `Congratulations — your listing has been successfully closed.`;
+      subject = "Congratulations — Your Listing Has Been Closed";
+      body = "Congratulations — your listing has been successfully closed.";
       if (p.closeOutcome) {
         body += `<br/><br/><strong>Outcome:</strong> ${p.closeOutcome}`;
       }

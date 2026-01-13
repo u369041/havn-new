@@ -434,7 +434,6 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
         slug: (updated as any).slug,
         listingId: (updated as any).id,
         myListingsUrl: "https://havn.ie/my-listings.html",
-        adminUrl: `https://havn.ie/property-admin.html?id=${(updated as any).id}`,
       });
     })();
 
