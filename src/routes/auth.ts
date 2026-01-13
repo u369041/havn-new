@@ -3,8 +3,87 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
+import { sendWelcomeEmail } from "../lib/mail";
 
 const router = Router();
+
+/**
+ * POST /api/auth/register
+ * Body: { email, password, name? }
+ *
+ * Creates a new user and returns JWT token (same shape as /login),
+ * and sends "Welcome to HAVN.ie" email (fire-and-forget).
+ */
+router.post("/register", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+    const name = req.body.name !== undefined ? String(req.body.name || "").trim() : null;
+
+    if (!email || !password) {
+      return res.status(400).json({ ok: false, message: "Email and password required" });
+    }
+
+    // Basic sanity check (light-touch; frontend should validate too)
+    if (!email.includes("@") || password.length < 8) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid email or password too short (min 8 chars)",
+      });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ ok: false, message: "Email already registered" });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: hash,
+        role: "user",
+        name: name || null,
+        // emailVerified defaults handled by DB/schema if present
+      },
+    });
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ ok: false, message: "Server misconfigured" });
+
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      secret,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
+
+    // ✅ Welcome email (fire-and-forget; never blocks signup)
+    void (async () => {
+      try {
+        await sendWelcomeEmail({ to: user.email, firstName: user.name || null });
+      } catch (e) {
+        console.warn("Welcome email failed (non-fatal):", e);
+      }
+    })();
+
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        createdAt: user.createdAt,
+        emailVerified: user.emailVerified ?? false,
+      },
+    });
+  } catch (err: any) {
+    console.error("POST /auth/register error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
  * POST /api/auth/login
