@@ -1,190 +1,149 @@
 import { Resend } from "resend";
 
-/* ===========================
-   CONFIG
-=========================== */
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const RESEND_FROM = process.env.RESEND_FROM || "";
-const ADMIN_NOTIFY_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || "";
+const FROM = "HAVN <noreply@havn.ie>";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@havn.ie";
 
-const resend = RESEND_API_KEY && RESEND_FROM ? new Resend(RESEND_API_KEY) : null;
-
-/* ===========================
-   HELPERS
-=========================== */
-
-function strip(html: string) {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function wrap(html: string) {
-  return `<!doctype html>
-<html>
-  <body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif">
-    <div style="max-width:640px;margin:0 auto;padding:24px">
-      ${html}
-      <hr style="margin:24px 0;border:none;border-top:1px solid #eee" />
-      <p style="color:#666;font-size:12px;margin:0">HAVN.ie</p>
-    </div>
-  </body>
-</html>`;
-}
-
-async function sendMail(to: string, subject: string, html: string) {
-  if (!resend) {
-    console.log("[mail] Resend not configured — skipping email:", subject);
-    return;
-  }
-
-  await resend.emails.send({
-    from: RESEND_FROM,
-    to,
-    subject,
-    html,
-    text: strip(html),
-  });
-}
-
-/* ===========================
-   WELCOME EMAIL (signup)
-=========================== */
-
-export async function sendWelcomeEmail(p: { to: string; firstName?: string | null }) {
-  const name = (p.firstName || "").trim();
-  const subject = "Welcome to HAVN.ie";
-  const html = wrap(`
-    <h2>Welcome to HAVN.ie${name ? `, ${name}` : ""} 👋</h2>
-    <p>Your account has been created successfully.</p>
-    <p>You can now create a listing, save drafts, and submit for moderation.</p>
-    <p><a href="https://havn.ie/my-listings.html">Go to My Listings</a></p>
-  `);
-
-  await sendMail(p.to, subject, html);
-}
-
-/* ===========================
-   ADMIN EMAIL
-=========================== */
-
-export async function sendAdminNewSubmissionEmail(p: {
-  listingTitle?: string;
-  slug?: string;
-  listingId?: number | string;
-  adminUrl?: string;
-}) {
-  if (!ADMIN_NOTIFY_EMAIL) return;
-
-  const subject = `New listing submitted: ${p.listingTitle || "HAVN Listing"}`;
-
-  const html = wrap(`
-    <h2>${subject}</h2>
-    <p><strong>Title:</strong> ${p.listingTitle || ""}</p>
-    <p><strong>Slug:</strong> ${p.slug || ""}</p>
-    <p><strong>ID:</strong> ${p.listingId || ""}</p>
-    ${p.adminUrl ? `<p><a href="${p.adminUrl}">Open in Admin</a></p>` : ""}
-    <p>This listing is awaiting moderation.</p>
-  `);
-
-  await sendMail(ADMIN_NOTIFY_EMAIL, subject, html);
-}
-
-/* ===========================
-   USER LISTING EMAILS
-=========================== */
-
+/**
+ * Email event types
+ */
 export type ListingEmailEvent =
   | "DRAFT_CREATED"
   | "DRAFT_SAVED"
-  | "SUBMITTED_FOR_APPROVAL"
+  | "SUBMITTED"
   | "APPROVED_LIVE"
   | "REJECTED"
   | "CLOSED";
 
 /**
- * NOTE:
- * - `event` optional for backward compatibility
- * - `to` REQUIRED
- * - extra fields allowed (future-proof)
+ * Base payload (future-proof)
+ * NOTE: `to` is optional by design
  */
-export async function sendUserListingEmail(p: {
-  to: string;
-  event?: ListingEmailEvent;
+export type ListingEmailPayload = {
+  to?: string;                 // customer email (optional)
+  event: ListingEmailEvent;
 
   listingTitle?: string;
   slug?: string;
-  reason?: string;
+  listingId?: string | number;
 
-  listingId?: number | string;
+  reason?: string;
   status?: string;
 
+  adminUrl?: string;
   publicUrl?: string;
   myListingsUrl?: string;
-  adminUrl?: string;
-  closeOutcome?: string;
 
+  closeOutcome?: "SOLD" | "RENTED";
+
+  // allow future additions without breaking TS
   [key: string]: any;
-}) {
-  const title = p.listingTitle || "Your HAVN listing";
-  const event: ListingEmailEvent = p.event ?? "SUBMITTED_FOR_APPROVAL";
+};
 
-  let subject = "";
+/**
+ * ADMIN notifications (submission etc)
+ */
+export async function sendListingStatusEmail(payload: ListingEmailPayload) {
+  try {
+    const subject =
+      payload.event === "SUBMITTED"
+        ? `New listing submitted: ${payload.listingTitle}`
+        : `Listing update`;
+
+    const html = `
+      <h2>${subject}</h2>
+      <p><strong>Title:</strong> ${payload.listingTitle}</p>
+      <p><strong>Slug:</strong> ${payload.slug}</p>
+      <p><strong>ID:</strong> ${payload.listingId}</p>
+      ${payload.adminUrl ? `<p><a href="${payload.adminUrl}">Open in Admin</a></p>` : ""}
+    `;
+
+    await resend.emails.send({
+      from: FROM,
+      to: ADMIN_EMAIL,
+      subject,
+      html,
+    });
+  } catch (err) {
+    console.error("sendListingStatusEmail failed:", err);
+  }
+}
+
+/**
+ * CUSTOMER notifications
+ */
+export async function sendUserListingEmail(payload: ListingEmailPayload) {
+  if (!payload.to) {
+    console.warn("sendUserListingEmail called without `to` — skipping");
+    return;
+  }
+
+  let subject = "HAVN.ie update";
   let body = "";
 
-  switch (event) {
+  switch (payload.event) {
     case "DRAFT_CREATED":
-      subject = "Congratulations — your draft listing has been created";
-      body = "Your draft listing has been created and is ready to edit.";
+      subject = "Your draft listing has been created";
+      body = `
+        <p>Congratulations — your draft listing has been created.</p>
+        <p><strong>${payload.listingTitle}</strong></p>
+        <p><a href="${payload.myListingsUrl}">View your listings</a></p>
+      `;
       break;
 
     case "DRAFT_SAVED":
-      subject = "Congratulations — your draft listing has been saved";
-      body = "Your draft listing has been saved successfully.";
+      subject = "Your draft listing has been saved";
+      body = `
+        <p>Your draft listing has been saved successfully.</p>
+        <p><strong>${payload.listingTitle}</strong></p>
+        <p><a href="${payload.myListingsUrl}">View your listings</a></p>
+      `;
       break;
 
-    case "SUBMITTED_FOR_APPROVAL":
-      subject = "Congratulations — your listing has been sent for approval";
-      body = "Congratulations — your listing has been sent to the HAVN.ie moderation team for approval.";
+    case "SUBMITTED":
+      subject = "Your listing has been sent for approval";
+      body = `
+        <p>Your listing has been sent to the HAVN.ie moderation team.</p>
+        <p><strong>${payload.listingTitle}</strong></p>
+      `;
       break;
 
     case "APPROVED_LIVE":
       subject = "Your listing is now live on HAVN";
-      body = "Congratulations — your listing has been approved and is now live.";
+      body = `
+        <p>Congratulations — your listing has been approved and is now live.</p>
+        <p><a href="${payload.publicUrl}">View your listing</a></p>
+      `;
       break;
 
     case "REJECTED":
-      subject = "Unfortunately — your listing was rejected";
-      body = `Unfortunately your listing was rejected by the HAVN.ie moderation team for the following reasons:<br/><br/>
-              <em>${p.reason || "No reason provided."}</em><br/><br/>
-              Please re-submit your listing taking into account this feedback.`;
+      subject = "Your listing was rejected";
+      body = `
+        <p>Unfortunately your listing was rejected for the following reason:</p>
+        <blockquote>${payload.reason || "No reason provided"}</blockquote>
+        <p><a href="${payload.myListingsUrl}">Edit and resubmit</a></p>
+      `;
       break;
 
     case "CLOSED":
-      subject = "Congratulations — Your Listing Has Been Closed";
-      body = "Congratulations — your listing has been successfully closed.";
-      if (p.closeOutcome) {
-        body += `<br/><br/><strong>Outcome:</strong> ${p.closeOutcome}`;
-      }
+      subject = "Your listing has been closed";
+      body = `
+        <p>Congratulations — your listing has been marked as ${payload.closeOutcome}.</p>
+        <p><strong>${payload.listingTitle}</strong></p>
+        <p><a href="${payload.myListingsUrl}">View your listings</a></p>
+      `;
       break;
   }
 
-  const links: string[] = [];
-  if (p.publicUrl) links.push(`<a href="${p.publicUrl}">View your listing</a>`);
-  if (p.myListingsUrl) links.push(`<a href="${p.myListingsUrl}">My listings</a>`);
-  if (p.adminUrl) links.push(`<a href="${p.adminUrl}">Open in admin</a>`);
-
-  const html = wrap(`
-    <h2>${subject}</h2>
-    <p>${body}</p>
-    ${p.slug ? `<p><strong>Listing reference:</strong> ${p.slug}</p>` : ""}
-    ${links.length ? `<p>${links.join(" &nbsp;•&nbsp; ")}</p>` : ""}
-  `);
-
-  await sendMail(p.to, subject, html);
+  try {
+    await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject,
+      html: body,
+    });
+  } catch (err) {
+    console.error("sendUserListingEmail failed:", err);
+  }
 }
-
-/* ===========================
-   BACKWARD COMPAT
-=========================== */
-
-export const sendListingStatusEmail = sendUserListingEmail;
