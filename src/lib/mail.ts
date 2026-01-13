@@ -1,10 +1,18 @@
 import { Resend } from "resend";
 
+/* ===========================
+   CONFIG
+=========================== */
+
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const RESEND_FROM = process.env.RESEND_FROM || "";
 const ADMIN_NOTIFY_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || "";
 
 const resend = RESEND_API_KEY && RESEND_FROM ? new Resend(RESEND_API_KEY) : null;
+
+/* ===========================
+   HELPERS
+=========================== */
 
 function strip(html: string) {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -76,15 +84,20 @@ export type ListingEmailEvent =
   | "REJECTED"
   | "CLOSED";
 
+/**
+ * IMPORTANT:
+ * - `event` is OPTIONAL for backward compatibility
+ * - default = SUBMITTED_FOR_APPROVAL
+ * - extra fields are allowed without TS breakage
+ */
 export async function sendUserListingEmail(p: {
   to: string;
-  event: ListingEmailEvent;
+  event?: ListingEmailEvent;
 
   listingTitle?: string;
   slug?: string;
   reason?: string;
 
-  // ✅ widened (fixes TS2353 churn from routes)
   listingId?: number | string;
   status?: string;
 
@@ -92,13 +105,17 @@ export async function sendUserListingEmail(p: {
   myListingsUrl?: string;
   adminUrl?: string;
   closeOutcome?: string;
+
+  // ✅ future-proof escape hatch
+  [key: string]: any;
 }) {
   const title = p.listingTitle || "Your HAVN listing";
+  const event: ListingEmailEvent = p.event ?? "SUBMITTED_FOR_APPROVAL";
 
   let subject = "";
   let body = "";
 
-  switch (p.event) {
+  switch (event) {
     case "DRAFT_CREATED":
       subject = `Draft created: ${title}`;
       body = `Your draft listing has been created.`;
@@ -143,9 +160,7 @@ export async function sendUserListingEmail(p: {
   const html = wrap(`
     <h2>${subject}</h2>
     <p>${body}</p>
-
     ${p.slug ? `<p><strong>Listing reference:</strong> ${p.slug}</p>` : ""}
-
     ${links.length ? `<p>${links.join(" &nbsp;•&nbsp; ")}</p>` : ""}
   `);
 
@@ -153,7 +168,7 @@ export async function sendUserListingEmail(p: {
 }
 
 /* ===========================
-   BACKWARD-COMPAT EXPORT
+   BACKWARD COMPAT
 =========================== */
 
 export const sendListingStatusEmail = sendUserListingEmail;
