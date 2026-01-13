@@ -52,7 +52,7 @@ const requireAuth: AuthMiddleware = ((req: any, res: Response, next: NextFunctio
       userId,
       role: payload.role || "user",
       email: payload.email || null,
-      raw: payload,
+      raw: payload
     } satisfies UserPayload;
 
     return next();
@@ -88,7 +88,7 @@ requireAuth.optional = (req: any, res: Response, next: NextFunction) => {
       userId,
       role: payload.role || "user",
       email: payload.email || null,
-      raw: payload,
+      raw: payload
     } satisfies UserPayload;
 
     return next();
@@ -98,11 +98,3 @@ requireAuth.optional = (req: any, res: Response, next: NextFunction) => {
 };
 
 export default requireAuth;
-
-
-
-
-curl.exe -i -H "Authorization: Bearer YOUR_TOKEN" "https://api.havn.ie/api/properties/mine"
-
-
-
