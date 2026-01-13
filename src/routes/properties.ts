@@ -1,7 +1,7 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
-import { sendAdminNewSubmissionEmail } from "../lib/mail";
+import { sendAdminNewSubmissionEmail, sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -32,6 +32,18 @@ async function generateUniqueSlug(base: string) {
     candidate = `${clean}-${n}`;
     n++;
     if (n > 50) candidate = `${clean}-${Date.now()}`;
+  }
+}
+
+async function getUserEmailById(userId: number): Promise<string | null> {
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    return u?.email || null;
+  } catch {
+    return null;
   }
 }
 
@@ -277,6 +289,21 @@ router.post("/", requireAuth, async (req: any, res) => {
       },
     });
 
+    // ✅ EMAIL (customer): draft created (fire-and-forget)
+    void (async () => {
+      const to = user?.email || (await getUserEmailById(user.userId));
+      if (!to) return;
+
+      await sendUserListingEmail({
+        to,
+        event: "DRAFT_CREATED",
+        listingTitle: (created as any).title || "Untitled listing",
+        slug: (created as any).slug,
+        listingId: (created as any).id,
+        myListingsUrl: "https://havn.ie/my-listings.html",
+      });
+    })();
+
     return res.json({ ok: true, item: created });
   } catch (err: any) {
     console.error("POST /properties error", err);
@@ -334,6 +361,25 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
       },
     });
 
+    // ✅ EMAIL (customer): draft saved (fire-and-forget)
+    void (async () => {
+      const to =
+        user?.email ||
+        (user?.userId ? await getUserEmailById(user.userId) : null) ||
+        (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+      if (!to) return;
+
+      await sendUserListingEmail({
+        to,
+        event: "DRAFT_SAVED",
+        listingTitle: (updated as any).title || "Untitled listing",
+        slug: (updated as any).slug,
+        listingId: (updated as any).id,
+        myListingsUrl: "https://havn.ie/my-listings.html",
+      });
+    })();
+
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     console.error("PATCH /properties/:id error", err);
@@ -371,6 +417,26 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
         submittedAt: new Date(),
       },
     });
+
+    // ✅ EMAIL (customer): submitted for approval (fire-and-forget)
+    void (async () => {
+      const to =
+        user?.email ||
+        (user?.userId ? await getUserEmailById(user.userId) : null) ||
+        (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+      if (!to) return;
+
+      await sendUserListingEmail({
+        to,
+        event: "SUBMITTED_FOR_APPROVAL",
+        listingTitle: (updated as any).title || "Untitled listing",
+        slug: (updated as any).slug,
+        listingId: (updated as any).id,
+        myListingsUrl: "https://havn.ie/my-listings.html",
+        adminUrl: `https://havn.ie/property-admin.html?id=${(updated as any).id}`,
+      });
+    })();
 
     // ✅ EMAIL: notify admin (fire-and-forget, never breaks flow)
     void sendAdminNewSubmissionEmail({

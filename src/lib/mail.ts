@@ -85,10 +85,10 @@ export type ListingEmailEvent =
   | "CLOSED";
 
 /**
- * IMPORTANT:
- * - `event` is OPTIONAL for backward compatibility
- * - default = SUBMITTED_FOR_APPROVAL
- * - extra fields are allowed without TS breakage
+ * NOTE:
+ * - `event` is optional for backward compatibility (older call sites)
+ * - `to` is intentionally REQUIRED
+ * - additional fields allowed (future-proof)
  */
 export async function sendUserListingEmail(p: {
   to: string;
@@ -106,7 +106,6 @@ export async function sendUserListingEmail(p: {
   adminUrl?: string;
   closeOutcome?: string;
 
-  // ✅ future-proof escape hatch
   [key: string]: any;
 }) {
   const title = p.listingTitle || "Your HAVN listing";
@@ -117,18 +116,18 @@ export async function sendUserListingEmail(p: {
 
   switch (event) {
     case "DRAFT_CREATED":
-      subject = `Draft created: ${title}`;
-      body = `Your draft listing has been created.`;
+      subject = `Congratulations — your draft listing has been created`;
+      body = `Your draft listing has been created and is ready to edit.`;
       break;
 
     case "DRAFT_SAVED":
-      subject = `Draft saved: ${title}`;
-      body = `Your draft listing has been saved.`;
+      subject = `Congratulations — your draft listing has been saved`;
+      body = `Your draft listing has been saved successfully.`;
       break;
 
     case "SUBMITTED_FOR_APPROVAL":
-      subject = `Listing submitted for approval: ${title}`;
-      body = `Your listing has been submitted for approval.`;
+      subject = `Congratulations — your listing has been sent for approval`;
+      body = `Congratulations — your listing has been sent to the HAVN.ie moderation team for approval.`;
       break;
 
     case "APPROVED_LIVE":
@@ -137,15 +136,15 @@ export async function sendUserListingEmail(p: {
       break;
 
     case "REJECTED":
-      subject = `Listing rejected: ${title}`;
-      body = `Your listing was rejected for the following reason:<br/><br/>
+      subject = `Unfortunately — your listing was rejected`;
+      body = `Unfortunately your listing was rejected by the HAVN.ie moderation team for the following reasons:<br/><br/>
               <em>${p.reason || "No reason provided."}</em><br/><br/>
               Please re-submit your listing taking into account this feedback.`;
       break;
 
     case "CLOSED":
       subject = `Congratulations — Your Listing Has Been Closed`;
-      body = `Your listing has been successfully closed.`;
+      body = `Congratulations — your listing has been successfully closed.`;
       if (p.closeOutcome) {
         body += `<br/><br/><strong>Outcome:</strong> ${p.closeOutcome}`;
       }
