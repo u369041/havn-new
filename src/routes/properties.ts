@@ -1,7 +1,7 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
-import { sendListingStatusEmail } from "../lib/mail";
+import { sendAdminNewSubmissionEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -373,8 +373,7 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
     });
 
     // ✅ EMAIL: notify admin (fire-and-forget, never breaks flow)
-    void sendListingStatusEmail({
-      status: "SUBMITTED",
+    void sendAdminNewSubmissionEmail({
       listingTitle: (updated as any).title || "Untitled listing",
       slug: (updated as any).slug,
       listingId: String((updated as any).id),
