@@ -79,13 +79,19 @@ export type ListingEmailEvent =
 export async function sendUserListingEmail(p: {
   to: string;
   event: ListingEmailEvent;
+
   listingTitle?: string;
   slug?: string;
   reason?: string;
 
-  // ✅ widened (fixes TS2353)
+  // ✅ widened (fixes TS2353 churn from routes)
   listingId?: number | string;
   status?: string;
+
+  publicUrl?: string;
+  myListingsUrl?: string;
+  adminUrl?: string;
+  closeOutcome?: string;
 }) {
   const title = p.listingTitle || "Your HAVN listing";
 
@@ -116,19 +122,31 @@ export async function sendUserListingEmail(p: {
     case "REJECTED":
       subject = `Listing rejected: ${title}`;
       body = `Your listing was rejected for the following reason:<br/><br/>
-              <em>${p.reason || "No reason provided."}</em>`;
+              <em>${p.reason || "No reason provided."}</em><br/><br/>
+              Please re-submit your listing taking into account this feedback.`;
       break;
 
     case "CLOSED":
       subject = `Congratulations — Your Listing Has Been Closed`;
       body = `Your listing has been successfully closed.`;
+      if (p.closeOutcome) {
+        body += `<br/><br/><strong>Outcome:</strong> ${p.closeOutcome}`;
+      }
       break;
   }
+
+  const links: string[] = [];
+  if (p.publicUrl) links.push(`<a href="${p.publicUrl}">View your listing</a>`);
+  if (p.myListingsUrl) links.push(`<a href="${p.myListingsUrl}">My listings</a>`);
+  if (p.adminUrl) links.push(`<a href="${p.adminUrl}">Open in admin</a>`);
 
   const html = wrap(`
     <h2>${subject}</h2>
     <p>${body}</p>
-    ${p.slug ? `<p>Listing reference: ${p.slug}</p>` : ""}
+
+    ${p.slug ? `<p><strong>Listing reference:</strong> ${p.slug}</p>` : ""}
+
+    ${links.length ? `<p>${links.join(" &nbsp;•&nbsp; ")}</p>` : ""}
   `);
 
   await sendMail(p.to, subject, html);
