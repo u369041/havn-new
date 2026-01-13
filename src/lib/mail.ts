@@ -82,6 +82,10 @@ export async function sendUserListingEmail(p: {
   listingTitle?: string;
   slug?: string;
   reason?: string;
+
+  // ✅ widened (fixes TS2353)
+  listingId?: number | string;
+  status?: string;
 }) {
   const title = p.listingTitle || "Your HAVN listing";
 
@@ -131,8 +135,7 @@ export async function sendUserListingEmail(p: {
 }
 
 /* ===========================
-   ✅ BACKWARD-COMPAT EXPORT
-   (this fixes the build)
+   BACKWARD-COMPAT EXPORT
 =========================== */
 
 export const sendListingStatusEmail = sendUserListingEmail;
