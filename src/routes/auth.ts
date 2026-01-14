@@ -3,9 +3,71 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
-import { sendWelcomeEmail } from "../lib/mail";
 
 const router = Router();
+
+/**
+ * POST /api/auth/register
+ * Body: { firstName, lastName, email, password }
+ */
+router.post("/register", async (req, res) => {
+  try {
+    const firstName = String(req.body.firstName || "").trim();
+    const lastName = String(req.body.lastName || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ ok: false, message: "All fields are required" });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ ok: false, message: "Password must be at least 8 characters" });
+    }
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ ok: false, message: "Server misconfigured" });
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ ok: false, message: "Email already in use" });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: hashed,
+        role: "user",
+        name: fullName,
+        // keep emailVerified default behaviour (schema might default false)
+      },
+    });
+
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      secret,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
+
+    return res.json({
+      ok: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        createdAt: user.createdAt,
+        emailVerified: (user as any).emailVerified ?? false,
+      },
+    });
+  } catch (err: any) {
+    console.error("POST /auth/register error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
  * POST /api/auth/login
@@ -44,7 +106,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: user.emailVerified ?? false,
+        emailVerified: (user as any).emailVerified ?? false,
       },
     });
   } catch (err: any) {
@@ -71,7 +133,7 @@ router.get("/me", requireAuth, async (req: any, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: user.emailVerified ?? false,
+        emailVerified: (user as any).emailVerified ?? false,
       },
     });
   } catch (err: any) {
@@ -82,6 +144,7 @@ router.get("/me", requireAuth, async (req: any, res) => {
 
 /**
  * POST /api/auth/request-email-verify
+ * Creates and stores token (no email sending yet).
  */
 router.post("/request-email-verify", requireAuth, async (req: any, res) => {
   try {
@@ -94,13 +157,28 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
       return res.json({ ok: true, message: "Admin accounts are already verified." });
     }
 
-    if (user.emailVerified) {
+    if ((user as any).emailVerified) {
       return res.json({ ok: true, message: "Email already verified." });
     }
+
+    const verifyToken = cryptoRandomToken(32);
+
+    // Token expires in 30 minutes
+    const exp = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerifyToken: verifyToken as any,
+        emailVerifyTokenExp: exp as any,
+      } as any,
+    });
 
     return res.json({
       ok: true,
       message: "Verification token created.",
+      token: verifyToken,
+      exp,
     });
   } catch (err: any) {
     console.error("POST /auth/request-email-verify error", err);
@@ -109,13 +187,48 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
 });
 
 /**
- * OPTIONAL — if/when you add signup:
- * Call sendWelcomeEmail like this:
- *
- * await sendWelcomeEmail({
- *   to: user.email,
- *   name: user.name || null
- * });
+ * POST /api/auth/verify-email
+ * Body: { token }
  */
+router.post("/verify-email", async (req, res) => {
+  try {
+    const token = String(req.body.token || "").trim();
+    if (!token) return res.status(400).json({ ok: false, message: "Token required" });
+
+    const user = await prisma.user.findFirst({
+      where: { emailVerifyToken: token as any } as any,
+    });
+
+    if (!user) return res.status(400).json({ ok: false, message: "Invalid token" });
+
+    // Token expired?
+    if ((user as any).emailVerifyTokenExp && (user as any).emailVerifyTokenExp.getTime() < Date.now()) {
+      return res.status(400).json({ ok: false, message: "Token expired" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true as any,
+        emailVerifyToken: null as any,
+        emailVerifyTokenExp: null as any,
+      } as any,
+    });
+
+    return res.json({ ok: true, message: "Email verified." });
+  } catch (err: any) {
+    console.error("POST /auth/verify-email error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+function cryptoRandomToken(length: number) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
 
 export default router;
