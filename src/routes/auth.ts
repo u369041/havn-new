@@ -3,8 +3,22 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
+import { sendWelcomeEmail } from "../lib/mail";
 
 const router = Router();
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
 
 /**
  * POST /api/auth/register
@@ -44,6 +58,18 @@ router.post("/register", async (req, res) => {
         // keep emailVerified default behaviour (schema might default false)
       },
     });
+
+    // Welcome email (await with short timeout; never blocks signup)
+    console.log("REGISTER: attempting welcome email for", user.email);
+    try {
+      const result = await withTimeout(
+        sendWelcomeEmail({ to: user.email, name: user.name || null }),
+        3500
+      );
+      console.log("REGISTER: welcome email result", result);
+    } catch (e: any) {
+      console.error("REGISTER: welcome email failed (non-blocking):", e?.message || e);
+    }
 
     const token = jwt.sign(
       { role: user.role, email: user.email },
@@ -139,6 +165,38 @@ router.get("/me", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     console.error("GET /auth/me error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * POST /api/auth/_send-welcome-test
+ * Admin-only: send welcome email to any address without creating users.
+ * Body: { to, name? }
+ */
+router.post("/_send-welcome-test", requireAuth, async (req: any, res) => {
+  try {
+    const role = req.user?.role;
+    if (role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Admin only" });
+    }
+
+    const to = String(req.body?.to || "").trim();
+    const name = req.body?.name != null ? String(req.body.name) : null;
+
+    if (!to) {
+      return res.status(400).json({ ok: false, message: "Missing 'to' email" });
+    }
+
+    const result = await sendWelcomeEmail({ to, name });
+
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error("POST /auth/_send-welcome-test error", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Failed to send welcome email",
+      error: err?.message || String(err),
+    });
   }
 });
 

@@ -178,33 +178,46 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
  * ----------------------------
  * WELCOME EMAIL (signup)
  * ----------------------------
- * auth.ts is currently importing this. Export it so builds stop failing.
- * You can call this from your actual register endpoint when ready.
+ * IMPORTANT: This now RETURNS the Resend response, and it DOES NOT swallow errors.
+ * That lets routes/logs show the real issue when welcome email doesn't arrive.
  */
 export async function sendWelcomeEmail(args: { to: string; name?: string | null }) {
-  try {
-    const subject = "Welcome to HAVN.ie";
-    const displayName = (args.name || "").trim();
+  const to = String(args.to || "").trim();
+  if (!to) throw new Error("sendWelcomeEmail: missing recipient");
 
-    const html = `
-      <h2>Welcome to HAVN.ie</h2>
-      <p>${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
-      <p>Your account has been created successfully.</p>
-      <p>You can create, save and submit property listings for approval anytime.</p>
-      <p><a href="https://havn.ie/my-listings.html">Go to My Listings</a></p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
-    `;
+  const subject = "Welcome to HAVN.ie";
+  const displayName = (args.name || "").trim();
 
-    await resend.emails.send({
-      from: FROM,
-      to: args.to,
-      subject,
-      html,
-    });
-  } catch (err) {
-    console.error("sendWelcomeEmail failed:", err);
-  }
+  const text =
+    `Welcome to HAVN.ie\n\n` +
+    `${displayName ? `Hi ${displayName},\n\n` : "Hi,\n\n"}` +
+    `Your account has been created successfully.\n` +
+    `You can create, save and submit property listings for approval anytime.\n\n` +
+    `My Listings: https://havn.ie/my-listings.html\n\n` +
+    `— HAVN.ie`;
+
+  const html = `
+    <h2>Welcome to HAVN.ie</h2>
+    <p>${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+    <p>Your account has been created successfully.</p>
+    <p>You can create, save and submit property listings for approval anytime.</p>
+    <p><a href="https://havn.ie/my-listings.html">Go to My Listings</a></p>
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
+    <p style="color:#64748b;font-size:12px">HAVN.ie</p>
+  `;
+
+  console.log("sendWelcomeEmail: sending", { to, from: FROM, subject });
+
+  const result: any = await resend.emails.send({
+    from: FROM,
+    to,
+    subject,
+    text,
+    html,
+  });
+
+  console.log("sendWelcomeEmail: sent", result);
+  return result;
 }
 
 function escapeHtml(input: string) {
