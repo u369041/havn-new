@@ -70,6 +70,7 @@ router.post("/register", async (req, res) => {
         password: hashed,
         role: "user",
         name: fullName,
+        // emailVerified defaults false in schema
       },
     });
 
@@ -78,6 +79,32 @@ router.post("/register", async (req, res) => {
       await withTimeout(sendWelcomeEmail({ to: user.email, name: user.name || null }), 3500);
     } catch (e: any) {
       console.error("REGISTER: welcome email failed (non-blocking):", e?.message || e);
+    }
+
+    // ✅ Email verification token + email (non-blocking)
+    try {
+      const verifyToken = makeToken(24);
+      const exp = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifyToken: verifyToken,
+          emailVerifyTokenExp: exp,
+        },
+      });
+
+      const verifyUrl = `${APP_URL}/verify-email.html?token=${encodeURIComponent(verifyToken)}`;
+
+      sendEmailVerificationEmail({
+        to: user.email,
+        name: user.name || null,
+        verifyUrl,
+      }).catch((e) => {
+        console.error("REGISTER: verify email failed (non-blocking):", e?.message || e);
+      });
+    } catch (e: any) {
+      console.error("REGISTER: verify token create failed (non-blocking):", e?.message || e);
     }
 
     const token = jwt.sign(
@@ -95,7 +122,7 @@ router.post("/register", async (req, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: (user as any).emailVerified ?? false,
+        emailVerified: user.emailVerified,
       },
     });
   } catch (err: any) {
@@ -132,6 +159,15 @@ router.post("/login", async (req, res) => {
       { subject: String(user.id), expiresIn: "2h" }
     );
 
+    // Optional login tracking (safe / non-blocking)
+    prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        loginCount: { increment: 1 },
+      },
+    }).catch(() => null);
+
     return res.json({
       ok: true,
       token,
@@ -141,7 +177,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: (user as any).emailVerified ?? false,
+        emailVerified: user.emailVerified,
       },
     });
   } catch (err: any) {
@@ -168,7 +204,7 @@ router.get("/me", requireAuth, async (req: any, res) => {
         role: user.role,
         name: user.name,
         createdAt: user.createdAt,
-        emailVerified: (user as any).emailVerified ?? false,
+        emailVerified: user.emailVerified,
       },
     });
   } catch (err: any) {
@@ -190,8 +226,8 @@ router.post("/forgot-password", async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json({ ok: true });
 
-    // Delete old reset tokens for user (cleanup)
-    await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+    // Cleanup prior tokens for this user
+    await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }).catch(() => null);
 
     const rawToken = makeToken(32);
     const tokenHash = sha256(rawToken);
@@ -211,8 +247,7 @@ router.post("/forgot-password", async (req, res) => {
     return res.json({ ok: true });
   } catch (err: any) {
     console.error("POST /auth/forgot-password error", err);
-    // still ok:true for enumeration safety
-    return res.json({ ok: true });
+    return res.json({ ok: true }); // enumeration-safe
   }
 });
 
@@ -238,7 +273,7 @@ router.post("/reset-password", async (req, res) => {
     if (!rec) return res.status(400).json({ ok: false, message: "Invalid or expired token" });
 
     if (rec.expiresAt.getTime() < Date.now()) {
-      await prisma.passwordResetToken.delete({ where: { id: rec.id } });
+      await prisma.passwordResetToken.delete({ where: { id: rec.id } }).catch(() => null);
       return res.status(400).json({ ok: false, message: "Invalid or expired token" });
     }
 
@@ -274,7 +309,7 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
       return res.json({ ok: true, message: "Admin accounts are already verified." });
     }
 
-    if ((user as any).emailVerified) {
+    if (user.emailVerified) {
       return res.json({ ok: true, message: "Email already verified." });
     }
 
@@ -284,9 +319,9 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
     await prisma.user.update({
       where: { id: userId },
       data: {
-        emailVerifyToken: verifyToken as any,
-        emailVerifyTokenExp: exp as any,
-      } as any,
+        emailVerifyToken: verifyToken,
+        emailVerifyTokenExp: exp,
+      },
     });
 
     const verifyUrl = `${APP_URL}/verify-email.html?token=${encodeURIComponent(verifyToken)}`;
@@ -317,22 +352,22 @@ router.post("/verify-email", async (req, res) => {
     if (!token) return res.status(400).json({ ok: false, message: "Token required" });
 
     const user = await prisma.user.findFirst({
-      where: { emailVerifyToken: token as any } as any,
+      where: { emailVerifyToken: token },
     });
 
     if (!user) return res.status(400).json({ ok: false, message: "Invalid token" });
 
-    if ((user as any).emailVerifyTokenExp && (user as any).emailVerifyTokenExp.getTime() < Date.now()) {
+    if (user.emailVerifyTokenExp && user.emailVerifyTokenExp.getTime() < Date.now()) {
       return res.status(400).json({ ok: false, message: "Token expired" });
     }
 
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        emailVerified: true as any,
-        emailVerifyToken: null as any,
-        emailVerifyTokenExp: null as any,
-      } as any,
+        emailVerified: true,
+        emailVerifyToken: null,
+        emailVerifyTokenExp: null,
+      },
     });
 
     return res.json({ ok: true, message: "Email verified." });
