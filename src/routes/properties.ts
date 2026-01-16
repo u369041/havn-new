@@ -1,6 +1,7 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
+import requireVerifiedEmail from "../middleware/requireVerifiedEmail";
 import { sendListingStatusEmail, sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
@@ -396,8 +397,9 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 /**
  * POST /api/properties/:id/submit
  * Owner/admin: move DRAFT -> SUBMITTED (locks listing)
+ * ✅ Email verification required (owner must verify before submitting)
  */
-router.post("/:id/submit", requireAuth, async (req: any, res) => {
+router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
@@ -432,6 +434,29 @@ router.post("/:id/submit", requireAuth, async (req: any, res) => {
       listingId: String((updated as any).id),
       adminUrl: `https://havn.ie/property-admin.html?id=${(updated as any).id}`,
     });
+
+    // ✅ CUSTOMER EMAIL: Submitted (fire-and-forget)
+    void (async () => {
+      try {
+        const to =
+          user?.email ||
+          (user?.userId ? await getUserEmailById(user.userId) : null) ||
+          (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+        if (!to) return;
+
+        await sendUserListingEmail({
+          to,
+          event: "SUBMITTED",
+          listingTitle: updated.title || "Untitled listing",
+          slug: updated.slug,
+          listingId: updated.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+        });
+      } catch (e) {
+        console.warn("Submitted email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
