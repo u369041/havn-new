@@ -8,20 +8,37 @@ datasource db {
 }
 
 model User {
-  id                  Int        @id @default(autoincrement())
+  id                  Int                 @id @default(autoincrement())
   name                String?
-  email               String     @unique
+  email               String              @unique
   password            String
-  role                UserRole   @default(user)
-  createdAt           DateTime   @default(now())
-  emailVerified       Boolean    @default(false)
-  emailVerifyToken    String?    @unique
+  role                UserRole            @default(user)
+  createdAt           DateTime            @default(now())
+  emailVerified       Boolean             @default(false)
+  emailVerifyToken    String?             @unique
   emailVerifyTokenExp DateTime?
   lastLoginAt         DateTime?
-  loginCount          Int        @default(0)
-  approvals           Property[] @relation("PropertyApprovedBy")
-  rejections          Property[] @relation("PropertyRejectedBy")
+  loginCount          Int                 @default(0)
+
+  approvals           Property[]          @relation("PropertyApprovedBy")
+  rejections          Property[]          @relation("PropertyRejectedBy")
   properties          Property[]
+
+  // ✅ Password reset tokens
+  passwordResetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Property {
@@ -58,6 +75,7 @@ model Property {
   submittedAt    DateTime?
   marketStatus   String?
   rejectedReason String?
+
   approvedBy     User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
   rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
   user           User          @relation(fields: [userId], references: [id])
