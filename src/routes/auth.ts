@@ -3,9 +3,16 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
-import { sendWelcomeEmail } from "../lib/mail";
+import {
+  sendWelcomeEmail,
+  sendPasswordResetEmail,
+  sendEmailVerificationEmail,
+} from "../lib/mail";
+import crypto from "crypto";
 
 const router = Router();
+
+const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -18,6 +25,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
       reject(e);
     });
   });
+}
+
+function sha256(input: string) {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+function makeToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString("hex");
 }
 
 /**
@@ -55,18 +70,12 @@ router.post("/register", async (req, res) => {
         password: hashed,
         role: "user",
         name: fullName,
-        // keep emailVerified default behaviour (schema might default false)
       },
     });
 
-    // Welcome email (await with short timeout; never blocks signup)
-    console.log("REGISTER: attempting welcome email for", user.email);
+    // Welcome email (non-blocking)
     try {
-      const result = await withTimeout(
-        sendWelcomeEmail({ to: user.email, name: user.name || null }),
-        3500
-      );
-      console.log("REGISTER: welcome email result", result);
+      await withTimeout(sendWelcomeEmail({ to: user.email, name: user.name || null }), 3500);
     } catch (e: any) {
       console.error("REGISTER: welcome email failed (non-blocking):", e?.message || e);
     }
@@ -169,40 +178,90 @@ router.get("/me", requireAuth, async (req: any, res) => {
 });
 
 /**
- * POST /api/auth/_send-welcome-test
- * Admin-only: send welcome email to any address without creating users.
- * Body: { to, name? }
+ * POST /api/auth/forgot-password
+ * Body: { email }
+ * Always returns ok:true to prevent enumeration.
  */
-router.post("/_send-welcome-test", requireAuth, async (req: any, res) => {
+router.post("/forgot-password", async (req, res) => {
   try {
-    const role = req.user?.role;
-    if (role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Admin only" });
-    }
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!email) return res.json({ ok: true });
 
-    const to = String(req.body?.to || "").trim();
-    const name = req.body?.name != null ? String(req.body.name) : null;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.json({ ok: true });
 
-    if (!to) {
-      return res.status(400).json({ ok: false, message: "Missing 'to' email" });
-    }
+    // Delete old reset tokens for user (cleanup)
+    await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
 
-    const result = await sendWelcomeEmail({ to, name });
+    const rawToken = makeToken(32);
+    const tokenHash = sha256(rawToken);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 60 min
 
-    return res.json({ ok: true, result });
-  } catch (err: any) {
-    console.error("POST /auth/_send-welcome-test error", err);
-    return res.status(500).json({
-      ok: false,
-      message: "Failed to send welcome email",
-      error: err?.message || String(err),
+    await prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash, expiresAt },
     });
+
+    const resetUrl = `${APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}`;
+
+    // Non-blocking send
+    sendPasswordResetEmail({ to: user.email, name: user.name || null, resetUrl }).catch((e) => {
+      console.error("forgot-password: email failed:", e?.message || e);
+    });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /auth/forgot-password error", err);
+    // still ok:true for enumeration safety
+    return res.json({ ok: true });
+  }
+});
+
+/**
+ * POST /api/auth/reset-password
+ * Body: { token, password }
+ */
+router.post("/reset-password", async (req, res) => {
+  try {
+    const token = String(req.body.token || "").trim();
+    const password = String(req.body.password || "");
+
+    if (!token || password.length < 8) {
+      return res.status(400).json({ ok: false, message: "Invalid request" });
+    }
+
+    const tokenHash = sha256(token);
+
+    const rec = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+    });
+
+    if (!rec) return res.status(400).json({ ok: false, message: "Invalid or expired token" });
+
+    if (rec.expiresAt.getTime() < Date.now()) {
+      await prisma.passwordResetToken.delete({ where: { id: rec.id } });
+      return res.status(400).json({ ok: false, message: "Invalid or expired token" });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: rec.userId },
+        data: { password: hashed },
+      }),
+      prisma.passwordResetToken.delete({ where: { id: rec.id } }),
+    ]);
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /auth/reset-password error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 /**
  * POST /api/auth/request-email-verify
- * Creates and stores token (no email sending yet).
+ * Creates and stores token, and emails the link.
  */
 router.post("/request-email-verify", requireAuth, async (req: any, res) => {
   try {
@@ -219,9 +278,7 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
       return res.json({ ok: true, message: "Email already verified." });
     }
 
-    const verifyToken = cryptoRandomToken(32);
-
-    // Token expires in 30 minutes
+    const verifyToken = makeToken(24);
     const exp = new Date(Date.now() + 30 * 60 * 1000);
 
     await prisma.user.update({
@@ -232,10 +289,16 @@ router.post("/request-email-verify", requireAuth, async (req: any, res) => {
       } as any,
     });
 
+    const verifyUrl = `${APP_URL}/verify-email.html?token=${encodeURIComponent(verifyToken)}`;
+
+    // Non-blocking send
+    sendEmailVerificationEmail({ to: user.email, name: user.name || null, verifyUrl }).catch((e) => {
+      console.error("request-email-verify: email failed:", e?.message || e);
+    });
+
     return res.json({
       ok: true,
-      message: "Verification token created.",
-      token: verifyToken,
+      message: "Verification email sent.",
       exp,
     });
   } catch (err: any) {
@@ -259,7 +322,6 @@ router.post("/verify-email", async (req, res) => {
 
     if (!user) return res.status(400).json({ ok: false, message: "Invalid token" });
 
-    // Token expired?
     if ((user as any).emailVerifyTokenExp && (user as any).emailVerifyTokenExp.getTime() < Date.now()) {
       return res.status(400).json({ ok: false, message: "Token expired" });
     }
@@ -280,13 +342,32 @@ router.post("/verify-email", async (req, res) => {
   }
 });
 
-function cryptoRandomToken(length: number) {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)];
+/**
+ * POST /api/auth/_send-welcome-test
+ * Admin-only + feature-flagged.
+ * Body: { to, name? }
+ */
+router.post("/_send-welcome-test", requireAuth, async (req: any, res) => {
+  try {
+    if (process.env.ENABLE_EMAIL_TEST_ENDPOINT !== "true") {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+
+    const role = req.user?.role;
+    if (role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Admin only" });
+    }
+
+    const to = String(req.body?.to || "").trim();
+    const name = req.body?.name != null ? String(req.body.name) : null;
+    if (!to) return res.status(400).json({ ok: false, message: "Missing 'to' email" });
+
+    const result = await sendWelcomeEmail({ to, name });
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error("POST /auth/_send-welcome-test error", err);
+    return res.status(500).json({ ok: false, message: "Failed", error: err?.message || String(err) });
   }
-  return out;
-}
+});
 
 export default router;
