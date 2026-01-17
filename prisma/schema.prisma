@@ -29,11 +29,14 @@ model User {
 }
 
 model PasswordResetToken {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   userId    Int
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  ip        String?
+  userAgent String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -75,6 +78,11 @@ model Property {
   submittedAt    DateTime?
   marketStatus   String?
   rejectedReason String?
+
+  // MARKET MODE (SOURCE OF TRUTH): BUY | RENT | SHARE
+  // - Defaults existing listings to BUY
+  // - Powers Buy / Rent / Share navigation
+  mode           String        @default("BUY")
 
   approvedBy     User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
   rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
