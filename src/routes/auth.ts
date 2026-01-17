@@ -237,7 +237,11 @@ router.post("/forgot-password", async (req, res) => {
       data: { userId: user.id, tokenHash, expiresAt },
     });
 
-    const resetUrl = `${APP_URL}/reset-password.html?token=${encodeURIComponent(rawToken)}`;
+    // ✅ FIX: include email param so reset-password.html can submit safely
+    const resetUrl =
+      `${APP_URL}/reset-password.html` +
+      `?token=${encodeURIComponent(rawToken)}` +
+      `&email=${encodeURIComponent(email)}`;
 
     // Non-blocking send
     sendPasswordResetEmail({ to: user.email, name: user.name || null, resetUrl }).catch((e) => {
@@ -253,14 +257,21 @@ router.post("/forgot-password", async (req, res) => {
 
 /**
  * POST /api/auth/reset-password
- * Body: { token, password }
+ * Body (new): { email, token, newPassword }
+ * Body (legacy): { token, password }
  */
 router.post("/reset-password", async (req, res) => {
   try {
     const token = String(req.body.token || "").trim();
-    const password = String(req.body.password || "");
 
-    if (!token || password.length < 8) {
+    // ✅ Accept both new + legacy fields
+    const email = req.body.email != null ? String(req.body.email).trim().toLowerCase() : "";
+    const newPassword =
+      req.body.newPassword != null ? String(req.body.newPassword) :
+      req.body.password != null ? String(req.body.password) :
+      "";
+
+    if (!token || newPassword.length < 8) {
       return res.status(400).json({ ok: false, message: "Invalid request" });
     }
 
@@ -277,14 +288,24 @@ router.post("/reset-password", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Invalid or expired token" });
     }
 
-    const hashed = await bcrypt.hash(password, 10);
+    // ✅ If email was provided, enforce token belongs to that email's user
+    if (email) {
+      const u = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+      if (!u || u.id !== rec.userId) {
+        return res.status(400).json({ ok: false, message: "Invalid or expired token" });
+      }
+    }
 
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    // ✅ Reset password + invalidate tokens
     await prisma.$transaction([
       prisma.user.update({
         where: { id: rec.userId },
         data: { password: hashed },
       }),
       prisma.passwordResetToken.delete({ where: { id: rec.id } }),
+      prisma.passwordResetToken.deleteMany({ where: { userId: rec.userId } }),
     ]);
 
     return res.json({ ok: true });
