@@ -3,80 +3,64 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
-import propertiesRouter from "./routes/properties";
-import authRouter from "./routes/auth";
-import uploadsRouter from "./routes/uploads";
-import diagRouter from "./routes/diag";
-
-// ✅ Admin feed / ping etc
-import adminRouter from "./routes/admin";
-
-// ✅ Approve/Reject moderation routes
-import moderationRouter from "./routes/moderation";
-
-// ✅ Forgot password routes
-import authPasswordRouter from "./routes/auth-password";
+import authRoutes from "./routes/auth";
+import authPasswordRoutes from "./routes/auth-password";
+import propertiesRoutes from "./routes/properties";
+import adminRoutes from "./routes/admin";
+import moderationRoutes from "./routes/moderation";
+import uploadsRoutes from "./routes/uploads";
+import diagRoutes from "./routes/diag";
 
 const app = express();
 
+/* -------------------------------------------------------
+   GLOBAL MIDDLEWARE
+------------------------------------------------------- */
 app.use(helmet());
+app.use(cors({
+  origin: [
+    "https://havn.ie",
+    "https://www.havn.ie",
+    "https://api.havn.ie"
+  ],
+  credentials: true
+}));
 app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
 
-app.use(
-  cors({
-    origin: [
-      "https://havn.ie",
-      "https://www.havn.ie",
-      "https://havn-new.onrender.com",
-    ],
-    credentials: true,
-  })
-);
+app.use(rateLimit({
+  windowMs: 60 * 1000,
+  max: 60
+}));
 
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-  })
-);
+/* -------------------------------------------------------
+   ROUTES (ORDER MATTERS)
+------------------------------------------------------- */
 
-app.get("/api/health", (req, res) => {
-  res.status(200).json({ ok: true });
-});
+// Health / diagnostics
+app.use("/api/health", (_req, res) => res.json({ ok: true }));
+app.use("/api/diag", diagRoutes);
 
-// ✅ DIAG
-app.use("/api/_diag", diagRouter);
+// AUTH (LOGIN / SIGNUP)
+app.use("/api/auth", authRoutes);
 
-// ✅ CORE
-app.use("/api/properties", propertiesRouter);
-app.use("/api/auth", authRouter);
+// 🔑 PASSWORD RESET (THIS WAS MISSING / BROKEN)
+app.use("/api/auth", authPasswordRoutes);
 
-// ✅ Forgot password (mounted under /api/auth)
-app.use("/api/auth", authPasswordRouter);
+// PROPERTIES
+app.use("/api/properties", propertiesRoutes);
 
-app.use("/api/uploads", uploadsRouter);
+// ADMIN
+app.use("/api/admin", adminRoutes);
+app.use("/api/moderation", moderationRoutes);
 
-/**
- * ✅ ADMIN
- * IMPORTANT:
- * - moderationRouter MUST be mounted BEFORE adminRouter
- * - because both are under /api/admin and adminRouter currently has legacy handlers
- *   that otherwise intercept /properties/:id/approve|reject first.
- */
+// UPLOADS
+app.use("/api/uploads", uploadsRoutes);
 
-// 1) Moderation routes FIRST: /api/admin/properties/:id/approve + /reject
-app.use("/api/admin", moderationRouter);
+/* -------------------------------------------------------
+   START SERVER
+------------------------------------------------------- */
+const PORT = process.env.PORT || 8080;
 
-// 2) Admin misc routes AFTER: /api/admin/ping etc
-app.use("/api/admin", adminRouter);
-
-app.use((req, res) => {
-  res.status(404).json({ ok: false, message: "Not found" });
-});
-
-const PORT = Number(process.env.PORT || 8080);
-
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log(`HAVN API listening on ${PORT}`);
 });
