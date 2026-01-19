@@ -12,6 +12,22 @@ function isOwnerOrAdmin(user: any, ownerId: number) {
   return user.userId === ownerId;
 }
 
+function safeText(v: any) {
+  return v === null || v === undefined ? "" : String(v);
+}
+
+/**
+ * ✅ MARKET MODE normalizer
+ * Accepts: BUY|RENT|SHARE (any casing), plus buy/rent/share
+ * Defaults: BUY
+ */
+function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
+  const m = safeText(raw).trim().toUpperCase();
+  if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
+  if (m === "B" || m === "FORSALE") return "BUY";
+  return "BUY";
+}
+
 function slugify(input: string) {
   return String(input || "")
     .trim()
@@ -44,12 +60,6 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
-  const m = String(raw || "").trim().toUpperCase();
-  if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
-  return "BUY";
 }
 
 /**
@@ -138,11 +148,12 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
 
+    // ✅ optional admin filter by mode
+    const modeRaw = String(req.query.mode || "").trim();
+    const mode = modeRaw ? clampMode(modeRaw) : "";
+
     const statusRaw = String(req.query.listingStatus || "").trim().toUpperCase();
     const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw;
-
-    const modeRaw = String(req.query.mode || "").trim();
-    if (modeRaw) where.mode = clampMode(modeRaw);
 
     if (q) {
       where.OR = [
@@ -160,6 +171,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     if (city) where.city = { contains: city, mode: "insensitive" };
     if (type) where.propertyType = type;
     if (status) where.listingStatus = status;
+    if (mode) where.mode = mode;
 
     const [total, items] = await Promise.all([
       prisma.property.count({ where }),
@@ -181,7 +193,10 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 /**
  * GET /api/properties
  * Public browse endpoint: returns PUBLISHED listings only.
- * ✅ Now supports ?mode=BUY|RENT|SHARE
+ *
+ * ✅ Option 1: mode-aware browsing
+ * - /api/properties?mode=BUY|RENT|SHARE
+ * - If mode is omitted: return ALL PUBLISHED (backwards compatible)
  */
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
@@ -195,8 +210,11 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
 
+    // ✅ mode filter (optional, but powers Buy/Rent/Share)
     const modeRaw = String(req.query.mode || "").trim();
-    if (modeRaw) where.mode = clampMode(modeRaw);
+    if (modeRaw) {
+      where.mode = clampMode(modeRaw);
+    }
 
     if (q) {
       where.OR = [
@@ -257,7 +275,6 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
 /**
  * POST /api/properties
  * Create new draft listing (owner = logged in user)
- * ✅ Now sets mode (BUY|RENT|SHARE) default BUY
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
@@ -277,6 +294,9 @@ router.post("/", requireAuth, async (req: any, res) => {
       if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
 
+    // ✅ mode (BUY default)
+    const mode = clampMode(payload.mode || payload.marketMode || payload.listingMode);
+
     const created = await prisma.property.create({
       data: {
         slug,
@@ -292,10 +312,6 @@ router.post("/", requireAuth, async (req: any, res) => {
         bedrooms: payload.bedrooms || null,
         bathrooms: payload.bathrooms || null,
         propertyType: payload.propertyType || "house",
-
-        // ✅ SOURCE OF TRUTH
-        mode: clampMode(payload.mode),
-
         saleType: payload.saleType || null,
         marketStatus: payload.marketStatus || payload.status || null,
         description: payload.description || null,
@@ -303,6 +319,9 @@ router.post("/", requireAuth, async (req: any, res) => {
         photos: Array.isArray(payload.photos) ? payload.photos : [],
         listingStatus: "DRAFT",
         userId: user.userId,
+
+        // ✅ Option 1 field
+        mode,
       },
     });
 
@@ -335,7 +354,6 @@ router.post("/", requireAuth, async (req: any, res) => {
 /**
  * PATCH /api/properties/:id
  * Update draft listing (owner/admin)
- * ✅ Allows mode update while still DRAFT (not SUBMITTED/PUBLISHED/ARCHIVED)
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
@@ -360,6 +378,12 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 
     const payload = req.body || {};
 
+    // ✅ allow updating mode while in draft (BUY default if provided invalid)
+    const nextMode =
+      payload.mode || payload.marketMode || payload.listingMode
+        ? clampMode(payload.mode || payload.marketMode || payload.listingMode)
+        : (existing as any).mode;
+
     const updated = await prisma.property.update({
       where: { id },
       data: {
@@ -375,15 +399,14 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         bedrooms: payload.bedrooms ?? existing.bedrooms,
         bathrooms: payload.bathrooms ?? existing.bathrooms,
         propertyType: payload.propertyType ?? existing.propertyType,
-
-        // ✅ SOURCE OF TRUTH
-        mode: payload.mode ? clampMode(payload.mode) : (existing as any).mode,
-
         saleType: payload.saleType ?? existing.saleType,
         marketStatus: payload.marketStatus ?? payload.status ?? existing.marketStatus,
         description: payload.description ?? existing.description,
         features: Array.isArray(payload.features) ? payload.features : existing.features,
         photos: Array.isArray(payload.photos) ? payload.photos : existing.photos,
+
+        // ✅ Option 1 field
+        mode: nextMode,
       },
     });
 
