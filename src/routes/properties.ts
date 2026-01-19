@@ -46,6 +46,12 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   }
 }
 
+function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
+  const m = String(raw || "").trim().toUpperCase();
+  if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
+  return "BUY";
+}
+
 /**
  * GET /api/properties/mine
  * Returns all listings owned by user (admins see all)
@@ -135,6 +141,9 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     const statusRaw = String(req.query.listingStatus || "").trim().toUpperCase();
     const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw;
 
+    const modeRaw = String(req.query.mode || "").trim();
+    if (modeRaw) where.mode = clampMode(modeRaw);
+
     if (q) {
       where.OR = [
         { title: { contains: q, mode: "insensitive" } },
@@ -172,6 +181,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 /**
  * GET /api/properties
  * Public browse endpoint: returns PUBLISHED listings only.
+ * ✅ Now supports ?mode=BUY|RENT|SHARE
  */
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
@@ -184,6 +194,9 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
     const county = String(req.query.county || "").trim();
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
+
+    const modeRaw = String(req.query.mode || "").trim();
+    if (modeRaw) where.mode = clampMode(modeRaw);
 
     if (q) {
       where.OR = [
@@ -244,6 +257,7 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
 /**
  * POST /api/properties
  * Create new draft listing (owner = logged in user)
+ * ✅ Now sets mode (BUY|RENT|SHARE) default BUY
  */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
@@ -278,6 +292,10 @@ router.post("/", requireAuth, async (req: any, res) => {
         bedrooms: payload.bedrooms || null,
         bathrooms: payload.bathrooms || null,
         propertyType: payload.propertyType || "house",
+
+        // ✅ SOURCE OF TRUTH
+        mode: clampMode(payload.mode),
+
         saleType: payload.saleType || null,
         marketStatus: payload.marketStatus || payload.status || null,
         description: payload.description || null,
@@ -317,6 +335,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 /**
  * PATCH /api/properties/:id
  * Update draft listing (owner/admin)
+ * ✅ Allows mode update while still DRAFT (not SUBMITTED/PUBLISHED/ARCHIVED)
  */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
@@ -356,6 +375,10 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         bedrooms: payload.bedrooms ?? existing.bedrooms,
         bathrooms: payload.bathrooms ?? existing.bathrooms,
         propertyType: payload.propertyType ?? existing.propertyType,
+
+        // ✅ SOURCE OF TRUTH
+        mode: payload.mode ? clampMode(payload.mode) : (existing as any).mode,
+
         saleType: payload.saleType ?? existing.saleType,
         marketStatus: payload.marketStatus ?? payload.status ?? existing.marketStatus,
         description: payload.description ?? existing.description,

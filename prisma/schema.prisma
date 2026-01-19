@@ -24,7 +24,6 @@ model User {
   rejections          Property[]          @relation("PropertyRejectedBy")
   properties          Property[]
 
-  // ✅ Password reset tokens
   passwordResetTokens PasswordResetToken[]
 }
 
@@ -47,12 +46,18 @@ model PasswordResetToken {
 model Property {
   id             Int           @id @default(autoincrement())
   slug           String        @unique
+
   title          String
   address1       String
   address2       String?
   city           String
   county         String
   eircode        String?
+
+  // ✅ OPTION 1: MARKET MODE (SOURCE OF TRUTH)
+  // BUY | RENT | SHARE
+  mode           MarketMode    @default(BUY)
+
   price          Int
   ber            String?
   bedrooms       Int?
@@ -60,14 +65,19 @@ model Property {
   features       String[]
   description    String?
   photos         String[]
+
   userId         Int
   berNo          String?
+
   createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
   lat            Float?
   lng            Float?
   propertyType   String
   saleType       String?
-  updatedAt      DateTime      @updatedAt
+  marketStatus   String?
+
   listingStatus  ListingStatus @default(DRAFT)
   publishedAt    DateTime?
   archivedAt     DateTime?
@@ -76,13 +86,7 @@ model Property {
   rejectedAt     DateTime?
   rejectedById   Int?
   submittedAt    DateTime?
-  marketStatus   String?
   rejectedReason String?
-
-  // MARKET MODE (SOURCE OF TRUTH): BUY | RENT | SHARE
-  // - Defaults existing listings to BUY
-  // - Powers Buy / Rent / Share navigation
-  mode           String        @default("BUY")
 
   approvedBy     User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
   rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
@@ -90,6 +94,13 @@ model Property {
 
   @@index([userId])
   @@index([listingStatus])
+  @@index([mode])
+}
+
+enum MarketMode {
+  BUY
+  RENT
+  SHARE
 }
 
 enum UserRole {

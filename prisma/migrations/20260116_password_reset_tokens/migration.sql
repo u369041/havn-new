@@ -1,27 +1,39 @@
-@'
--- CreateTable
-CREATE TABLE "PasswordResetToken" (
-  "id" SERIAL NOT NULL,
+-- 20260116_password_reset_tokens
+-- Create PasswordResetToken table + indexes + FK
+
+CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
+  "id" SERIAL PRIMARY KEY,
   "userId" INTEGER NOT NULL,
   "tokenHash" TEXT NOT NULL,
   "expiresAt" TIMESTAMP(3) NOT NULL,
+  "usedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  CONSTRAINT "PasswordResetToken_pkey" PRIMARY KEY ("id")
+  "ip" TEXT,
+  "userAgent" TEXT
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX "PasswordResetToken_tokenHash_key" ON "PasswordResetToken"("tokenHash");
+-- Unique token hash
+CREATE UNIQUE INDEX IF NOT EXISTS "PasswordResetToken_tokenHash_key"
+ON "PasswordResetToken"("tokenHash");
 
--- CreateIndex
-CREATE INDEX "PasswordResetToken_userId_idx" ON "PasswordResetToken"("userId");
+-- Indexes for lookups / cleanup
+CREATE INDEX IF NOT EXISTS "PasswordResetToken_userId_idx"
+ON "PasswordResetToken"("userId");
 
--- CreateIndex
-CREATE INDEX "PasswordResetToken_expiresAt_idx" ON "PasswordResetToken"("expiresAt");
+CREATE INDEX IF NOT EXISTS "PasswordResetToken_expiresAt_idx"
+ON "PasswordResetToken"("expiresAt");
 
--- AddForeignKey
-ALTER TABLE "PasswordResetToken"
-ADD CONSTRAINT "PasswordResetToken_userId_fkey"
-FOREIGN KEY ("userId") REFERENCES "User"("id")
-ON DELETE CASCADE ON UPDATE CASCADE;
-'@ | Set-Content -Encoding UTF8 prisma\migrations\20260116_password_reset_tokens\migration.sql
+-- FK to User with cascade delete
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'PasswordResetToken_userId_fkey'
+  ) THEN
+    ALTER TABLE "PasswordResetToken"
+    ADD CONSTRAINT "PasswordResetToken_userId_fkey"
+    FOREIGN KEY ("userId") REFERENCES "User"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
