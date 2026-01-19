@@ -36,10 +36,16 @@ router.post("/forgot", async (req, res) => {
       },
     });
 
+    // ✅ Mail helper expects { to, name?, resetUrl }
+    // ✅ Put the token on the URL instead of passing a "token" prop.
+    const resetUrl =
+      "https://havn.ie/reset-password.html?token=" + encodeURIComponent(token) +
+      "&email=" + encodeURIComponent(user.email);
+
     await sendPasswordResetEmail({
       to: user.email,
-      token,
-      resetUrl: "https://havn.ie/reset-password.html",
+      name: user.name || undefined,
+      resetUrl,
     });
 
     return res.json({ ok: true });
