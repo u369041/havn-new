@@ -14,6 +14,9 @@ import adminRouter from "./routes/admin";
 // ✅ Approve/Reject moderation routes
 import moderationRouter from "./routes/moderation";
 
+// ✅ Forgot password routes
+import authPasswordRouter from "./routes/auth-password";
+
 const app = express();
 
 app.use(helmet());
@@ -48,6 +51,10 @@ app.use("/api/_diag", diagRouter);
 // ✅ CORE
 app.use("/api/properties", propertiesRouter);
 app.use("/api/auth", authRouter);
+
+// ✅ Forgot password (mounted under /api/auth)
+app.use("/api/auth", authPasswordRouter);
+
 app.use("/api/uploads", uploadsRouter);
 
 /**
