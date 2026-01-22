@@ -2,36 +2,22 @@
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import dotenv from "dotenv";
 
-dotenv.config();
-
-// ROUTES (adjust paths if your project uses different filenames)
-import propertiesRouter from "./routes/properties";
 import authRouter from "./routes/auth";
+import propertiesRouter from "./routes/properties";
 import uploadsRouter from "./routes/uploads";
 import debugRouter from "./routes/debug";
 import adminPropertiesRouter from "./routes/admin-properties";
 
 const app = express();
 
-// ----- Security / middleware -----
+/* security */
 app.use(helmet());
-
-// 60 req/min baseline (matches your prior locked config)
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-);
-
+app.use(rateLimit({ windowMs: 60 * 1000, max: 60 }));
 app.use(express.json({ limit: "2mb" }));
 
-// ----- CORS (locked allowlist) -----
-const ALLOWED_ORIGINS = new Set<string>([
+/* cors */
+const ALLOWED = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
@@ -39,50 +25,37 @@ const ALLOWED_ORIGINS = new Set<string>([
 
 app.use(
   cors({
-    origin: (origin, cb) => {
-      // Allow server-to-server/no-origin requests
-      if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS"));
+    origin(origin, cb) {
+      if (!origin || ALLOWED.has(origin)) return cb(null, true);
+      return cb(new Error("CORS blocked"));
     },
     credentials: true,
   })
 );
 
-// ----- Health -----
+/* health */
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// ----- Route mounts -----
-// Auth
+/* routes */
 app.use("/api/auth", authRouter);
-
-// Uploads (Cloudinary signature endpoint etc)
 app.use("/api/uploads", uploadsRouter);
-
-// Properties (public browse, mine, draft create/save/submit, detail)
 app.use("/api/properties", propertiesRouter);
-
-// Debug/diag (if you have it; harmless if present)
+app.use("/api/admin/properties", adminPropertiesRouter);
 app.use("/api/debug", debugRouter);
 
-// ✅ NEW: Admin moderation compatibility endpoints (fixes your 404s)
-app.use("/api/admin/properties", adminPropertiesRouter);
-
-// ----- 404 fallback -----
+/* fallback */
 app.use((_req, res) => {
-  res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  res.status(404).json({ ok: false });
 });
 
-// ----- Error handler -----
 app.use((err: any, _req: any, res: any, _next: any) => {
-  console.error("SERVER_ERROR:", err);
-  res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+  console.error(err);
+  res.status(500).json({ ok: false });
 });
 
-// ----- Listen -----
-const port = Number(process.env.PORT || 8080);
-app.listen(port, () => {
-  console.log(`HAVN API listening on :${port}`);
+const PORT = Number(process.env.PORT || 8080);
+app.listen(PORT, () => {
+  console.log(`HAVN API running on ${PORT}`);
 });
