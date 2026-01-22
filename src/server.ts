@@ -1,5 +1,5 @@
 ﻿import express from "express";
-import cors, { CorsOptions } from "cors";
+import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
@@ -18,23 +18,19 @@ app.use(rateLimit({ windowMs: 60 * 1000, max: 60 }));
 /* body */
 app.use(express.json({ limit: "2mb" }));
 
-/* CORS — FIXED + PRE-FLIGHT SAFE */
-const ALLOWED = new Set<string>([
+/* CORS — PRE-FLIGHT SAFE */
+const ALLOWED = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
   "https://havn-new.onrender.com",
 ]);
 
-const corsOptions: CorsOptions = {
-  origin(origin, cb) {
-    // server-to-server / curl etc (no Origin header)
-    if (!origin) return cb(null, true);
-
-    // allow known origins
+// No TS types here — avoids CorsOptions namespace/type mismatch in your build
+const corsOptions = {
+  origin(origin: any, cb: any) {
+    if (!origin) return cb(null, true); // server-to-server/no Origin
     if (ALLOWED.has(origin)) return cb(null, true);
-
-    // IMPORTANT: do NOT throw errors here — just deny CORS
-    return cb(null, false);
+    return cb(null, false); // deny without throwing
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
@@ -42,7 +38,7 @@ const corsOptions: CorsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// ✅ This is the key: respond to preflight for ALL routes
+// ✅ Key: respond to preflight for ALL routes
 app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
 
