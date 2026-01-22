@@ -2,65 +2,87 @@
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import dotenv from "dotenv";
 
-import authRoutes from "./routes/auth";
-import authPasswordRoutes from "./routes/auth-password";
-import propertiesRoutes from "./routes/properties";
-import adminRoutes from "./routes/admin";
-import moderationRoutes from "./routes/moderation";
-import uploadsRoutes from "./routes/uploads";
-import diagRoutes from "./routes/diag";
+dotenv.config();
+
+// ROUTES (adjust paths if your project uses different filenames)
+import propertiesRouter from "./routes/properties";
+import authRouter from "./routes/auth";
+import uploadsRouter from "./routes/uploads";
+import debugRouter from "./routes/debug";
+import adminPropertiesRouter from "./routes/admin-properties";
 
 const app = express();
 
-/* -------------------------------------------------------
-   GLOBAL MIDDLEWARE
-------------------------------------------------------- */
+// ----- Security / middleware -----
 app.use(helmet());
-app.use(cors({
-  origin: [
-    "https://havn.ie",
-    "https://www.havn.ie",
-    "https://api.havn.ie"
-  ],
-  credentials: true
-}));
-app.use(express.json({ limit: "10mb" }));
 
-app.use(rateLimit({
-  windowMs: 60 * 1000,
-  max: 60
-}));
+// 60 req/min baseline (matches your prior locked config)
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
 
-/* -------------------------------------------------------
-   ROUTES (ORDER MATTERS)
-------------------------------------------------------- */
+app.use(express.json({ limit: "2mb" }));
 
-// Health / diagnostics
-app.use("/api/health", (_req, res) => res.json({ ok: true }));
-app.use("/api/diag", diagRoutes);
+// ----- CORS (locked allowlist) -----
+const ALLOWED_ORIGINS = new Set<string>([
+  "https://havn.ie",
+  "https://www.havn.ie",
+  "https://havn-new.onrender.com",
+]);
 
-// AUTH (LOGIN / SIGNUP)
-app.use("/api/auth", authRoutes);
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Allow server-to-server/no-origin requests
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 
-// 🔑 PASSWORD RESET (THIS WAS MISSING / BROKEN)
-app.use("/api/auth", authPasswordRoutes);
+// ----- Health -----
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
-// PROPERTIES
-app.use("/api/properties", propertiesRoutes);
+// ----- Route mounts -----
+// Auth
+app.use("/api/auth", authRouter);
 
-// ADMIN
-app.use("/api/admin", adminRoutes);
-app.use("/api/moderation", moderationRoutes);
+// Uploads (Cloudinary signature endpoint etc)
+app.use("/api/uploads", uploadsRouter);
 
-// UPLOADS
-app.use("/api/uploads", uploadsRoutes);
+// Properties (public browse, mine, draft create/save/submit, detail)
+app.use("/api/properties", propertiesRouter);
 
-/* -------------------------------------------------------
-   START SERVER
-------------------------------------------------------- */
-const PORT = process.env.PORT || 8080;
+// Debug/diag (if you have it; harmless if present)
+app.use("/api/debug", debugRouter);
 
-app.listen(PORT, () => {
-  console.log(`HAVN API listening on ${PORT}`);
+// ✅ NEW: Admin moderation compatibility endpoints (fixes your 404s)
+app.use("/api/admin/properties", adminPropertiesRouter);
+
+// ----- 404 fallback -----
+app.use((_req, res) => {
+  res.status(404).json({ ok: false, error: "NOT_FOUND" });
+});
+
+// ----- Error handler -----
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error("SERVER_ERROR:", err);
+  res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+});
+
+// ----- Listen -----
+const port = Number(process.env.PORT || 8080);
+app.listen(port, () => {
+  console.log(`HAVN API listening on :${port}`);
 });
