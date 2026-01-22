@@ -1,11 +1,18 @@
 ﻿import { Router } from "express";
-import prisma from "../prisma"; // ✅ DEFAULT IMPORT — matches working baseline
+import prisma from "../prisma"; // ✅ default import (matches your baseline)
 
 const router = Router();
 
 /**
  * Admin Properties router
- * Supports admin.html moderation actions
+ * Supports admin.html moderation actions:
+ *  - POST   /api/admin/properties/:id/approve
+ *  - POST   /api/admin/properties/:id/reject
+ *  - POST   /api/admin/properties/:id/moderate
+ *  - PATCH  /api/admin/properties/:id
+ *
+ * NOTE: ListingStatus enum in your schema does NOT include "PENDING".
+ * The "Pending" moderation queue corresponds to "SUBMITTED".
  */
 
 async function findPropertyByIdOrSlug(idOrSlug: string) {
@@ -30,6 +37,7 @@ async function requireProperty(req: any, res: any) {
   return prop;
 }
 
+/** Approve -> PUBLISHED */
 router.post("/:id/approve", async (req, res) => {
   const prop = await requireProperty(req, res);
   if (!prop) return;
@@ -42,6 +50,7 @@ router.post("/:id/approve", async (req, res) => {
   res.json({ ok: true, property: updated });
 });
 
+/** Reject -> REJECTED */
 router.post("/:id/reject", async (req, res) => {
   const prop = await requireProperty(req, res);
   if (!prop) return;
@@ -54,18 +63,23 @@ router.post("/:id/reject", async (req, res) => {
   res.json({ ok: true, property: updated });
 });
 
+/**
+ * Moderate -> SUBMITTED
+ * (this is the "Pending" queue in the UI; your enum does not support "PENDING")
+ */
 router.post("/:id/moderate", async (req, res) => {
   const prop = await requireProperty(req, res);
   if (!prop) return;
 
   const updated = await prisma.property.update({
     where: { id: prop.id },
-    data: { listingStatus: "PENDING" },
+    data: { listingStatus: "SUBMITTED" },
   });
 
   res.json({ ok: true, property: updated });
 });
 
+/** Generic admin patch (used by UI edit flows) */
 router.patch("/:id", async (req, res) => {
   const prop = await requireProperty(req, res);
   if (!prop) return;
