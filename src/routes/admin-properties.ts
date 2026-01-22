@@ -1,29 +1,43 @@
 ﻿import { Router } from "express";
-import prisma from "../prisma"; // ✅ default import (matches your baseline)
+import prisma from "../prisma";
 
 const router = Router();
 
 /**
- * Admin Properties router
- * Supports admin.html moderation actions:
+ * Admin Properties router (crash-proof)
+ * Endpoints:
  *  - POST   /api/admin/properties/:id/approve
  *  - POST   /api/admin/properties/:id/reject
  *  - POST   /api/admin/properties/:id/moderate
  *  - PATCH  /api/admin/properties/:id
  *
- * NOTE: ListingStatus enum in your schema does NOT include "PENDING".
- * The "Pending" moderation queue corresponds to "SUBMITTED".
+ * Key fixes:
+ *  - If Property.id is Int, only query by id when the param is numeric.
+ *  - Wrap all async handlers so Express never drops errors / causes 502.
+ *  - "Pending" queue uses ListingStatus = "SUBMITTED" (not "PENDING").
  */
 
-async function findPropertyByIdOrSlug(idOrSlug: string) {
-  const byId = await prisma.property.findUnique({
-    where: { id: idOrSlug as any },
-  });
-  if (byId) return byId;
+function wrap(fn: any) {
+  return (req: any, res: any, next: any) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
 
+async function findPropertyByIdOrSlug(idOrSlug: string) {
+  // If numeric, try by Int id first
+  if (/^\d+$/.test(idOrSlug)) {
+    const intId = Number(idOrSlug);
+    const byId = await prisma.property.findUnique({
+      where: { id: intId as any },
+    });
+    if (byId) return byId;
+  }
+
+  // Then try slug
   const bySlug = await prisma.property.findUnique({
     where: { slug: idOrSlug as any },
   });
+
   return bySlug;
 }
 
@@ -38,58 +52,67 @@ async function requireProperty(req: any, res: any) {
 }
 
 /** Approve -> PUBLISHED */
-router.post("/:id/approve", async (req, res) => {
-  const prop = await requireProperty(req, res);
-  if (!prop) return;
+router.post(
+  "/:id/approve",
+  wrap(async (req: any, res: any) => {
+    const prop = await requireProperty(req, res);
+    if (!prop) return;
 
-  const updated = await prisma.property.update({
-    where: { id: prop.id },
-    data: { listingStatus: "PUBLISHED" },
-  });
+    const updated = await prisma.property.update({
+      where: { id: prop.id as any },
+      data: { listingStatus: "PUBLISHED" },
+    });
 
-  res.json({ ok: true, property: updated });
-});
+    res.json({ ok: true, action: "approve", property: updated });
+  })
+);
 
 /** Reject -> REJECTED */
-router.post("/:id/reject", async (req, res) => {
-  const prop = await requireProperty(req, res);
-  if (!prop) return;
+router.post(
+  "/:id/reject",
+  wrap(async (req: any, res: any) => {
+    const prop = await requireProperty(req, res);
+    if (!prop) return;
 
-  const updated = await prisma.property.update({
-    where: { id: prop.id },
-    data: { listingStatus: "REJECTED" },
-  });
+    const updated = await prisma.property.update({
+      where: { id: prop.id as any },
+      data: { listingStatus: "REJECTED" },
+    });
 
-  res.json({ ok: true, property: updated });
-});
+    res.json({ ok: true, action: "reject", property: updated });
+  })
+);
 
-/**
- * Moderate -> SUBMITTED
- * (this is the "Pending" queue in the UI; your enum does not support "PENDING")
- */
-router.post("/:id/moderate", async (req, res) => {
-  const prop = await requireProperty(req, res);
-  if (!prop) return;
+/** Moderate -> SUBMITTED (this is your "Pending" queue) */
+router.post(
+  "/:id/moderate",
+  wrap(async (req: any, res: any) => {
+    const prop = await requireProperty(req, res);
+    if (!prop) return;
 
-  const updated = await prisma.property.update({
-    where: { id: prop.id },
-    data: { listingStatus: "SUBMITTED" },
-  });
+    const updated = await prisma.property.update({
+      where: { id: prop.id as any },
+      data: { listingStatus: "SUBMITTED" },
+    });
 
-  res.json({ ok: true, property: updated });
-});
+    res.json({ ok: true, action: "moderate", property: updated });
+  })
+);
 
-/** Generic admin patch (used by UI edit flows) */
-router.patch("/:id", async (req, res) => {
-  const prop = await requireProperty(req, res);
-  if (!prop) return;
+/** Generic admin patch (keep permissive for now; we can lock later) */
+router.patch(
+  "/:id",
+  wrap(async (req: any, res: any) => {
+    const prop = await requireProperty(req, res);
+    if (!prop) return;
 
-  const updated = await prisma.property.update({
-    where: { id: prop.id },
-    data: req.body || {},
-  });
+    const updated = await prisma.property.update({
+      where: { id: prop.id as any },
+      data: req.body || {},
+    });
 
-  res.json({ ok: true, property: updated });
-});
+    res.json({ ok: true, action: "patch", property: updated });
+  })
+);
 
 export default router;
