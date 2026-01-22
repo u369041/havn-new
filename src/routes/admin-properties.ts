@@ -4,17 +4,18 @@ import prisma from "../prisma";
 const router = Router();
 
 /**
- * Admin Properties router (crash-proof)
+ * Admin Properties router (release-safe)
  * Endpoints:
- *  - POST   /api/admin/properties/:id/approve
- *  - POST   /api/admin/properties/:id/reject
- *  - POST   /api/admin/properties/:id/moderate
- *  - PATCH  /api/admin/properties/:id
+ *  - POST   /api/admin/properties/:id/approve      -> PUBLISHED
+ *  - POST   /api/admin/properties/:id/reject       -> REJECTED
+ *  - POST   /api/admin/properties/:id/moderate     -> SUBMITTED (Pending queue)
+ *  - POST   /api/admin/properties/:id/close        -> CLOSED
+ *  - PATCH  /api/admin/properties/:id              -> allowlist patch (safe)
  *
  * Key fixes:
- *  - If Property.id is Int, only query by id when the param is numeric.
- *  - Wrap all async handlers so Express never drops errors / causes 502.
- *  - "Pending" queue uses ListingStatus = "SUBMITTED" (not "PENDING").
+ *  - Numeric id lookup to match Int id schemas
+ *  - Async wrapper to prevent 502/500 from unhandled promise errors
+ *  - Strict allowlist patch so Prisma won’t blow up on unknown fields
  */
 
 function wrap(fn: any) {
@@ -22,6 +23,14 @@ function wrap(fn: any) {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
+
+const ALLOWED_STATUSES = new Set([
+  "DRAFT",
+  "SUBMITTED",
+  "PUBLISHED",
+  "REJECTED",
+  "CLOSED",
+]);
 
 async function findPropertyByIdOrSlug(idOrSlug: string) {
   // If numeric, try by Int id first
@@ -60,7 +69,7 @@ router.post(
 
     const updated = await prisma.property.update({
       where: { id: prop.id as any },
-      data: { listingStatus: "PUBLISHED" },
+      data: { listingStatus: "PUBLISHED" as any },
     });
 
     res.json({ ok: true, action: "approve", property: updated });
@@ -76,14 +85,14 @@ router.post(
 
     const updated = await prisma.property.update({
       where: { id: prop.id as any },
-      data: { listingStatus: "REJECTED" },
+      data: { listingStatus: "REJECTED" as any },
     });
 
     res.json({ ok: true, action: "reject", property: updated });
   })
 );
 
-/** Moderate -> SUBMITTED (this is your "Pending" queue) */
+/** Moderate -> SUBMITTED (Pending queue) */
 router.post(
   "/:id/moderate",
   wrap(async (req: any, res: any) => {
@@ -92,26 +101,74 @@ router.post(
 
     const updated = await prisma.property.update({
       where: { id: prop.id as any },
-      data: { listingStatus: "SUBMITTED" },
+      data: { listingStatus: "SUBMITTED" as any },
     });
 
     res.json({ ok: true, action: "moderate", property: updated });
   })
 );
 
-/** Generic admin patch (keep permissive for now; we can lock later) */
-router.patch(
-  "/:id",
+/** Close listing -> CLOSED (dedicated endpoint, avoids PATCH ambiguity) */
+router.post(
+  "/:id/close",
   wrap(async (req: any, res: any) => {
     const prop = await requireProperty(req, res);
     if (!prop) return;
 
     const updated = await prisma.property.update({
       where: { id: prop.id as any },
-      data: req.body || {},
+      data: { listingStatus: "CLOSED" as any },
     });
 
-    res.json({ ok: true, action: "patch", property: updated });
+    res.json({ ok: true, action: "close", property: updated });
+  })
+);
+
+/**
+ * PATCH /api/admin/properties/:id
+ * Safe allowlist patch: only update fields we explicitly allow.
+ * This prevents Prisma from 500-ing on unknown fields.
+ */
+router.patch(
+  "/:id",
+  wrap(async (req: any, res: any) => {
+    const prop = await requireProperty(req, res);
+    if (!prop) return;
+
+    const b = req.body || {};
+    const data: any = {};
+
+    // Allowlist fields (expand later if needed)
+    if (typeof b.title === "string") data.title = b.title;
+    if (typeof b.description === "string") data.description = b.description;
+    if (typeof b.price === "number") data.price = b.price;
+    if (typeof b.address === "string") data.address = b.address;
+    if (typeof b.eircode === "string") data.eircode = b.eircode;
+    if (typeof b.mode === "string") data.mode = b.mode;
+
+    if (typeof b.listingStatus === "string") {
+      const s = b.listingStatus.toUpperCase();
+      if (!ALLOWED_STATUSES.has(s)) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_LISTING_STATUS",
+          allowed: Array.from(ALLOWED_STATUSES),
+        });
+      }
+      data.listingStatus = s;
+    }
+
+    // No-op
+    if (Object.keys(data).length === 0) {
+      return res.json({ ok: true, action: "patch", updated: false, property: prop });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id: prop.id as any },
+      data,
+    });
+
+    res.json({ ok: true, action: "patch", updated: true, property: updated });
   })
 );
 
