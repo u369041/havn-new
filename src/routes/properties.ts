@@ -6,6 +6,19 @@ import { sendListingStatusEmail, sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
 
+/**
+ * DEPLOY PROBE — safe endpoint to confirm current running code
+ * URL: /api/properties/_deploy_probe
+ */
+router.get("/_deploy_probe", (req, res) => {
+  res.json({
+    ok: true,
+    service: "havn-new",
+    route: "/api/properties/_deploy_probe",
+    deployedAt: new Date().toISOString(),
+  });
+});
+
 function isOwnerOrAdmin(user: any, ownerId: number) {
   if (!user) return false;
   if (user.role === "admin") return true;
