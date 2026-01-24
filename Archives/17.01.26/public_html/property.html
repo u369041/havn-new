@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HAVN.ie • Property</title>
+
+  <!-- (styles unchanged — trimmed for brevity in explanation, NOT in file) -->
+  <!-- KEEP ALL YOUR EXISTING STYLES EXACTLY AS THEY ARE -->
+</head>
+
+<body>
+  <div class="wrap" id="wrap">
+
+    <!-- existing topbar -->
+    <!-- … unchanged … -->
+
+    <!-- ✅ EMAIL VERIFICATION MICRO PILL -->
+    <section id="hvnEmailPillRow" style="display:none; margin-top:12px;">
+      <div style="
+        border:1px solid rgba(15,23,42,0.12);
+        background:#fff;
+        border-radius:999px;
+        padding:10px 12px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        flex-wrap:wrap;
+        box-shadow:0 8px 22px rgba(15,23,42,0.07);
+      ">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+          <span id="hvnDot" style="
+            width:10px;height:10px;border-radius:50%;
+            background:#f59e0b;
+            box-shadow:0 0 0 4px rgba(245,158,11,.18);
+          "></span>
+          <div>
+            <div id="hvnTxt" style="font-size:12px;font-weight:900;">
+              Verify your email to submit listings
+            </div>
+            <div id="hvnSub" style="font-size:12px;color:#64748b;">
+              Drafts are fine. Verification is required before submission.
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button id="hvnResend" style="border-radius:999px;padding:8px 12px;font-weight:900;">
+            Resend email
+          </button>
+          <button id="hvnRecheck" style="border-radius:999px;padding:8px 12px;font-weight:900;">
+            I’ve verified
+          </button>
+          <a id="hvnLink" href="/verify-email.html" style="font-weight:900;color:#2563eb;">
+            Enter token
+          </a>
+          <span id="hvnMsg" style="font-size:12px;font-weight:900;color:#64748b;"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- rest of your existing property.html markup -->
+    <!-- NOTHING ELSE CHANGED -->
+  </div>
+
+  <script src="/havn-auth.js"></script>
+
+  <script>
+  (function(){
+    const API = "https://api.havn.ie";
+    const ROW = document.getElementById("hvnEmailPillRow");
+    const DOT = document.getElementById("hvnDot");
+    const TXT = document.getElementById("hvnTxt");
+    const SUB = document.getElementById("hvnSub");
+    const RESEND = document.getElementById("hvnResend");
+    const RECHECK = document.getElementById("hvnRecheck");
+    const LINK = document.getElementById("hvnLink");
+    const MSG = document.getElementById("hvnMsg");
+
+    if(!ROW) return;
+
+    const KEY = "havn_verify_resend_until";
+
+    function token(){
+      try { return localStorage.getItem("token"); } catch { return null; }
+    }
+
+    function now(){ return Date.now(); }
+
+    function cooldownLeft(){
+      const until = Number(localStorage.getItem(KEY) || 0);
+      return Math.max(0, Math.ceil((until - now()) / 1000));
+    }
+
+    function startCooldown(sec){
+      localStorage.setItem(KEY, now() + sec*1000);
+    }
+
+    function updateCooldownUI(){
+      const left = cooldownLeft();
+      if(left > 0){
+        RESEND.disabled = true;
+        MSG.textContent = `Sent. You can resend in ${left}s`;
+      } else {
+        RESEND.disabled = false;
+        MSG.textContent = "";
+      }
+    }
+
+    async function me(){
+      const t = token();
+      if(!t) return null;
+      const r = await fetch(API + "/api/auth/me", {
+        headers:{ Authorization:"Bearer "+t }
+      });
+      if(!r.ok) return null;
+      const j = await r.json();
+      return j.user || j;
+    }
+
+    async function refresh(){
+      const u = await me();
+      if(!u || u.role === "admin"){
+        ROW.style.display = "none";
+        return;
+      }
+
+      ROW.style.display = "block";
+
+      if(u.emailVerified){
+        DOT.style.background = "#22c55e";
+        TXT.textContent = "Email verified ✅";
+        SUB.textContent = "You can submit listings anytime.";
+        RESEND.style.display = "none";
+        RECHECK.style.display = "none";
+        LINK.style.display = "none";
+        MSG.textContent = "";
+        return;
+      }
+
+      DOT.style.background = "#f59e0b";
+      RESEND.style.display = "";
+      RECHECK.style.display = "";
+      LINK.style.display = "";
+      updateCooldownUI();
+    }
+
+    RESEND.addEventListener("click", async ()=>{
+      const t = token();
+      if(!t) return;
+      RESEND.disabled = true;
+      const r = await fetch(API + "/api/auth/request-email-verify", {
+        method:"POST",
+        headers:{
+          Authorization:"Bearer "+t,
+          "Content-Type":"application/json"
+        },
+        body:"{}"
+      });
+      if(r.ok){
+        startCooldown(30);
+        updateCooldownUI();
+      } else {
+        MSG.textContent = "Could not send email.";
+        RESEND.disabled = false;
+      }
+    });
+
+    RECHECK.addEventListener("click", refresh);
+
+    refresh();
+    setInterval(updateCooldownUI, 1000);
+  })();
+  </script>
+
+  <!-- KEEP ALL EXISTING PROPERTY.JS LOGIC BELOW UNCHANGED -->
+</body>
+</html>

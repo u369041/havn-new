@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>List a property • HAVN.ie</title>
+
+  <style>
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:#f6f7fb;
+      color:#0b1220;
+    }
+    .wrap{
+      max-width:920px;
+      margin:0 auto;
+      padding:24px 16px 80px;
+    }
+    h1{font-size:26px;font-weight:950;margin-bottom:6px}
+    .sub{color:#64748b;margin-bottom:20px}
+
+    label{
+      display:block;
+      font-weight:900;
+      font-size:13px;
+      margin:18px 0 6px;
+    }
+    input, select, textarea{
+      width:100%;
+      padding:14px;
+      border-radius:14px;
+      border:1px solid rgba(15,23,42,.12);
+      font-size:14px;
+      background:#fff;
+    }
+    textarea{min-height:120px}
+
+    .row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    @media(max-width:700px){
+      .row{grid-template-columns:1fr}
+    }
+
+    .actions{
+      margin-top:24px;
+      display:flex;
+      gap:12px;
+    }
+    .btn{
+      padding:14px 18px;
+      border-radius:16px;
+      font-weight:950;
+      border:0;
+      cursor:pointer;
+      font-size:14px;
+    }
+    .btn.primary{
+      background:#0f172a;
+      color:#fff;
+    }
+    .btn.ghost{
+      background:#fff;
+      border:1px solid rgba(15,23,42,.12);
+    }
+
+    .notice{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      background:#fff3cd;
+      border:1px solid #facc15;
+      font-size:13px;
+      display:none;
+    }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>List a property</h1>
+  <p class="sub">Create a draft or submit for approval.</p>
+
+  <div id="notice" class="notice"></div>
+
+  <form id="form">
+
+    <!-- 🔑 MARKET INTENT (SOURCE OF TRUTH) -->
+    <label for="saleType">Listing type *</label>
+    <select id="saleType" required>
+      <option value="">Select listing type</option>
+      <option value="BUY">For sale</option>
+      <option value="RENT">For rent</option>
+      <option value="SHARE">Room / share</option>
+    </select>
+
+    <label>Title</label>
+    <input id="title" placeholder="e.g. 3-bed semi in Rathmines" />
+
+    <label>Description</label>
+    <textarea id="description"></textarea>
+
+    <div class="row">
+      <div>
+        <label>Price (€)</label>
+        <input id="price" type="number" />
+      </div>
+      <div>
+        <label>Property type</label>
+        <select id="propertyType">
+          <option value="">Select</option>
+          <option value="HOUSE">House</option>
+          <option value="APARTMENT">Apartment</option>
+          <option value="SITE">Site</option>
+          <option value="COMMERCIAL">Commercial</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Bedrooms</label>
+        <input id="bedrooms" type="number" />
+      </div>
+      <div>
+        <label>Bathrooms</label>
+        <input id="bathrooms" type="number" />
+      </div>
+    </div>
+
+    <label>Address line 1</label>
+    <input id="address1" />
+
+    <label>Address line 2</label>
+    <input id="address2" />
+
+    <div class="row">
+      <div>
+        <label>City / Town</label>
+        <input id="city" />
+      </div>
+      <div>
+        <label>County</label>
+        <input id="county" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn ghost" id="saveDraft">Save draft</button>
+      <button type="button" class="btn primary" id="submit">Submit for approval</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const API = "https://api.havn.ie";
+const notice = document.getElementById("notice");
+
+function show(msg){
+  notice.style.display = "block";
+  notice.textContent = msg;
+}
+
+function getToken(){
+  try{ return localStorage.getItem("token"); }catch{ return null; }
+}
+
+function payload(){
+  return {
+    saleType: document.getElementById("saleType").value,
+    title: document.getElementById("title").value,
+    description: document.getElementById("description").value,
+    price: Number(document.getElementById("price").value || 0),
+    propertyType: document.getElementById("propertyType").value,
+    bedrooms: Number(document.getElementById("bedrooms").value || null),
+    bathrooms: Number(document.getElementById("bathrooms").value || null),
+    address1: document.getElementById("address1").value,
+    address2: document.getElementById("address2").value,
+    city: document.getElementById("city").value,
+    county: document.getElementById("county").value
+  };
+}
+
+/* SAVE DRAFT (saleType optional) */
+document.getElementById("saveDraft").onclick = async () => {
+  await fetch(API + "/api/properties/draft", {
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer " + getToken(),
+      "Content-Type":"application/json"
+    },
+    body: JSON.stringify(payload())
+  });
+  show("Draft saved.");
+};
+
+/* SUBMIT (saleType REQUIRED) */
+document.getElementById("submit").onclick = async () => {
+  const p = payload();
+
+  if(!p.saleType){
+    alert("Please select whether this listing is for sale, rent, or share.");
+    return;
+  }
+
+  const res = await fetch(API + "/api/properties/submit", {
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer " + getToken(),
+      "Content-Type":"application/json"
+    },
+    body: JSON.stringify(p)
+  });
+
+  if(res.ok){
+    alert("Submitted for approval.");
+    location.href = "/my-listings.html";
+  } else {
+    const t = await res.text();
+    alert(t || "Submit failed");
+  }
+};
+</script>
+</body>
+</html>

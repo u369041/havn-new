@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<!-- HAVN.ie — Login (Stable Auth Baseline + NO LOOP) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>havn.ie — Login</title>
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --card:rgba(255,255,255,0.90);
+      --text:#0b1220;
+      --muted:#5c6b86;
+      --line:rgba(15,23,42,0.10);
+      --shadow:0 18px 55px rgba(15,23,42,0.12);
+      --shadow2:0 10px 26px rgba(15,23,42,0.08);
+      --radius:22px;
+      --danger:#ef4444;
+      --ok:#22c55e;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(1200px 700px at 15% -10%, rgba(37,99,235,0.07), transparent 55%),
+        radial-gradient(900px 550px at 85% -10%, rgba(14,165,233,0.08), transparent 50%),
+        var(--bg);
+      color:var(--text);
+    }
+
+    .wrap{
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:28px 16px;
+    }
+
+    .card{
+      width:min(520px, 92vw);
+      border:1px solid rgba(15,23,42,0.10);
+      background:var(--card);
+      border-radius:28px;
+      box-shadow:var(--shadow);
+      padding:28px 22px 22px;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin-bottom:16px;
+      text-decoration:none;
+      color:inherit;
+    }
+    .logo{
+      width:38px;height:38px;border-radius:14px;
+      background:linear-gradient(135deg, rgba(37,99,235,0.95), rgba(14,165,233,0.95));
+      box-shadow:0 12px 28px rgba(37,99,235,0.18);
+      position:relative;
+      flex:0 0 auto;
+    }
+    .logo:before{
+      content:""; position:absolute; inset:10px 11px 11px 11px;
+      border:2px solid rgba(255,255,255,0.92);
+      border-bottom-left-radius:8px;border-bottom-right-radius:8px;
+      border-top-left-radius:3px;border-top-right-radius:3px;
+      transform: skewY(-2deg);
+    }
+    .brand .name{font-weight:950;font-size:18px;line-height:1;}
+    .brand .tag{font-size:12px;color:var(--muted);margin-top:2px;}
+
+    h1{
+      margin:10px 0 6px;
+      font-size:22px;
+      font-weight:950;
+      letter-spacing:-0.02em;
+    }
+    .sub{
+      margin:0 0 18px;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.5;
+    }
+
+    .debug{
+      margin:0 0 16px;
+      padding:10px 12px;
+      border-radius:999px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(10px);
+      box-shadow:var(--shadow2);
+      font-size:12px;
+      color:rgba(11,18,32,0.74);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .debug strong{color:rgba(11,18,32,0.92); font-weight:950;}
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 0 4px rgba(34,197,94,0.18);
+      flex:0 0 auto;
+    }
+    .debugLeft{display:flex;align-items:center;gap:10px;min-width:0;}
+    .debugText{
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:360px;
+    }
+
+    label{
+      display:block;
+      margin:14px 0 6px;
+      font-size:13px;
+      font-weight:950;
+      color:rgba(11,18,32,0.92);
+    }
+    input{
+      width:100%;
+      border:1px solid rgba(15,23,42,0.10);
+      border-radius:16px;
+      padding:14px 14px;
+      font-size:14px;
+      outline:none;
+      background:#fff;
+      box-shadow:0 1px 0 rgba(15,23,42,0.04);
+    }
+    input:focus{
+      border-color:rgba(37,99,235,0.35);
+      box-shadow:0 0 0 4px rgba(37,99,235,0.10);
+    }
+
+    .btn{
+      width:100%;
+      margin-top:16px;
+      border:0;
+      border-radius:18px;
+      padding:14px 14px;
+      font-weight:950;
+      cursor:pointer;
+      font-size:14px;
+      color:#fff;
+      background: linear-gradient(135deg, rgba(11,18,32,0.96), rgba(17,24,39,0.96));
+      box-shadow: 0 14px 34px rgba(11,18,32,0.18);
+      transition:all .15s ease;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      user-select:none;
+    }
+    .btn:hover{transform:translateY(-1px);box-shadow:0 18px 44px rgba(11,18,32,0.22);}
+    .btn:disabled{
+      opacity:0.72;
+      cursor:not-allowed;
+      transform:none;
+    }
+
+    .spinner{
+      width:16px;height:16px;border-radius:50%;
+      border:2px solid rgba(255,255,255,0.35);
+      border-top-color:#fff;
+      animation:spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .msg{
+      margin-top:12px;
+      font-size:13px;
+      line-height:1.5;
+      border-radius:16px;
+      padding:12px 12px;
+      display:none;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.85);
+    }
+    .msg.show{display:block;}
+    .msg.ok{border-color:rgba(34,197,94,0.28); background:rgba(34,197,94,0.08); color:rgba(11,18,32,0.92);}
+    .msg.err{border-color:rgba(239,68,68,0.28); background:rgba(239,68,68,0.08); color:rgba(11,18,32,0.92);}
+
+    /* ✅ Daft-style helper links */
+    .helperRow{
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .helperRow a{
+      color:#1d4ed8;
+      text-decoration:none;
+      font-weight:950;
+      white-space:nowrap;
+    }
+    .helperRow a:hover{ text-decoration:underline; }
+
+    .divider{
+      margin:14px 0 10px;
+      height:1px;
+      background:rgba(15,23,42,0.10);
+      border:0;
+    }
+
+    .signupRow{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:13px;
+      color:var(--muted);
+    }
+    .signupRow a{
+      color:#1d4ed8;
+      text-decoration:none;
+      font-weight:950;
+      white-space:nowrap;
+    }
+    .signupRow a:hover{ text-decoration:underline; }
+
+    .foot{
+      margin-top:14px;
+      color:var(--muted);
+      font-size:12px;
+      text-align:center;
+    }
+    .foot a{color:#1d4ed8;text-decoration:none;font-weight:950;}
+    .foot a:hover{text-decoration:underline;}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+
+      <a class="brand" href="/index.html">
+        <div class="logo"></div>
+        <div>
+          <div class="name">havn.ie</div>
+          <div class="tag">Ireland’s most curated property marketplace.</div>
+        </div>
+      </a>
+
+      <div class="debug">
+        <div class="debugLeft">
+          <span class="dot"></span>
+          <div class="debugText"><strong>vLOGIN.3-NOLOOP</strong> <span id="dbg">Ready</span></div>
+        </div>
+        <div id="dbgRight">API: <strong id="apiHost">api.havn.ie</strong></div>
+      </div>
+
+      <h1>Sign in</h1>
+      <p class="sub">Use your HAVN.ie account to continue.</p>
+
+      <form id="loginForm" autocomplete="on">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button class="btn" id="loginBtn" type="submit">
+          <span id="btnText">Login</span>
+        </button>
+
+        <div class="msg" id="msg"></div>
+
+        <div class="helperRow" aria-label="Account helpers">
+          <a href="#" id="forgotLink">Forgot your details?</a>
+          <a href="#" id="agentLink" style="display:none;">Agent sign in</a>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="signupRow" aria-label="Sign up prompt">
+          <div>No account yet?</div>
+          <a href="#" id="signupLink">Sign up for havn.ie</a>
+        </div>
+      </form>
+
+      <div class="foot">
+        By signing in you agree to <a href="#" onclick="alert('Terms placeholder');return false;">HAVN.ie terms</a>.
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const API = "https://api.havn.ie";
+    document.getElementById("apiHost").textContent = API.replace("https://","");
+
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const NEXT = params.get("next") || "/my-listings.html";
+
+    // ✅ wire Sign up link to preserve next param
+    (function(){
+      const u = new URL(location.href);
+      const next = u.searchParams.get("next") || "/my-listings.html";
+      const signupUrl = "signup.html?next=" + encodeURIComponent(next);
+      $("signupLink").setAttribute("href", signupUrl);
+    })();
+
+    // ✅ Forgot password (preserve next) + prefill email via query param
+    $("forgotLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      const u = new URL(location.href);
+      const next = u.searchParams.get("next") || "/my-listings.html";
+      const email = ($("email").value || "").trim().toLowerCase();
+
+      let url = "forgot-password.html?next=" + encodeURIComponent(next);
+      if(email) url += "&email=" + encodeURIComponent(email);
+
+      location.href = url;
+    });
+
+    // agentLink hidden by default; keep hook if you want later
+    $("agentLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      alert("Agent sign-in is not enabled yet.");
+    });
+
+    function setDbg(text){ $("dbg").textContent = text; }
+    function setMsg(type, text){
+      const el = $("msg");
+      el.className = "msg show " + (type === "ok" ? "ok" : "err");
+      el.textContent = text;
+    }
+    function clearMsg(){
+      const el = $("msg");
+      el.className = "msg";
+      el.textContent = "";
+    }
+
+    async function fetchText(path, headers={}){
+      const res = await fetch(API + path, { headers });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+    async function postJSON(path, payload){
+      const res = await fetch(API + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+    // ✅ FALLBACK LOGIN ENDPOINTS
+    async function loginWithFallback(payload){
+      const endpoints = [
+        "/api/auth/login",
+        "/api/login",
+        "/api/auth/signin",
+        "/api/auth/sign-in",
+      ];
+
+      for(const ep of endpoints){
+        setDbg("Trying " + ep + "…");
+        const r = await postJSON(ep, payload);
+        if(r.ok && r.json){
+          return { endpoint: ep, result: r.json };
+        }
+      }
+      throw new Error("Login failed: no endpoints accepted credentials.");
+    }
+
+    // ✅ FALLBACK TOKEN VALIDATION ENDPOINTS
+    async function validateTokenWithFallback(token){
+      const endpoints = [
+        "/api/auth/me",
+        "/api/me",
+        "/api/users/me",
+        "/api/profile",
+      ];
+
+      for(const ep of endpoints){
+        setDbg("Validating token " + ep + "…");
+        const r = await fetchText(ep, { "Authorization": "Bearer " + token });
+        if(r.ok){
+          return { endpoint: ep, result: r.json || r.text };
+        }
+      }
+      return null;
+    }
+
+    function extractToken(obj){
+      if(!obj) return "";
+      return (
+        obj.token ||
+        obj.jwt ||
+        obj.accessToken ||
+        (obj.data && (obj.data.token || obj.data.jwt || obj.data.accessToken)) ||
+        (obj.result && (obj.result.token || obj.result.jwt || obj.result.accessToken)) ||
+        ""
+      );
+    }
+
+    function setLoading(isLoading){
+      const btn = $("loginBtn");
+      const text = $("btnText");
+
+      btn.disabled = !!isLoading;
+
+      if(isLoading){
+        text.innerHTML = `<span class="spinner" aria-hidden="true"></span> Signing in…`;
+      } else {
+        text.textContent = "Login";
+      }
+    }
+
+    // ✅ IMPORTANT: DO NOT AUTO-REDIRECT JUST BECAUSE TOKEN EXISTS
+    // Instead validate first. If invalid, clear token and stay on login.
+    (async function bootstrap(){
+      try{
+        const t = localStorage.getItem("token");
+        if(!t) return;
+
+        setDbg("Token detected — validating…");
+
+        const ok = await validateTokenWithFallback(t);
+        if(ok){
+          setDbg("Token valid (" + ok.endpoint + ")");
+          setMsg("ok", "Already signed in. Redirecting…");
+          setTimeout(() => location.href = NEXT, 350);
+          return;
+        }
+
+        // Token exists but invalid
+        localStorage.removeItem("token");
+        setDbg("Token invalid — cleared");
+        setMsg("err", "Your session expired. Please sign in again.");
+
+      } catch(e){
+        // If validation fails unexpectedly, do not redirect
+        console.warn(e);
+        setDbg("Token check failed (staying)");
+      }
+    })();
+
+    // ✅ LOGIN SUBMIT
+    $("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearMsg();
+
+      const email = $("email").value.trim();
+      const password = $("password").value;
+
+      if(!email || !password){
+        setMsg("err", "Please enter your email and password.");
+        return;
+      }
+
+      setLoading(true);
+
+      try{
+        const payload = { email, password };
+
+        const { endpoint, result } = await loginWithFallback(payload);
+        const token = extractToken(result);
+
+        if(!token){
+          console.warn("Login success but no token:", result);
+          throw new Error("Login succeeded but token was missing in response.");
+        }
+
+        localStorage.setItem("token", token);
+
+        // Validate once to prevent redirect loops
+        const ok = await validateTokenWithFallback(token);
+        if(!ok){
+          localStorage.removeItem("token");
+          throw new Error("Login succeeded but token validation failed. Please try again.");
+        }
+
+        setDbg("Success (" + endpoint + ")");
+        setMsg("ok", "Logged in. Redirecting…");
+
+        setTimeout(() => location.href = NEXT, 400);
+
+      } catch(err){
+        console.error(err);
+        setDbg("Error");
+        setMsg("err", err.message || "Login failed.");
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // ✅ Remember email
+    try{
+      const savedEmail = localStorage.getItem("havn_login_email");
+      if(savedEmail && !$("email").value) $("email").value = savedEmail;
+    }catch(e){}
+    $("email").addEventListener("change", () => {
+      try{ localStorage.setItem("havn_login_email", $("email").value.trim()); }catch(e){}
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Moderation • HAVN.ie</title>
+
+  <style>
+    :root{
+      --bg:#f6f8fc;
+      --card:#ffffff;
+      --ink:#0f172a;
+      --muted:#64748b;
+      --line:#e5e7eb;
+      --shadow:0 12px 30px rgba(15,23,42,.08);
+      --radius:18px;
+
+      --blue:#2563eb;
+      --navy:#0f172a;
+      --green:#16a34a;
+      --red:#ef4444;
+      --amber:#f59e0b;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color:var(--ink);
+      background:var(--bg);
+      visibility:hidden; /* ✅ prevent UI flash until admin is confirmed */
+    }
+
+    .wrap{max-width:1200px; margin:0 auto; padding:18px 14px 60px;}
+
+    .hdr{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+    h1{margin:0; font-size:22px; letter-spacing:-.02em}
+    .sub{color:var(--muted); font-size:13px; font-weight:800; margin-top:4px}
+
+    .topRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin:12px 0 14px;
+    }
+
+    .filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+    .pill{
+      border:1px solid var(--line);
+      background:#fff;
+      padding:7px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      user-select:none;
+    }
+    .pill.active{border-color:#bfdbfe; box-shadow:0 10px 25px rgba(37,99,235,.14);}
+
+    .searchWrap{
+      flex:1;
+      display:flex;
+      justify-content:flex-end;
+      min-width:260px;
+    }
+    input[type="search"]{
+      width:min(520px, 100%);
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:10px 14px;
+      font-size:14px;
+      outline:none;
+      background:#fff;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+    }
+
+    .metaRow{
+      color:var(--muted);
+      font-weight:900;
+      font-size:12px;
+      display:flex;
+      justify-content:flex-end;
+      margin-top:-6px;
+      margin-bottom:10px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap:14px;
+      align-items:start;
+    }
+    @media (max-width: 980px){ .grid{grid-template-columns: repeat(2, minmax(0,1fr));} }
+    @media (max-width: 620px){ .grid{grid-template-columns: 1fr;} }
+
+    .card{
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:22px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      min-height:360px;
+    }
+
+    .thumb{
+      width:100%;
+      height:190px;
+      object-fit:cover;
+      display:block;
+      background:#eef2ff;
+    }
+    .thumbPh{
+      width:100%;
+      height:190px;
+      background:linear-gradient(180deg,#eef2ff,#f8fafc);
+    }
+
+    .cardBody{padding:12px 12px 14px; display:flex; flex-direction:column; gap:10px;}
+    .title{
+      margin:0;
+      font-weight:1000;
+      font-size:13px;
+      line-height:1.25;
+      max-height:2.6em;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .addr{
+      color:var(--muted);
+      font-weight:900;
+      font-size:12px;
+      line-height:1.25;
+      max-height:2.6em;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-weight:900;
+      font-size:12px;
+      color:var(--ink);
+      max-width:100%;
+    }
+    .slug{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:11px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      max-width:100%;
+      display:inline-block;
+    }
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dot.good{background:var(--green)}
+    .dot.warn{background:var(--amber)}
+    .dot.bad{background:var(--red)}
+    .dot.neutral{background:#94a3b8}
+
+    .smallRow{
+      color:var(--muted);
+      font-weight:900;
+      font-size:11px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .btnRow{
+      margin-top:auto;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      padding:8px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:1000;
+      font-size:12px;
+      box-shadow:0 10px 25px rgba(15,23,42,.06);
+      user-select:none;
+    }
+    .btn.primary{border-color:#bfdbfe}
+    .btn.good{border-color:rgba(22,163,74,.30); background:rgba(22,163,74,.08)}
+    .btn.bad{border-color:rgba(239,68,68,.30); background:rgba(239,68,68,.08)}
+    .btn.warn{border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.10)}
+    .btn[disabled]{opacity:.55; cursor:not-allowed}
+
+    .toast{
+      position:fixed;
+      left:50%;
+      bottom:20px;
+      transform:translateX(-50%);
+      background:#0b1220;
+      color:#fff;
+      padding:10px 14px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:13px;
+      box-shadow:0 18px 50px rgba(0,0,0,.35);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .18s ease;
+      z-index:9999;
+    }
+    .toast.show{opacity:1}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="hdr">
+      <div>
+        <h1>Admin Moderation</h1>
+        <div class="sub">Approve / Reject pending listings. Public “View” opens property.html by slug.</div>
+      </div>
+      <div class="metaRow" id="metaRow">—</div>
+    </div>
+
+    <div class="topRow">
+      <div class="filters" id="filters"></div>
+      <div class="searchWrap">
+        <input id="q" type="search" placeholder="Search: slug, address, title, eircode…" />
+      </div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/havn-auth.js"></script>
+  <script>
+  /* global HAVN_AUTH */
+  (() => {
+    const API_BASE = "https://api.havn.ie";
+
+    const els = {
+      filters: document.getElementById("filters"),
+      q: document.getElementById("q"),
+      grid: document.getElementById("grid"),
+      meta: document.getElementById("metaRow"),
+      toast: document.getElementById("toast")
+    };
+
+    const FILTERS = [
+      { key: "ALL", label: "All" },
+      { key: "PENDING", label: "Pending" },
+      { key: "PUBLISHED", label: "Published" },
+      { key: "REJECTED", label: "Rejected" },
+      { key: "DRAFT", label: "Draft" },
+      { key: "ARCHIVED", label: "Closed" }
+    ];
+
+    let state = {
+      filter: "ALL",
+      q: "",
+      items: [],
+      loading: false
+    };
+
+    function toast(msg, ms = 2200){
+      els.toast.textContent = msg;
+      els.toast.classList.add("show");
+      window.clearTimeout(toast._t);
+      toast._t = window.setTimeout(() => els.toast.classList.remove("show"), ms);
+    }
+
+    function safeText(v){ return (v ?? "").toString(); }
+
+    // ✅ Minimal admin gate (no layout changes)
+    async function enforceAdmin(){
+      const token = localStorage.getItem("token");
+      if (!token){
+        location.href = "/login.html?next=" + encodeURIComponent("/admin.html");
+        return false;
+      }
+
+      try{
+        // Prefer the same auth path used everywhere
+        const res = await fetch(API_BASE + "/api/auth/me", {
+          headers: { Authorization: "Bearer " + token }
+        });
+
+        if (!res.ok){
+          localStorage.removeItem("token");
+          location.href = "/login.html?next=" + encodeURIComponent("/admin.html");
+          return false;
+        }
+
+        const data = await res.json().catch(()=>null);
+        const me = (data && data.user) ? data.user : data;
+
+        if (!me || String(me.role || "").toLowerCase() !== "admin"){
+          location.href = "/index.html";
+          return false;
+        }
+
+        // ✅ show UI only after admin confirmed
+        document.body.style.visibility = "visible";
+        return true;
+
+      }catch(e){
+        console.error("Admin gate failed:", e);
+        location.href = "/index.html";
+        return false;
+      }
+    }
+
+    function rawListingStatus(p){
+      return (
+        p.listingStatus ||
+        p.listing_status ||
+        p.moderationStatus ||
+        p.moderation_status ||
+        p.status ||
+        ""
+      );
+    }
+
+    function normalizedStatus(p){
+      const s = safeText(rawListingStatus(p)).toUpperCase();
+
+      if (s === "SUBMITTED") return "PENDING";
+      if (s === "PENDING") return "PENDING";
+      if (s === "APPROVED") return "PUBLISHED";
+      if (s === "LIVE") return "PUBLISHED";
+      if (s === "DECLINED") return "REJECTED";
+
+      if (s === "PUBLISHED") return "PUBLISHED";
+      if (s === "REJECTED") return "REJECTED";
+      if (s === "DRAFT") return "DRAFT";
+      if (s === "ARCHIVED") return "ARCHIVED";
+
+      return "UNKNOWN";
+    }
+
+    function statusDot(normal){
+      if (normal === "PUBLISHED") return "good";
+      if (normal === "PENDING") return "warn";
+      if (normal === "REJECTED") return "bad";
+      if (normal === "DRAFT") return "neutral";
+      if (normal === "ARCHIVED") return "neutral";
+      return "neutral";
+    }
+
+    function getHeroUrl(p){
+      return (
+        p.coverImageUrl ||
+        p.heroImageUrl ||
+        p.primaryImageUrl ||
+        (Array.isArray(p.photos) && p.photos[0]) ||
+        (Array.isArray(p.images) && p.images[0] && (p.images[0].url || p.images[0])) ||
+        ""
+      );
+    }
+
+    function getTitle(p){
+      return p.title || p.headline || p.addressLine1 || p.address || p.slug || "Untitled listing";
+    }
+
+    function getAddress(p){
+      const a1 = safeText(p.address1 || p.addressLine1 || "");
+      const a2 = safeText(p.address2 || "");
+      const city = safeText(p.city || "");
+      const county = safeText(p.county || "");
+      const eir = safeText(p.eircode || "");
+      const bits = [a1, a2, city, county].filter(Boolean);
+      return bits.join(", ") || eir || "";
+    }
+
+    function created(p){ return p.createdAt || p.created_at || ""; }
+    function updated(p){ return p.updatedAt || p.updated_at || ""; }
+
+    function fmtDate(d){
+      if (!d) return "";
+      const dt = new Date(d);
+      if (Number.isNaN(dt.getTime())) return safeText(d);
+      return dt.toLocaleString();
+    }
+
+    async function apiFetch(path, opts = {}){
+      if (window.HAVN_AUTH && typeof HAVN_AUTH.apiFetch === "function") {
+        return HAVN_AUTH.apiFetch(`${API_BASE}${path}`, opts);
+      }
+      const token = localStorage.getItem("token");
+      const headers = Object.assign(
+        { "Content-Type": "application/json" },
+        opts.headers || {},
+        token ? { Authorization: `Bearer ${token}` } : {}
+      );
+      return fetch(`${API_BASE}${path}`, Object.assign({}, opts, { headers }));
+    }
+
+    async function readJsonSafe(res){
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return { raw: text }; }
+    }
+
+    async function moderate(id, action, payload = {}){
+      const tries = [
+        { path: `/api/properties/${id}/${action}`, method: "POST" },
+        { path: `/api/properties/${id}/_moderate`, method: "POST", body: { action, ...payload } },
+        { path: `/api/admin/properties/${id}/${action}`, method: "POST" },
+        { path: `/api/admin/properties/${id}`, method: "PATCH", body: { action, ...payload } }
+      ];
+
+      let lastErr = null;
+      for (const t of tries){
+        try{
+          const res = await apiFetch(t.path, {
+            method: t.method,
+            body: JSON.stringify(t.body || payload || {})
+          });
+          if (res.ok) return { ok:true, res, used: t.path };
+          const data = await readJsonSafe(res);
+          lastErr = { used: t.path, status: res.status, data };
+        }catch(e){
+          lastErr = { used: t.path, error: String(e) };
+        }
+      }
+      return { ok:false, lastErr };
+    }
+
+    async function closeListing(p){
+      const id = (p.id !== undefined && p.id !== null) ? p.id : p.slug;
+      if (!id) { toast("Close failed — missing id"); return; }
+
+      const status = normalizedStatus(p);
+      if (status !== "PUBLISHED") {
+        toast("Only PUBLISHED listings can be closed");
+        return;
+      }
+
+      if (!confirm(`Close listing?\n\nThis will archive it and email the customer.\n\n${p.slug || p.id || ""}`)) return;
+
+      const outcomeRaw = prompt('Close outcome? Type SOLD or RENTED (leave blank = auto):', "");
+      if (outcomeRaw === null) return;
+
+      const outcome = (outcomeRaw || "").trim().toUpperCase();
+      const body = (outcome === "SOLD" || outcome === "RENTED") ? { outcome } : {};
+
+      const res = await apiFetch(`/api/admin/properties/${encodeURIComponent(id)}/close`, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+
+      if (res.ok) {
+        toast("Closed ✅ (email sent)");
+        await load();
+        return;
+      }
+
+      const data = await readJsonSafe(res);
+      console.warn("Close failed:", { status: res.status, data });
+      toast("Close failed — check console");
+    }
+
+    function renderFilters(){
+      els.filters.innerHTML = "";
+      for (const f of FILTERS){
+        const b = document.createElement("button");
+        b.className = "pill" + (state.filter === f.key ? " active" : "");
+        b.textContent = f.label;
+        b.addEventListener("click", () => {
+          state.filter = f.key;
+          renderFilters();
+          render();
+        });
+        els.filters.appendChild(b);
+      }
+    }
+
+    function passesFilter(p){
+      if (state.filter === "ALL") return true;
+      const s = normalizedStatus(p);
+      if (state.filter === "PENDING") return s === "PENDING";
+      if (state.filter === "PUBLISHED") return s === "PUBLISHED";
+      if (state.filter === "REJECTED") return s === "REJECTED";
+      if (state.filter === "DRAFT") return s === "DRAFT";
+      if (state.filter === "ARCHIVED") return s === "ARCHIVED";
+      return true;
+    }
+
+    function passesSearch(p){
+      const q = state.q.trim().toLowerCase();
+      if (!q) return true;
+      const hay = [
+        p.slug, p.title, p.address1, p.address2, p.city, p.county, p.eircode
+      ].map(x => safeText(x).toLowerCase()).join(" • ");
+      return hay.includes(q);
+    }
+
+    function computeButtonState(p){
+      const s = normalizedStatus(p);
+      const canApprove = (s === "PENDING" || s === "REJECTED");
+      const canReject  = (s === "PENDING" || s === "PUBLISHED");
+      const canClose   = (s === "PUBLISHED");
+      return { canApprove, canReject, canClose };
+    }
+
+    function linkForEdit(p){
+      if (p.id !== undefined && p.id !== null) return `/property-upload.html?id=${encodeURIComponent(p.id)}`;
+      return `/property-upload.html`;
+    }
+
+    function linkForAdminDetail(p){
+      if (p.id !== undefined && p.id !== null) return `/property-admin.html?id=${encodeURIComponent(p.id)}`;
+      if (p.slug) return `/property-admin.html?slug=${encodeURIComponent(p.slug)}`;
+      return `/property-admin.html`;
+    }
+
+    function linkForView(p){
+      const status = normalizedStatus(p);
+      const slug = safeText(p.slug);
+
+      if (status === "PUBLISHED") {
+        if (slug) return `/property.html?slug=${encodeURIComponent(slug)}`;
+        if (p.id !== undefined && p.id !== null) return `/property.html?id=${encodeURIComponent(p.id)}`;
+        return `/property.html`;
+      }
+
+      return linkForAdminDetail(p);
+    }
+
+    function card(p){
+      const img = getHeroUrl(p);
+      const title = getTitle(p);
+      const addr = getAddress(p);
+
+      const status = normalizedStatus(p);
+      const dotClass = statusDot(status);
+      const { canApprove, canReject, canClose } = computeButtonState(p);
+
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `
+        ${img ? `<img class="thumb" src="${img}" alt="">` : `<div class="thumbPh" aria-hidden="true"></div>`}
+        <div class="cardBody">
+          <div style="min-width:0">
+            <p class="title" title="${safeText(title)}">${safeText(title)}</p>
+            <div class="addr" title="${safeText(addr)}">${safeText(addr)}</div>
+          </div>
+
+          <div class="row">
+            <span class="chip"><span class="dot ${dotClass}"></span>${status}</span>
+            ${p.propertyType ? `<span class="chip">${safeText(p.propertyType)}</span>` : ``}
+            ${p.slug ? `<span class="chip"><span class="slug">${safeText(p.slug)}</span></span>` : ""}
+          </div>
+
+          <div class="smallRow">
+            ${created(p) ? `<span>Created: ${fmtDate(created(p))}</span>` : ""}
+            ${updated(p) ? `<span>Updated: ${fmtDate(updated(p))}</span>` : ""}
+          </div>
+
+          <div class="btnRow">
+            <button class="btn primary" data-act="detail">Moderate</button>
+            <button class="btn" data-act="view">View</button>
+            <button class="btn" data-act="edit">Edit</button>
+            <button class="btn good" data-act="approve" ${canApprove ? "" : "disabled"}>Approve</button>
+            <button class="btn bad" data-act="reject" ${canReject ? "" : "disabled"}>Reject</button>
+            <button class="btn warn" data-act="close" ${canClose ? "" : "disabled"}>Close Listing</button>
+          </div>
+        </div>
+      `;
+
+      el.querySelector('[data-act="detail"]').addEventListener("click", () => location.href = linkForAdminDetail(p));
+      el.querySelector('[data-act="view"]').addEventListener("click", () => window.open(linkForView(p), "_blank"));
+      el.querySelector('[data-act="edit"]').addEventListener("click", () => window.open(linkForEdit(p), "_blank"));
+
+      el.querySelector('[data-act="approve"]').addEventListener("click", async () => {
+        if (!confirm(`Approve listing?\n\n${p.slug || p.id || ""}`)) return;
+        const r = await moderate(p.id || p.slug, "approve");
+        if (r.ok){ toast("Approved ✅"); await load(); }
+        else { console.warn("Approve failed:", r.lastErr); toast("Approve failed — check console"); }
+      });
+
+      el.querySelector('[data-act="reject"]').addEventListener("click", async () => {
+        const reason = prompt("Reject reason (optional):", "");
+        const r = await moderate(p.id || p.slug, "reject", reason ? { reason } : {});
+        if (r.ok){ toast("Rejected ✅"); await load(); }
+        else { console.warn("Reject failed:", r.lastErr); toast("Reject failed — check console"); }
+      });
+
+      el.querySelector('[data-act="close"]').addEventListener("click", async () => {
+        await closeListing(p);
+      });
+
+      return el;
+    }
+
+    function render(){
+      const filtered = state.items.filter(passesFilter).filter(passesSearch);
+      els.meta.textContent = `${filtered.length} shown • ${state.items.length} total • filter: ${state.filter}`;
+      els.grid.innerHTML = "";
+
+      for (const p of filtered){
+        els.grid.appendChild(card(p));
+      }
+
+      if (!filtered.length){
+        const empty = document.createElement("div");
+        empty.style.color = "#64748b";
+        empty.style.fontWeight = "900";
+        empty.style.fontSize = "13px";
+        empty.textContent = state.loading ? "Loading…" : "No listings match this filter/search.";
+        els.grid.appendChild(empty);
+      }
+    }
+
+    async function load(){
+      state.loading = true;
+      render();
+
+      const tries = [
+        "/api/properties/_admin",
+        "/api/admin/properties",
+        "/api/properties?scope=admin"
+      ];
+
+      let last = null;
+      for (const path of tries){
+        const res = await apiFetch(path);
+        if (res.ok){
+          const data = await res.json();
+          const items =
+            (Array.isArray(data) && data) ||
+            data.items ||
+            data.properties ||
+            data.results ||
+            [];
+          state.items = items;
+          state.loading = false;
+          render();
+          console.info("Admin list loaded via:", path);
+          return;
+        } else {
+          last = { path, status: res.status, body: await readJsonSafe(res) };
+        }
+      }
+
+      state.loading = false;
+      render();
+      console.error("Admin list failed:", last);
+      toast("Admin list failed — check console");
+    }
+
+    function wire(){
+      renderFilters();
+      els.q.addEventListener("input", () => {
+        state.q = els.q.value || "";
+        render();
+      });
+    }
+
+    async function boot(){
+      const ok = await enforceAdmin();
+      if (!ok) return;
+
+      wire();
+      await load();
+    }
+
+    boot();
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>UNH Volatility-Flow Dashboard (Auto GEX)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg-soft: #111827;
+      --card: #020617;
+      --accent: #38bdf8;
+      --accent-soft: #0ea5e9;
+      --danger: #f97373;
+      --warning: #fbbf24;
+      --success: #4ade80;
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --border-subtle: #1f2937;
+      --radius-lg: 18px;
+      --shadow-soft: 0 18px 40px rgba(0,0,0,0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0, #020617 52%);
+      color: var(--text-main);
+      padding: 14px 10px 24px;
+    }
+
+    .app {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 14px;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin: 0 0 4px;
+      letter-spacing: 0.03em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    header h1 span.badge {
+      font-size: 0.7rem;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.09);
+      color: var(--accent-soft);
+      border: 1px solid rgba(56, 189, 248, 0.5);
+    }
+
+    header p {
+      margin: 0;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pill-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+
+    .pill-secondary {
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pill-secondary span.dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #f97316;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.1fr);
+      gap: 10px;
+    }
+
+    @media (max-width: 640px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: radial-gradient(circle at top left, #020617, #020617 44%, #020617 100%);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-soft);
+      padding: 12px 12px 14px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      opacity: 0.06;
+      background: radial-gradient(circle at 10% 0%, #38bdf8 0, transparent 55%);
+      pointer-events: none;
+    }
+
+    .card > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 6px;
+    }
+
+    .card-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9ca3af;
+    }
+
+    .card-tag {
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      color: #e5e7eb;
+      white-space: nowrap;
+    }
+
+    .card-body {
+      font-size: 0.84rem;
+    }
+
+    .subdued {
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+
+    .summary-highlight {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 480px) {
+      .summary-highlight {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .summary-main {
+      font-size: 0.86rem;
+      line-height: 1.3;
+    }
+
+    .summary-badges {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-end;
+    }
+
+    @media (max-width: 480px) {
+      .summary-badges {
+        align-items: flex-start;
+      }
+    }
+
+    .status-chip {
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-chip span.dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--success);
+    }
+
+    .status-chip.safe {
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.7);
+      color: #bbf7d0;
+    }
+
+    .status-chip.caution {
+      background: rgba(234, 179, 8, 0.12);
+      border: 1px solid rgba(234, 179, 8, 0.7);
+      color: #fef9c3;
+    }
+
+    .status-chip.danger {
+      background: rgba(248, 113, 113, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.7);
+      color: #fee2e2;
+    }
+
+    .status-chip span.dot.caution {
+      background: var(--warning);
+    }
+
+    .status-chip span.dot.danger {
+      background: var(--danger);
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin: 3px 0;
+      font-size: 0.8rem;
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-weight: 500;
+      font-size: 0.82rem;
+    }
+
+    .stat-value.em {
+      color: var(--accent-soft);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    @media (max-width: 480px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    select, input[type="number"] {
+      width: 100%;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.45);
+      background: rgba(15, 23, 42, 0.92);
+      color: var(--text-main);
+      padding: 5px 10px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+
+    select:focus,
+    input[type="number"]:focus {
+      border-color: var(--accent-soft);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+    }
+
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .strategy-list {
+      margin: 4px 0 0;
+      padding-left: 18px;
+      font-size: 0.8rem;
+    }
+
+    .strategy-list li {
+      margin-bottom: 3px;
+    }
+
+    .footer-note {
+      margin-top: 10px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-align: center;
+      opacity: 0.75;
+    }
+
+    .pin-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .pin-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .badge-outline {
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .badge-outline span.dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .tiny {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>
+        UNH Volatility-Flow
+        <span class="badge">AUTO GEX • BETA</span>
+      </h1>
+      <p>
+        <span>
+          <span id="todayLabel">Today</span>
+          · Spot: <span id="spotLabel">–</span>
+          · Exp: <span id="expiryLabel">–</span>
+        </span>
+        <span style="display:flex; gap:6px; align-items:center;">
+          <span class="pill">
+            <span class="pill-dot"></span>
+            Auto GEX via CORS proxy
+          </span>
+          <span class="pill-secondary" id="dataStatusPill">
+            <span class="dot"></span>
+            Fetching…
+          </span>
+        </span>
+      </p>
+    </header>
+
+    <div class="grid">
+
+      <!-- SUMMARY CARD -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">Flow Summary</div>
+          <div class="card-tag" id="riskTag">Neutral Regime</div>
+        </div>
+        <div class="card-body">
+          <div class="subdued">Interpretation based on auto GEX + your Vanna / Charm inputs.</div>
+          <div class="summary-highlight">
+            <div class="summary-main" id="summaryText">
+              Waiting for options data… you can already adjust the controls on the right if you want to simulate different regimes.
+            </div>
+            <div class="summary-badges">
+              <div class="status-chip safe" id="premiumChip">
+                <span class="dot"></span>
+                <span id="premiumLabel">Premium Selling: Safe</span>
+              </div>
+              <div class="status-chip caution" id="directionChip">
+                <span class="dot caution"></span>
+                <span id="directionLabel">Bias: Sideways / Mild Drift</span>
+              </div>
+              <div class="status-chip danger" id="volChip">
+                <span class="dot danger"></span>
+                <span id="volLabel">Vol Regime: Normal</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 8px;">
+            <div class="stat-row">
+              <div class="stat-label">Premium Score</div>
+              <div class="stat-value em" id="premiumScoreLabel">7 / 10</div>
+            </div>
+            <div class="stat-row">
+              <div class="stat-label">Suggested Stance</div>
+              <div class="stat-value" id="stanceLabel">Sell defined-risk premium, avoid naked risk.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- INPUT / REGIME CARD -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">Today’s Regime</div>
+          <div class="card-tag" id="gexAutoTag">GEX: Auto / Manual Override</div>
+        </div>
+        <div class="card-body">
+          <div class="tiny" style="margin-bottom:6px;">
+            GEX is auto-classified from UNH options OI (via Yahoo). You can override it if your read differs.
+          </div>
+          <div class="form-grid">
+            <div>
+              <label for="gexSelect">Gamma Exposure (GEX)</label>
+              <select id="gexSelect">
+                <option value="neutral">Neutral / Unknown</option>
+                <option value="positive">Positive (pinning / stable)</option>
+                <option value="negative">Negative (unstable / explosive)</option>
+              </select>
+            </div>
+            <div>
+              <label for="vannaSelect">Vanna (vol move impact)</label>
+              <select id="vannaSelect">
+                <option value="neutral">Neutral / unclear</option>
+                <option value="strongPositive">Strong positive (vol likely to fall → bullish drift)</option>
+                <option value="weakPositive">Mild positive</option>
+                <option value="negative">Negative (vol likely to rise → bearish / choppy)</option>
+              </select>
+            </div>
+            <div>
+              <label for="charmSelect">Charm (time-based drift)</label>
+              <select id="charmSelect">
+                <option value="moderate">Moderate</option>
+                <option value="strong">Strong (expiry week / strong a.m. flows)</option>
+                <option value="weak">Weak</option>
+              </select>
+            </div>
+            <div>
+              <label for="eventSelect">Event Risk</label>
+              <select id="eventSelect">
+                <option value="none">None / normal session</option>
+                <option value="earnings">Earnings / company-specific</option>
+                <option value="macro">Macro (FOMC, CPI, NFP, etc.)</option>
+              </select>
+            </div>
+            <div>
+              <label for="ivrvSelect">IV vs Realised Vol</label>
+              <select id="ivrvSelect">
+                <option value="inline">Roughly in line</option>
+                <option value="ivAbove">IV above realised (rich options)</option>
+                <option value="ivBelow">IV below realised (cheap options)</option>
+              </select>
+            </div>
+            <div>
+              <label for="sentimentSelect">Your Read on Tape</label>
+              <select id="sentimentSelect">
+                <option value="flat">Choppy / two-sided</option>
+                <option value="bullish">Bid under price / dip bought</option>
+                <option value="bearish">Offers stacked / rips sold</option>
+              </select>
+            </div>
+          </div>
+          <div class="tiny" style="margin-top:6px;" id="gexDetailText">
+            Auto GEX not loaded yet.
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- STRATEGY + PIN CARD -->
+    <section class="card" style="margin-top: 10px;">
+      <div class="card-header">
+        <div class="card-title">Trade Map for UNH</div>
+        <div class="badge-outline">
+          <span class="dot"></span>
+          <span>1–3 Day Horizon</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="stat-row">
+          <div class="stat-label">Recommended Option Stance</div>
+          <div class="stat-value em" id="recommendedStance">Wait for clear positive GEX before selling condors.</div>
+        </div>
+        <ul class="strategy-list" id="strategyList">
+          <li>Waiting for live GEX classification and gamma walls from the UNH options chain…</li>
+          <li>You can still play with the controls above to simulate different scenarios.</li>
+        </ul>
+
+        <hr style="border:none;border-top:1px solid rgba(55,65,81,0.75);margin:9px 0 7px;" />
+
+        <div class="stat-row">
+          <div class="stat-label">Gamma Walls / Pin Zone</div>
+          <div class="stat-value">Auto-filled from largest OI (editable).</div>
+        </div>
+
+        <div class="pin-row">
+          <div>
+            <label for="putWall">Nearest big put wall</label>
+            <input type="number" id="putWall" placeholder="e.g. 360" inputmode="decimal" />
+          </div>
+          <div>
+            <label for="callWall">Nearest big call wall</label>
+            <input type="number" id="callWall" placeholder="e.g. 390" inputmode="decimal" />
+          </div>
+          <div>
+            <label>Estimated pin</label>
+            <div class="pin-value" id="pinEstimate">–</div>
+          </div>
+        </div>
+
+        <div class="subdued" style="margin-top: 6px;">
+          You can override the auto walls if your own chain read differs. This is a helper, not a replacement for your judgement.
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note">
+      Data source: Yahoo Finance options for UNH (nearest expiry) via a public CORS proxy. If data fails to load, GEX will default to Neutral and all controls work manually.
+    </div>
+  </div>
+
+  <script>
+    function formatToday() {
+      const d = new Date();
+      const opts = { weekday: "short", month: "short", day: "numeric" };
+      return d.toLocaleDateString(undefined, opts);
+    }
+
+    document.getElementById("todayLabel").textContent = formatToday();
+
+    const els = {
+      gex: document.getElementById("gexSelect"),
+      vanna: document.getElementById("vannaSelect"),
+      charm: document.getElementById("charmSelect"),
+      event: document.getElementById("eventSelect"),
+      ivrv: document.getElementById("ivrvSelect"),
+      sentiment: document.getElementById("sentimentSelect"),
+      riskTag: document.getElementById("riskTag"),
+      summaryText: document.getElementById("summaryText"),
+      premiumChip: document.getElementById("premiumChip"),
+      premiumLabel: document.getElementById("premiumLabel"),
+      premiumScoreLabel: document.getElementById("premiumScoreLabel"),
+      directionChip: document.getElementById("directionChip"),
+      directionLabel: document.getElementById("directionLabel"),
+      volChip: document.getElementById("volChip"),
+      volLabel: document.getElementById("volLabel"),
+      stanceLabel: document.getElementById("stanceLabel"),
+      recommendedStance: document.getElementById("recommendedStance"),
+      strategyList: document.getElementById("strategyList"),
+      putWall: document.getElementById("putWall"),
+      callWall: document.getElementById("callWall"),
+      pinEstimate: document.getElementById("pinEstimate"),
+      spotLabel: document.getElementById("spotLabel"),
+      expiryLabel: document.getElementById("expiryLabel"),
+      dataStatusPill: document.getElementById("dataStatusPill"),
+      gexDetailText: document.getElementById("gexDetailText"),
+      gexAutoTag: document.getElementById("gexAutoTag")
+    };
+
+    function setChipStyle(chip, level) {
+      chip.classList.remove("safe", "caution", "danger");
+      if (level === "safe") chip.classList.add("safe");
+      else if (level === "caution") chip.classList.add("caution");
+      else chip.classList.add("danger");
+    }
+
+    function updatePin() {
+      const put = parseFloat(els.putWall.value);
+      const call = parseFloat(els.callWall.value);
+      if (!isNaN(put) && !isNaN(call) && call > put) {
+        const mid = (put + call) / 2;
+        els.pinEstimate.textContent = mid.toFixed(1);
+      } else if (!isNaN(put)) {
+        els.pinEstimate.textContent = put.toFixed(1);
+      } else if (!isNaN(call)) {
+        els.pinEstimate.textContent = call.toFixed(1);
+      } else {
+        els.pinEstimate.textContent = "–";
+      }
+    }
+
+    function updateDashboard() {
+      const gex = els.gex.value;
+      const vanna = els.vanna.value;
+      const charm = els.charm.value;
+      const event = els.event.value;
+      const ivrv = els.ivrv.value;
+      const sentiment = els.sentiment.value;
+
+      // --- Premium score (0–10) ---
+      let premiumScore;
+      if (gex === "positive") premiumScore = 7;
+      else if (gex === "neutral") premiumScore = 5;
+      else premiumScore = 2;
+
+      if (ivrv === "ivAbove") premiumScore += 1;       // rich options → better for selling
+      if (ivrv === "ivBelow") premiumScore -= 2;       // cheap options → worse for selling
+
+      if (event !== "none") premiumScore = Math.min(premiumScore, 3);
+
+      premiumScore = Math.max(0, Math.min(10, premiumScore));
+
+      let premiumLabelText, premiumLevel, stance;
+      if (premiumScore >= 7) {
+        premiumLabelText = "Premium Selling: Attractive";
+        premiumLevel = "safe";
+        stance = "Sell defined-risk premium (iron condors / verticals), avoid naked short options.";
+      } else if (premiumScore >= 4) {
+        premiumLabelText = "Premium Selling: Selective Only";
+        premiumLevel = "caution";
+        stance = "If you sell, keep risk tight, further OTM, and size small. Consider spreads over condors.";
+      } else {
+        premiumLabelText = "Premium Selling: Avoid";
+        premiumLevel = "danger";
+        stance = "Prefer long premium, delta-hedged plays, or simply stay flat until regime improves.";
+      }
+
+      els.premiumLabel.textContent = premiumLabelText;
+      els.premiumScoreLabel.textContent = premiumScore + " / 10";
+      els.stanceLabel.textContent = stance;
+      setChipStyle(els.premiumChip, premiumLevel);
+
+      // --- Direction bias score ---
+      let dirScore = 0;
+      if (vanna === "strongPositive") dirScore += 2;
+      else if (vanna === "weakPositive") dirScore += 1;
+      else if (vanna === "negative") dirScore -= 2;
+
+      if (charm === "strong") dirScore += 1;
+      if (gex === "negative" && vanna === "negative") dirScore -= 1;
+      if (gex === "negative" && vanna.startsWith("strongPositive")) dirScore += 1;
+
+      if (sentiment === "bullish") dirScore += 1;
+      if (sentiment === "bearish") dirScore -= 1;
+
+      let directionText, directionLevel;
+      if (dirScore >= 2) {
+        directionText = "Bias: Bullish Drift (dealer hedging likely supports dips).";
+        directionLevel = "safe";
+      } else if (dirScore <= -2) {
+        directionText = "Bias: Bearish / Risk-off (dealer hedging likely reinforces downside).";
+        directionLevel = "danger";
+      } else {
+        directionText = "Bias: Sideways / Two-Sided (expect chop, respect levels).";
+        directionLevel = "caution";
+      }
+      els.directionLabel.textContent = directionText;
+      setChipStyle(els.directionChip, directionLevel);
+
+      // --- Volatility regime ---
+      let volText, volLevel;
+      if (gex === "negative" || event !== "none") {
+        volText = "Vol Regime: Elevated / Fragile";
+        volLevel = "danger";
+      } else if (gex === "neutral") {
+        volText = "Vol Regime: Normal / Path-dependent";
+        volLevel = "caution";
+      } else {
+        volText = "Vol Regime: Dampened (gamma pinning likely).";
+        volLevel = "safe";
+      }
+      els.volLabel.textContent = volText;
+      setChipStyle(els.volChip, volLevel);
+
+      // --- Risk tag + summary text ---
+      if (gex === "positive") {
+        els.riskTag.textContent = "Positive GEX • Pinning Bias";
+      } else if (gex === "negative") {
+        els.riskTag.textContent = "Negative GEX • Fragile Tape";
+      } else {
+        els.riskTag.textContent = "Neutral / Unclear Regime";
+      }
+
+      let summary = "";
+      if (gex === "positive") {
+        summary += "UNH sits in a positive gamma pocket, so dealer hedging should dampen intraday swings and encourage pinning around major strikes. ";
+      } else if (gex === "negative") {
+        summary += "UNH is in a negative gamma regime, so dealer hedging is likely to amplify moves rather than absorb them. Expect sharper intraday swings and less respect for levels. ";
+      } else {
+        summary += "Gamma regime is neutral or unclear, so flows may not strongly dampen or amplify moves. Local order flow and macro tone will matter more. ";
+      }
+
+      if (vanna === "strongPositive") {
+        summary += "Vanna is strongly positive, which means any drift lower in implied volatility can create a steady bid in UNH as dealers buy back stock. ";
+      } else if (vanna === "weakPositive") {
+        summary += "Vanna is mildly supportive; a grind lower in implied volatility can lean bullish but will not dominate the tape. ";
+      } else if (vanna === "negative") {
+        summary += "Vanna is negative, so rising implied volatility would likely force dealers to sell into weakness and lean bearish. ";
+      }
+
+      if (charm === "strong") {
+        summary += "Charm is strong (likely close to expiry), so morning flows may skew to dealers buying back short hedges, favouring upward drift early in the session. ";
+      } else if (charm === "weak") {
+        summary += "Charm is weak, so time-based hedging flows are less important today. ";
+      }
+
+      if (event === "earnings") {
+        summary += "Earnings risk is in play, so avoid leaning too heavily on any one flow input; large gaps can overwhelm gamma and vanna effects. ";
+      } else if (event === "macro") {
+        summary += "Macro event risk (FOMC/CPI/etc.) is present, so index-level flows can override single-name structure. Size down and be selective. ";
+      }
+
+      els.summaryText.textContent = summary;
+
+      // --- Strategy bullets ---
+      const strategies = [];
+      if (premiumLevel === "safe" && gex === "positive" && event === "none") {
+        strategies.push("Consider UNH iron condors centered between major strikes, with wings beyond the main gamma walls.");
+        strategies.push("Short call or put spreads (defined risk) can work well while gamma is dampening intraday moves.");
+      } else if (premiumLevel === "caution") {
+        strategies.push("If you sell premium, push strikes further OTM and keep size smaller than usual.");
+        strategies.push("Vertical spreads are safer than full iron condors when regime is only moderately supportive.");
+      } else {
+        strategies.push("Avoid new premium-selling structures; focus on risk reduction or opportunistic long volatility if you have a strong directional view.");
+        strategies.push("If already in positions, plan exits or hedges around key levels rather than adding risk.");
+      }
+
+      if (dirScore >= 2) {
+        strategies.push("Bullish bias: favour bull put spreads or rolling short calls higher rather than adding downside risk.");
+      } else if (dirScore <= -2) {
+        strategies.push("Bearish bias: consider tight bear call spreads or protective puts rather than aggressive naked short calls.");
+      } else {
+        strategies.push("Directional edge is limited: treat UNH as a mean-reversion / range name intraday unless levels break decisively.");
+      }
+
+      if (event !== "none") {
+        strategies.push("Event in play: shorten time-to-expiry for any trades and avoid oversized overnight exposure.");
+      }
+
+      els.strategyList.innerHTML = "";
+      strategies.forEach((s) => {
+        const li = document.createElement("li");
+        li.textContent = s;
+        els.strategyList.appendChild(li);
+      });
+
+      updatePin();
+    }
+
+    [
+      els.gex,
+      els.vanna,
+      els.charm,
+      els.event,
+      els.ivrv,
+      els.sentiment
+    ].forEach((el) => el.addEventListener("change", updateDashboard));
+
+    [els.putWall, els.callWall].forEach((el) =>
+      el.addEventListener("input", updatePin)
+    );
+
+    // --- AUTO DATA FETCH (Yahoo options via CORS proxy) ---
+    async function fetchUNHOptions() {
+      try {
+        els.dataStatusPill.innerHTML = '<span class="dot"></span>Fetching…';
+        const base = "https://query1.finance.yahoo.com/v7/finance/options/UNH";
+        const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(base);
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+
+        const chain = data?.optionChain?.result?.[0];
+        if (!chain || !chain.options || !chain.options.length) {
+          throw new Error("No options data");
+        }
+
+        const quote = chain.quote || {};
+        const spot = quote.regularMarketPrice;
+        if (typeof spot === "number") {
+          els.spotLabel.textContent = spot.toFixed(2);
+        } else {
+          els.spotLabel.textContent = "–";
+        }
+
+        const opt = chain.options[0]; // nearest expiry
+        const expiryTs = opt.expirationDate;
+        if (expiryTs) {
+          const d = new Date(expiryTs * 1000);
+          els.expiryLabel.textContent = d.toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric"
+          });
+        } else {
+          els.expiryLabel.textContent = "–";
+        }
+
+        const calls = opt.calls || [];
+        const puts = opt.puts || [];
+
+        if (!calls.length && !puts.length) {
+          throw new Error("Empty calls/puts");
+        }
+
+        // Determine band around spot (~5% either side)
+        let bandLower, bandUpper;
+        if (typeof spot === "number") {
+          const band = spot * 0.05;
+          bandLower = spot - band;
+          bandUpper = spot + band;
+        }
+
+        let callSum = 0;
+        let putSum = 0;
+
+        let bestCall = null; // above spot
+        let bestPut = null;  // below spot
+
+        calls.forEach(c => {
+          const k = c.strike;
+          const oi = c.openInterest || 0;
+          if (typeof spot === "number" && k >= spot && oi > 0) {
+            if (!bestCall || oi > bestCall.oi) bestCall = { strike: k, oi };
+          }
+          if (typeof bandLower === "number" && typeof bandUpper === "number") {
+            if (k >= bandLower && k <= bandUpper) callSum += oi;
+          }
+        });
+
+        puts.forEach(p => {
+          const k = p.strike;
+          const oi = p.openInterest || 0;
+          if (typeof spot === "number" && k <= spot && oi > 0) {
+            if (!bestPut || oi > bestPut.oi) bestPut = { strike: k, oi };
+          }
+          if (typeof bandLower === "number" && typeof bandUpper === "number") {
+            if (k >= bandLower && k <= bandUpper) putSum += oi;
+          }
+        });
+
+        // Fill walls if found
+        if (bestPut) els.putWall.value = bestPut.strike.toFixed(1);
+        if (bestCall) els.callWall.value = bestCall.strike.toFixed(1);
+        updatePin();
+
+        // Classify GEX
+        let autoGex = "neutral";
+        let explanation = `Calls OI in ±5% band: ${callSum.toLocaleString()} · Puts OI in ±5% band: ${putSum.toLocaleString()}. `;
+
+        if (callSum > putSum * 1.3) {
+          autoGex = "positive";
+          explanation += "Call OI clearly dominates near spot → positive gamma (pinning bias).";
+        } else if (putSum > callSum * 1.3) {
+          autoGex = "negative";
+          explanation += "Put OI clearly dominates near spot → negative gamma (fragile regime).";
+        } else {
+          explanation += "Call and put OI are similar near spot → no dominant gamma side (neutral).";
+        }
+
+        els.gex.value = autoGex;
+        els.gexDetailText.textContent = explanation;
+        els.gexAutoTag.textContent = "GEX: Auto (" + autoGex.toUpperCase() + ") · Editable";
+        els.dataStatusPill.innerHTML = '<span class="dot"></span>Live chain OK';
+
+        updateDashboard();
+      } catch (e) {
+        console.error(e);
+        els.dataStatusPill.innerHTML = '<span class="dot"></span>Error · Manual Only';
+        els.gexDetailText.textContent = "Could not load auto GEX (network / proxy / CORS). You can still set GEX manually using your own chain read.";
+        updateDashboard();
+      }
+    }
+
+    // Initial render + data fetch
+    updateDashboard();
+    fetchUNHOptions();
+  </script>
+</body>
+</html>

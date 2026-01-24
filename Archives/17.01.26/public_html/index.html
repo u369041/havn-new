@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<!-- HAVN HOME v6 — Ultra Thin Hero + Search + Premium Cards — LOCKED (Jan 2026) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>havn.ie — Ireland’s curated property marketplace</title>
+  <meta name="description" content="Curated listings with real detail — and a cleaner buying experience in Ireland." />
+
+  <meta property="og:title" content="havn.ie — Curated property listings in Ireland" />
+  <meta property="og:description" content="Search better. Browse smarter. Curated listings with real detail." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://havn.ie/" />
+  <meta property="og:image" content="https://havn.ie/og.png" />
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --text:#0b1220;
+      --muted:#5d6b85;
+      --line:rgba(15,23,42,0.10);
+      --shadow:0 16px 40px rgba(15,23,42,0.12);
+      --shadow2:0 8px 22px rgba(15,23,42,0.07);
+      --radius2:22px;
+      --accent:#2563eb;
+      --accent2:#0ea5e9;
+      --chip:#eef2ff;
+      --chipText:#273a9b;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(37,99,235,0.06), transparent 55%),
+        radial-gradient(900px 500px at 80% -10%, rgba(14,165,233,0.08), transparent 50%),
+        var(--bg);
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      letter-spacing:-0.01em;
+    }
+
+    .wrap{max-width:1200px;margin:0 auto;padding:24px 18px 80px;}
+
+    .nav{
+      display:flex;align-items:center;justify-content:space-between;gap:18px;
+      padding:14px 16px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,0.78);
+      backdrop-filter: blur(10px);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow2);
+      position: sticky; top:12px; z-index:50;
+    }
+    .brand{display:flex;align-items:center;gap:10px;min-width:160px;}
+    .logo{
+      width:34px;height:34px;border-radius:12px;
+      background: linear-gradient(135deg, rgba(37,99,235,0.95), rgba(14,165,233,0.95));
+      box-shadow: 0 12px 28px rgba(37,99,235,0.18);
+      position:relative;
+      flex:0 0 auto;
+    }
+    .logo:before{
+      content:""; position:absolute; inset:9px 10px 10px 10px;
+      border:2px solid rgba(255,255,255,0.92);
+      border-bottom-left-radius:7px;border-bottom-right-radius:7px;
+      border-top-left-radius:3px;border-top-right-radius:3px;
+      transform: skewY(-2deg);
+    }
+    .brand .name{font-weight:900;font-size:18px;line-height:1}
+    .brand .tag{font-size:12px;color:var(--muted);margin-top:2px}
+
+    .navlinks{display:flex;gap:16px;align-items:center;flex:1;justify-content:center;}
+    .navlinks a{
+      text-decoration:none;color:var(--muted);
+      font-weight:750;font-size:14px;padding:8px 10px;border-radius:12px;
+      transition: all .15s ease;
+    }
+    .navlinks a:hover{color:var(--text);background:rgba(15,23,42,0.05)}
+
+    .navactions{display:flex;gap:10px;align-items:center;}
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;color:var(--text);
+      border-radius:14px;padding:10px 12px;
+      font-weight:800;font-size:14px;cursor:pointer;
+      transition:all .15s ease;
+      box-shadow: 0 1px 0 rgba(15,23,42,0.04);
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      white-space:nowrap;
+    }
+    .btn:hover{transform:translateY(-1px); box-shadow:var(--shadow2);}
+    .btn.primary{
+      background:linear-gradient(135deg, rgba(11,18,32,0.96), rgba(17,24,39,0.96));
+      color:#fff;border-color:rgba(255,255,255,0.12);
+      box-shadow: 0 10px 25px rgba(11,18,32,0.20);
+    }
+
+    /* ✅ Option A: Micro email verification pill (page-local, no nav changes) */
+    .hvnEmailPillRow{
+      margin-top:10px;
+      display:flex;
+      justify-content:center;
+    }
+    .hvnEmailPill{
+      width:100%;
+      max-width:980px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.76);
+      backdrop-filter: blur(10px);
+      border-radius: 999px;
+      box-shadow: var(--shadow2);
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .hvnEmailLeft{display:flex;align-items:center;gap:10px;min-width:240px;flex:1;}
+    .hvnDot{
+      width:10px;height:10px;border-radius:50%;
+      background:rgba(15,23,42,0.20);
+      box-shadow:0 0 0 4px rgba(15,23,42,0.06);
+      flex:0 0 auto;
+    }
+    .hvnDot.ok{background:#22c55e; box-shadow:0 0 0 4px rgba(34,197,94,0.16);}
+    .hvnDot.warn{background:#f59e0b; box-shadow:0 0 0 4px rgba(245,158,11,0.18);}
+    .hvnEmailTxt{
+      font-size:12px;
+      font-weight:950;
+      color:rgba(11,18,32,0.86);
+      line-height:1.2;
+    }
+    .hvnEmailSub{
+      font-size:12px;
+      font-weight:800;
+      color:rgba(11,18,32,0.58);
+      margin-left:8px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:58ch;
+    }
+    .hvnEmailActions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+    .hvnMiniBtn{
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:999px;
+      padding:8px 11px;
+      font-weight:950;
+      font-size:12px;
+      cursor:pointer;
+      box-shadow: 0 1px 0 rgba(15,23,42,0.04);
+      transition:all .15s ease;
+      white-space:nowrap;
+    }
+    .hvnMiniBtn:hover{transform:translateY(-1px); box-shadow:var(--shadow2);}
+    .hvnMiniBtn.blue{background:#2563eb;color:#fff;border-color:#2563eb;}
+    .hvnMiniBtn[disabled]{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none;}
+    .hvnMiniLink{
+      color:#1d4ed8;
+      font-weight:950;
+      font-size:12px;
+      text-decoration:none;
+      white-space:nowrap;
+    }
+    .hvnMiniLink:hover{text-decoration:underline;}
+    .hvnMiniMsg{
+      font-size:12px;
+      font-weight:900;
+      color:rgba(11,18,32,0.70);
+      white-space:nowrap;
+    }
+
+    .heroRow{margin-top:10px;display:flex;justify-content:center;}
+    .heroCard{
+      width:100%;
+      max-width:980px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(255,255,255,0.74);
+      backdrop-filter: blur(10px);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow2);
+      padding:8px 14px 6px;
+      position:relative;
+      overflow:hidden;
+    }
+    .heroCard:after{
+      content:"";
+      position:absolute;
+      right:-240px; top:-320px;
+      width:720px;height:720px;
+      background: radial-gradient(circle at 35% 35%, rgba(37,99,235,0.08), transparent 62%);
+      pointer-events:none;
+    }
+
+    .heroLine{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .heroTitle{
+      font-size:20px;
+      font-weight:950;
+      letter-spacing:-0.03em;
+      margin:0;
+      line-height:1.05;
+      white-space:nowrap;
+    }
+    .heroSub{
+      font-size:12px;
+      color:var(--muted);
+      margin:0;
+      line-height:1.25;
+      max-width:70ch;
+      flex:1;
+      min-width:280px;
+    }
+
+    .trust{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:6px;
+    }
+    .trustPill{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:6px 8px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.82);
+      border-radius:999px;
+      font-size:12px;
+      font-weight:900;
+      color:var(--text);
+      white-space:nowrap;
+    }
+    .trustIcon{
+      width:18px;height:18px;
+      border-radius:7px;
+      background:rgba(37,99,235,0.10);
+      border:1px solid rgba(37,99,235,0.14);
+      display:flex;align-items:center;justify-content:center;
+      font-weight:950;color:#1d4ed8;font-size:10px;
+      flex:0 0 auto;
+    }
+
+    .searchShell{margin-top:10px;display:flex;justify-content:center;}
+    .searchCard{
+      width:100%;
+      max-width:980px;
+      border:1px solid rgba(37,99,235,0.18);
+      background:rgba(255,255,255,0.96);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow);
+      padding:18px;
+      position:relative;
+      overflow:hidden;
+    }
+    .searchCard:before{
+      content:"";
+      position:absolute;
+      left:-160px; bottom:-220px;
+      width:460px;height:460px;
+      background: radial-gradient(circle at 60% 40%, rgba(14,165,233,0.18), transparent 62%);
+      pointer-events:none;
+    }
+
+    .tabs{
+      display:inline-flex;
+      padding:6px;
+      border-radius:18px;
+      background:rgba(15,23,42,0.04);
+      border:1px solid rgba(15,23,42,0.06);
+      gap:6px;
+    }
+    .tab{
+      border:0;background:transparent;
+      padding:10px 14px;border-radius:14px;
+      font-weight:950;color:var(--muted);
+      cursor:pointer;font-size:13px;
+      transition: all .15s ease;
+    }
+    .tab.active{
+      background:#fff;color:var(--text);
+      box-shadow: 0 1px 0 rgba(15,23,42,0.06);
+      border:1px solid rgba(15,23,42,0.08);
+    }
+
+    .searchGrid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: 1.6fr 1fr 1fr 0.9fr;
+      gap:12px;
+      align-items:end;
+    }
+    .searchGrid2{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr 0.9fr;
+      gap:12px;
+      align-items:end;
+    }
+
+    .field label{
+      display:block;
+      font-size:12px;
+      color:var(--muted);
+      margin:0 0 6px;
+      font-weight:850;
+    }
+    .input, .select{
+      width:100%;
+      border:1px solid rgba(15,23,42,0.10);
+      border-radius:16px;
+      padding:14px 14px;
+      outline:none;
+      font-size:14px;
+      background:#fff;
+      transition: all .15s ease;
+    }
+    .input:focus, .select:focus{
+      border-color: rgba(37,99,235,0.35);
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+    }
+    .searchBtn{
+      width:100%;
+      border:0;border-radius:18px;
+      padding:15px 16px;
+      font-weight:950;cursor:pointer;font-size:14px;color:#fff;
+      background: linear-gradient(135deg, rgba(37,99,235,0.98), rgba(14,165,233,0.98));
+      box-shadow: 0 12px 30px rgba(37,99,235,0.22);
+      transition: all .15s ease;
+    }
+    .searchBtn:hover{transform:translateY(-1px); box-shadow:0 14px 36px rgba(37,99,235,0.28);}
+
+    .sectionHead{
+      margin-top:22px;
+      display:flex;
+      align-items:end;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .sectionHead h2{
+      margin:0;
+      font-size:18px;
+      letter-spacing:-0.02em;
+      font-weight:950;
+    }
+    .sectionHead p{
+      margin:6px 0 0;
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap:14px;
+    }
+
+    .card{
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.92);
+      border-radius: var(--radius2);
+      box-shadow: var(--shadow2);
+      overflow:hidden;
+      transition: transform .15s ease, box-shadow .15s ease;
+      cursor:pointer;
+      text-decoration:none;
+      color:inherit;
+      display:block;
+    }
+    .card:hover{transform:translateY(-3px); box-shadow: var(--shadow);}
+
+    .thumb{height:150px; background:#e5e7eb; position:relative; overflow:hidden;}
+    .thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+
+    .corner{position:absolute; top:10px; left:10px; display:flex; gap:6px;}
+    .tagChip{
+      font-size:11px;
+      font-weight:950;
+      padding:6px 10px;
+      border-radius:999px;
+      background: rgba(11,18,32,0.80);
+      color:#fff;
+      border:1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(10px);
+    }
+    .tagChip.light{
+      background: rgba(255,255,255,0.78);
+      color: var(--text);
+      border-color: rgba(15,23,42,0.10);
+    }
+
+    .body{padding:12px 12px 14px; display:flex; flex-direction:column; gap:8px;}
+    .price{font-weight:950; font-size:16px; letter-spacing:-0.02em;}
+
+    .titleRow{display:flex; gap:10px; justify-content:space-between; align-items:flex-start;}
+    .title{
+      font-weight:950;
+      font-size:14px;
+      line-height:1.2;
+      max-height:2.4em;
+      overflow:hidden;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+    }
+    .eircode{
+      font-size:11px;
+      color:var(--muted);
+      border:1px solid rgba(15,23,42,0.10);
+      padding:4px 8px;
+      border-radius:999px;
+      white-space:nowrap;
+      margin-top:2px;
+      background:rgba(255,255,255,0.85);
+    }
+
+    .loc{font-size:12px; color:var(--muted); display:flex; align-items:center; gap:8px;}
+    .pin{width:8px;height:8px;border-radius:999px;background:rgba(14,165,233,0.9); box-shadow:0 0 0 4px rgba(14,165,233,0.10);}
+
+    .meta{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px;}
+    .chip{
+      padding:6px 9px;
+      border-radius:999px;
+      background: rgba(15,23,42,0.04);
+      border:1px solid rgba(15,23,42,0.08);
+      font-size:12px;
+      font-weight:900;
+      color: var(--muted);
+    }
+    .chip.type{background: var(--chip); border-color: rgba(39,58,155,0.12); color: var(--chipText);}
+
+    .mutedBox{
+      margin-top:12px;
+      border:1px dashed rgba(15,23,42,0.18);
+      background:rgba(255,255,255,0.6);
+      border-radius:16px;
+      padding:14px 14px;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.4;
+    }
+
+    .debug{
+      position:fixed;
+      left:10px;
+      bottom:10px;
+      z-index:9999;
+      font-size:12px;
+      color:rgba(11,18,32,0.85);
+      background:rgba(255,255,255,0.80);
+      border:1px solid rgba(15,23,42,0.12);
+      border-radius:12px;
+      padding:8px 10px;
+      box-shadow: var(--shadow2);
+      display:none;
+      max-width:min(520px, calc(100vw - 20px));
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .debug strong{color:rgba(11,18,32,0.95); font-weight:900;}
+    .debug a{color:rgba(37,99,235,0.95); text-decoration:none; font-weight:900;}
+    .debug a:hover{text-decoration:underline;}
+
+    @media (max-width: 980px){
+      .navlinks{display:none;}
+      .searchGrid,.searchGrid2{grid-template-columns:1fr 1fr;}
+      .grid{grid-template-columns: repeat(2, minmax(0,1fr));}
+      .heroSub{min-width:unset;}
+      .hvnEmailSub{display:none;}
+    }
+    @media (max-width: 620px){
+      .brand .tag{display:none;}
+      .searchGrid,.searchGrid2{grid-template-columns:1fr;}
+      .grid{grid-template-columns: 1fr;}
+      .heroLine{flex-direction:column; align-items:flex-start;}
+      .heroSub{display:none;}
+      .trustPill{width:100%; justify-content:flex-start;}
+      .hvnEmailPill{border-radius:22px;}
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="nav">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <div class="name">havn.ie</div>
+          <div class="tag">Ireland’s most curated property marketplace.</div>
+        </div>
+      </div>
+
+      <!-- ✅ WIRED: Buy/Rent/Share now route to browse with mode -->
+      <nav class="navlinks" aria-label="Primary">
+        <a href="/properties.html?mode=buy">Buy</a>
+        <a href="/properties.html?mode=rent">Rent</a>
+        <a href="/properties.html?mode=share">Share</a>
+        <a href="#" onclick="alert('Sell is coming soon');return false;">Sell</a>
+        <a href="#" onclick="alert('Agents is coming soon');return false;">Agents</a>
+      </nav>
+
+      <div class="navactions">
+        <a class="btn primary" href="properties.html">Browse listings</a>
+
+        <!-- ✅ Logged OUT -->
+        <a class="btn" data-auth="out" href="login.html">Login</a>
+        <a class="btn" data-auth="out" href="signup.html">Sign up</a>
+
+        <!-- ✅ Logged IN -->
+        <a class="btn" data-auth="in" href="my-listings.html">My listings</a>
+        <a class="btn" data-role="admin" href="admin.html">Admin</a>
+        <a class="btn" data-auth="in" href="#" id="logoutBtn">Logout</a>
+      </div>
+    </header>
+
+    <!-- ✅ Micro verification pill row (shows only when relevant) -->
+    <section class="hvnEmailPillRow" id="hvnEmailPillRow" style="display:none;">
+      <div class="hvnEmailPill" aria-live="polite">
+        <div class="hvnEmailLeft">
+          <span class="hvnDot" id="hvnEmailDot" aria-hidden="true"></span>
+          <div class="hvnEmailTxt" id="hvnEmailTxt">—</div>
+          <div class="hvnEmailSub" id="hvnEmailSub">—</div>
+        </div>
+        <div class="hvnEmailActions" id="hvnEmailActions">
+          <button class="hvnMiniBtn blue" id="hvnResendVerify" type="button">Resend email</button>
+          <button class="hvnMiniBtn" id="hvnRecheckVerify" type="button">I’ve verified</button>
+          <a class="hvnMiniLink" id="hvnVerifyLink" href="/verify-email.html">Enter token</a>
+          <span class="hvnMiniMsg" id="hvnVerifyMini"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="heroRow">
+      <div class="heroCard">
+        <div class="heroLine">
+          <p class="heroTitle">Search better. Browse smarter.</p>
+          <p class="heroSub">Curated listings with real detail — and a cleaner buying experience in Ireland.</p>
+        </div>
+        <div class="trust">
+          <div class="trustPill"><span class="trustIcon">✓</span> Curated, not cluttered</div>
+          <div class="trustPill"><span class="trustIcon">⚡</span> Fast & minimal</div>
+          <div class="trustPill"><span class="trustIcon">◎</span> Eircode-first</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="searchShell">
+      <div class="searchCard">
+        <div class="tabs" role="tablist" aria-label="Search modes">
+          <button class="tab active" type="button" data-tab="buy">Buy</button>
+          <button class="tab" type="button" data-tab="rent">Rent</button>
+          <button class="tab" type="button" data-tab="share">Share</button>
+        </div>
+
+        <form id="searchForm" autocomplete="off">
+          <div class="searchGrid">
+            <div class="field">
+              <label for="q">Location</label>
+              <input id="q" name="q" class="input" placeholder="Eircode, County, Town, Area…" />
+            </div>
+            <div class="field">
+              <label for="price">Price</label>
+              <select id="price" name="price" class="select">
+                <option value="">Any</option>
+                <option value="under-300k">Under €300k</option>
+                <option value="300-500k">€300k – €500k</option>
+                <option value="500-800k">€500k – €800k</option>
+                <option value="800k-plus">€800k+</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="beds">Beds</label>
+              <select id="beds" name="beds" class="select">
+                <option value="">Any</option>
+                <option value="1">1+</option>
+                <option value="2">2+</option>
+                <option value="3">3+</option>
+                <option value="4">4+</option>
+                <option value="5">5+</option>
+              </select>
+            </div>
+            <div class="field">
+              <button class="searchBtn" type="submit">Search</button>
+            </div>
+          </div>
+
+          <div class="searchGrid2">
+            <div class="field">
+              <label for="type">Property type</label>
+              <select id="type" name="type" class="select">
+                <option value="">Any</option>
+                <option value="HOUSE">House</option>
+                <option value="APARTMENT">Apartment</option>
+                <option value="SITE">Site</option>
+                <option value="COMMERCIAL">Commercial</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="baths">Baths</label>
+              <select id="baths" name="baths" class="select">
+                <option value="">Any</option>
+                <option value="1">1+</option>
+                <option value="2">2+</option>
+                <option value="3">3+</option>
+                <option value="4">4+</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="sort">Sort by</label>
+              <select id="sort" name="sort" class="select">
+                <option value="newest">Newest</option>
+                <option value="price-low">Price (low)</option>
+                <option value="price-high">Price (high)</option>
+                <option value="beds">Beds</option>
+              </select>
+            </div>
+            <div class="field">
+              <button class="btn" type="button" id="advancedBtn" style="width:100%; padding:14px 14px; border-radius:18px;">
+                Advanced filters
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <div class="sectionHead">
+      <div>
+        <h2>Latest Listings</h2>
+        <p>Premium compact cards — published listings only.</p>
+      </div>
+      <a class="btn" href="properties.html">View all</a>
+    </div>
+
+    <section class="grid" id="grid"></section>
+    <div class="mutedBox" id="emptyState" style="display:none;"></div>
+    <div class="debug" id="dbg"></div>
+  </div>
+
+  <script>
+    (function(){
+      const API_BASE = "https://api.havn.ie";
+
+      const $ = (id) => document.getElementById(id);
+
+      // ---------- Auth UI (minimal, safe) ----------
+      function show(sel, on){
+        document.querySelectorAll(sel).forEach(el => {
+          el.style.display = on ? "" : "none";
+        });
+      }
+      async function fetchMe(token){
+        try{
+          const res = await fetch(API_BASE + "/api/auth/me", {
+            method:"GET",
+            headers:{ "Authorization":"Bearer " + token, "Accept":"application/json" }
+          });
+          if(!res.ok) return null;
+          const data = await res.json().catch(()=>null);
+          return (data && data.user) ? data.user : data;
+        }catch{ return null; }
+      }
+
+      async function bootAuth(){
+        const token = localStorage.getItem("token");
+        if(!token){
+          show('[data-auth="in"]', false);
+          show('[data-auth="out"]', true);
+          show('[data-role="admin"]', false);
+          return null;
+        }
+        const me = await fetchMe(token);
+        if(!me){
+          localStorage.removeItem("token");
+          show('[data-auth="in"]', false);
+          show('[data-auth="out"]', true);
+          show('[data-role="admin"]', false);
+          return null;
+        }
+        show('[data-auth="in"]', true);
+        show('[data-auth="out"]', false);
+        show('[data-role="admin"]', String(me.role||"").toLowerCase() === "admin");
+        return me;
+      }
+
+      const logoutBtn = $("logoutBtn");
+      if(logoutBtn){
+        logoutBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          try{ localStorage.removeItem("token"); }catch{}
+          location.href = "/index.html";
+        });
+      }
+
+      // ---------- Tabs -> Search mode ----------
+      let activeMode = "buy";
+      function setActiveMode(mode){
+        activeMode = (mode === "rent" || mode === "share") ? mode : "buy";
+        document.querySelectorAll(".tab").forEach(b => {
+          b.classList.toggle("active", b.getAttribute("data-tab") === activeMode);
+        });
+      }
+      document.querySelectorAll(".tab").forEach(b => {
+        b.addEventListener("click", () => setActiveMode(b.getAttribute("data-tab")));
+      });
+
+      // ---------- Search -> properties.html with params ----------
+      const form = $("searchForm");
+      if(form){
+        form.addEventListener("submit", (e) => {
+          e.preventDefault();
+          const q = ($("q")?.value || "").trim();
+          const type = ($("type")?.value || "").trim();
+          const beds = ($("beds")?.value || "").trim();
+          const baths = ($("baths")?.value || "").trim();
+          const price = ($("price")?.value || "").trim();
+          const sort = ($("sort")?.value || "newest").trim();
+
+          const u = new URL(location.origin + "/properties.html");
+          u.searchParams.set("mode", activeMode);
+          if(q) u.searchParams.set("q", q);
+          if(type) u.searchParams.set("type", type);
+          if(beds) u.searchParams.set("beds", beds);
+          if(baths) u.searchParams.set("baths", baths);
+          if(price) u.searchParams.set("price", price);
+          if(sort) u.searchParams.set("sort", sort);
+
+          location.href = u.pathname + u.search;
+        });
+      }
+
+      // ---------- Listings (Latest) ----------
+      function safeText(v){ return (v===null||v===undefined) ? "" : String(v); }
+      function getFirstDefined(...vals){
+        for (const v of vals){
+          if(v !== undefined && v !== null && String(v).trim() !== "") return v;
+        }
+        return "";
+      }
+      function getThumb(p){
+        const imgs = p.photos || p.images || p.pictures || [];
+        if(Array.isArray(imgs) && imgs.length){
+          const first = imgs[0];
+          if(typeof first === "string") return first;
+          if(first && typeof first === "object") return first.url || first.secure_url || "";
+        }
+        return "";
+      }
+      function euro(n){
+        const num = Number(n);
+        if(!Number.isFinite(num) || num<=0) return "";
+        return "€" + num.toLocaleString("en-IE");
+      }
+      function buildCard(p){
+        const slug = safeText(p.slug);
+        const href = "/property.html?slug=" + encodeURIComponent(slug);
+
+        const title = safeText(getFirstDefined(p.title, p.displayTitle, "Property"));
+        const eir = safeText(getFirstDefined(p.eircode, "")).trim();
+
+        const addr1 = getFirstDefined(p.address1, p.addressLine1);
+        const city  = getFirstDefined(p.city, p.town);
+        const county= getFirstDefined(p.county);
+        const loc = [addr1, city, county].filter(Boolean).join(", ");
+
+        const price = euro(p.price);
+        const beds = (p.bedrooms!==undefined && p.bedrooms!==null && p.bedrooms!=="") ? String(p.bedrooms) + " bed" : "";
+        const baths= (p.bathrooms!==undefined && p.bathrooms!==null && p.bathrooms!=="") ? String(p.bathrooms) + " bath" : "";
+        const type = safeText(getFirstDefined(p.propertyType, p.type, "")).toLowerCase();
+
+        const thumb = getThumb(p);
+
+        const a = document.createElement("a");
+        a.className = "card";
+        a.href = href;
+
+        const t = document.createElement("div");
+        t.className = "thumb";
+
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = title;
+        img.src = thumb || ("data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600">
+            <rect width="1200" height="600" fill="#e5e7eb"/>
+            <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#6b7280" font-size="44" font-family="Arial">No image</text>
+          </svg>`
+        ));
+
+        const corner = document.createElement("div");
+        corner.className = "corner";
+        const chip1 = document.createElement("div");
+        chip1.className = "tagChip";
+        chip1.textContent = "Published";
+        corner.appendChild(chip1);
+
+        t.appendChild(img);
+        t.appendChild(corner);
+
+        const b = document.createElement("div");
+        b.className = "body";
+
+        const pr = document.createElement("div");
+        pr.className = "price";
+        pr.textContent = price || "—";
+
+        const tr = document.createElement("div");
+        tr.className = "titleRow";
+
+        const tt = document.createElement("div");
+        tt.className = "title";
+        tt.textContent = title;
+
+        const ei = document.createElement("div");
+        ei.className = "eircode";
+        ei.textContent = eir || "—";
+
+        tr.appendChild(tt);
+        tr.appendChild(ei);
+
+        const locRow = document.createElement("div");
+        locRow.className = "loc";
+        const pin = document.createElement("span");
+        pin.className = "pin";
+        locRow.appendChild(pin);
+        const locTxt = document.createElement("span");
+        locTxt.textContent = loc || "—";
+        locRow.appendChild(locTxt);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+
+        function addChip(text, cls){
+          if(!text) return;
+          const c = document.createElement("span");
+          c.className = "chip" + (cls ? (" " + cls) : "");
+          c.textContent = text;
+          meta.appendChild(c);
+        }
+
+        addChip(price, "");
+        addChip(beds, "");
+        addChip(baths, "");
+        if(type) addChip(type, "type");
+
+        b.appendChild(pr);
+        b.appendChild(tr);
+        b.appendChild(locRow);
+        b.appendChild(meta);
+
+        a.appendChild(t);
+        a.appendChild(b);
+        return a;
+      }
+
+      function setEmpty(msg){
+        const grid = $("grid");
+        const empty = $("emptyState");
+        if(grid) grid.innerHTML = "";
+        if(empty){
+          empty.style.display = "block";
+          empty.textContent = msg || "No published listings yet.";
+        }
+      }
+
+      async function loadLatest(){
+        const grid = $("grid");
+        const empty = $("emptyState");
+        if(empty) empty.style.display = "none";
+        if(!grid) return;
+
+        try{
+          const res = await fetch(API_BASE + "/api/properties?limit=12&page=1", { headers:{ "Accept":"application/json" }});
+          const text = await res.text();
+          let json = null;
+          try{ json = JSON.parse(text); }catch{}
+
+          if(!res.ok){
+            setEmpty("Latest listings failed to load (API error).");
+            return;
+          }
+
+          const items = Array.isArray(json) ? json : (json && json.items ? json.items : []);
+          if(!items.length){
+            setEmpty("No published listings yet. Approve a listing in admin to publish.");
+            return;
+          }
+
+          grid.innerHTML = "";
+          items.slice(0, 12).forEach(p => {
+            try{ grid.appendChild(buildCard(p)); }catch{}
+          });
+
+        }catch(e){
+          setEmpty("Latest listings failed to load (network error).");
+        }
+      }
+
+      // ---------- Boot ----------
+      (async function init(){
+        await bootAuth();
+        loadLatest();
+      })();
+
+    })();
+  </script>
+</body>
+</html>

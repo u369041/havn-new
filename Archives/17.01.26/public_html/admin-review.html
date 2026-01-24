@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin Review – HAVN.ie</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fa;color:#0f172a;}
+    .wrap{max-width:1100px;margin:22px auto 90px;padding:0 16px;}
+    h1{margin:0 0 6px;font-size:22px;}
+    .sub{margin:0 0 14px;color:#64748b;font-size:13px;}
+    .status{margin:12px 0;border:1px solid rgba(15,23,42,.10);background:#fff;border-radius:14px;padding:10px 12px;font-size:13px;color:#334155;}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center;}
+    .btn{border:none;border-radius:999px;padding:10px 14px;font-weight:900;cursor:pointer;font-size:13px;}
+    .btnPrimary{background:#2563eb;color:#fff;}
+    .btnDanger{background:#fee2e2;color:#991b1b;border:1px solid rgba(220,38,38,.22);}
+    .btnGhost{background:#eef2ff;color:#1e40af;border:1px solid rgba(37,99,235,.20);}
+    .btn:disabled{opacity:.6;cursor:not-allowed;}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px;}
+    .card{background:#fff;border:1px solid rgba(15,23,42,.10);border-radius:16px;overflow:hidden;}
+    .cbody{padding:12px 14px;}
+    .title{font-weight:950;margin-bottom:4px;}
+    .meta{color:#64748b;font-size:13px;margin-top:2px;}
+    textarea{width:100%;min-height:70px;border-radius:12px;border:1px solid rgba(15,23,42,.15);padding:10px;font-family:inherit;}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Admin Review Queue</h1>
+    <div class="sub">Approve or reject pending listings.</div>
+
+    <div class="row">
+      <a class="btn btnGhost" href="my-listings.html" style="text-decoration:none;display:inline-flex;align-items:center;">← Back</a>
+      <button class="btn btnGhost" id="btnRefresh">Refresh</button>
+      <button class="btn btnDanger" id="btnLogout">Logout</button>
+    </div>
+
+    <div class="status" id="statusBox">Loading…</div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <script>
+    (() => {
+      const API = "https://api.havn.ie";
+      const TOKEN_KEY = "token"; // keep your existing storage key
+
+      const token = localStorage.getItem(TOKEN_KEY) || "";
+      const grid = document.getElementById("grid");
+      const statusBox = document.getElementById("statusBox");
+
+      if (!token) {
+        alert("Login required");
+        location.href = "login.html";
+        return;
+      }
+
+      document.getElementById("btnLogout").onclick = () => {
+        localStorage.removeItem(TOKEN_KEY);
+        location.href = "login.html";
+      };
+
+      document.getElementById("btnRefresh").onclick = () => load();
+
+      const setStatus = (s) => statusBox.textContent = s;
+
+      async function apiJson(url, opts={}) {
+        const res = await fetch(url, {
+          ...opts,
+          headers: {
+            ...(opts.headers || {}),
+            Authorization: "Bearer " + token,
+            "Content-Type": "application/json"
+          }
+        });
+        const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch { data = { raw: text }; }
+        return { res, data };
+      }
+
+      function escapeHtml(s){
+        return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+      }
+
+      function fmtDate(v){
+        if (!v) return "";
+        try { return new Date(v).toLocaleString(); } catch { return String(v); }
+      }
+
+      async function load() {
+        setStatus("Loading pending queue…");
+        const { res, data } = await apiJson(`${API}/api/properties/_admin/pending`);
+
+        if (!res.ok) {
+          const msg = data?.message || res.status;
+
+          if (res.status === 401) {
+            setStatus("Session expired. Please login again.");
+            alert("Session expired. Please login again.");
+            localStorage.removeItem(TOKEN_KEY);
+            location.href = "login.html";
+            return;
+          }
+
+          if (res.status === 403) {
+            setStatus("403 Forbidden — your account is not admin.");
+            alert("403 Forbidden — your account is not admin.");
+            location.href = "my-listings.html";
+            return;
+          }
+
+          setStatus("Failed: " + msg);
+          return;
+        }
+
+        const items = (data.items || []).filter(x => x.listingStatus === "PENDING");
+        setStatus(`Pending: ${items.length}`);
+        render(items);
+      }
+
+      function render(items) {
+        grid.innerHTML = "";
+        if (!items.length) {
+          grid.innerHTML = "<div class='card'><div class='cbody'>No pending listings ✅</div></div>";
+          return;
+        }
+
+        for (const p of items) {
+          const card = document.createElement("div");
+          card.className = "card";
+
+          card.innerHTML = `
+            <div class="cbody">
+              <div class="title">${escapeHtml(p.title)} <span class="meta">(${escapeHtml(p.slug)})</span></div>
+              <div class="meta">Owner: ${escapeHtml(p.user?.email || "unknown")}${p.user?.name ? " ("+escapeHtml(p.user.name)+")" : ""}</div>
+              <div class="meta">Submitted: ${escapeHtml(fmtDate(p.submittedAt))}</div>
+              <div class="meta">${escapeHtml([p.city, p.county].filter(Boolean).join(", "))} • €${Number(p.price||0).toLocaleString()}</div>
+              ${p.revisionOfId ? `<div class="meta"><strong>Revision of:</strong> #${escapeHtml(p.revisionOfId)}</div>` : ""}
+
+              <div style="margin-top:10px;">
+                <div class="meta" style="margin-bottom:6px;">Reject reason (optional):</div>
+                <textarea placeholder="e.g. Missing BER cert, add 6 photos minimum…" data-reason></textarea>
+              </div>
+
+              <div class="actions">
+                <button class="btn btnPrimary" data-approve>Approve & Publish</button>
+                <button class="btn btnDanger" data-reject>Reject to Draft</button>
+                <button class="btn btnGhost" data-view>View</button>
+              </div>
+            </div>
+          `;
+
+          const approveBtn = card.querySelector("[data-approve]");
+          const rejectBtn = card.querySelector("[data-reject]");
+          const viewBtn = card.querySelector("[data-view]");
+
+          viewBtn.onclick = () => {
+            location.href = "property.html?slug=" + encodeURIComponent(p.slug);
+          };
+
+          approveBtn.onclick = async () => {
+            if (!confirm(`Approve listing #${p.id}?`)) return;
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus("Approving…");
+
+            const { res, data } = await apiJson(`${API}/api/properties/${p.id}/approve`, { method: "POST" });
+            if (!res.ok) {
+              setStatus("Approve failed: " + (data?.message || res.status));
+              approveBtn.disabled = false;
+              rejectBtn.disabled = false;
+              return;
+            }
+            setStatus(`Approved ✅ (#${p.id})`);
+            load();
+          };
+
+          rejectBtn.onclick = async () => {
+            const reason = (card.querySelector("[data-reason]").value || "").trim() || "Needs changes";
+            if (!confirm(`Reject listing #${p.id} back to draft?`)) return;
+
+            approveBtn.disabled = true;
+            rejectBtn.disabled = true;
+            setStatus("Rejecting…");
+
+            const { res, data } = await apiJson(`${API}/api/properties/${p.id}/reject`, {
+              method: "POST",
+              body: JSON.stringify({ reason })
+            });
+            if (!res.ok) {
+              setStatus("Reject failed: " + (data?.message || res.status));
+              approveBtn.disabled = false;
+              rejectBtn.disabled = false;
+              return;
+            }
+            setStatus(`Rejected ✅ (#${p.id})`);
+            load();
+          };
+
+          grid.appendChild(card);
+        }
+      }
+
+      load();
+    })();
+  </script>
+</body>
+</html>

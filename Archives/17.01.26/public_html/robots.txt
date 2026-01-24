@@ -1,0 +1,15 @@
+# ===================================================================
+#  HAVN.ie robots.txt
+# ===================================================================
+
+User-agent: *
+Allow: /
+
+# Disallow sensitive directories
+Disallow: /admin/
+Disallow: /js/
+Disallow: /api/
+Disallow: /uploads/
+
+# Sitemap location (auto-generated live)
+Sitemap: https://havn.ie/sitemap.xml

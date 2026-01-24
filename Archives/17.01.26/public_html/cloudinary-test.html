@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="header.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cloudinary Smoke Test</title>
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; max-width: 720px; margin: 2rem auto; padding: 1rem; }
+    .box { border: 1px solid #ddd; padding: 1rem; border-radius: 12px; }
+    button { padding: .6rem 1rem; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
+    img { max-width: 100%; border-radius: 12px; margin-top: 1rem; }
+    pre { background:#f7f7f7; padding: .75rem; border-radius: 10px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div id="havn-header"></div>
+  <h1>Cloudinary Smoke Test</h1>
+  <div class="box">
+    <p>Choose an image (JPG/PNG), then click Upload.</p>
+    <input type="file" id="file" accept="image/*" />
+    <button id="uploadBtn">Upload</button>
+    <div id="status" style="margin-top:1rem;"></div>
+    <img id="preview" alt="" />
+    <pre id="out"></pre>
+  </div>
+
+  <script>
+    const API = "https://api.havn.ie/api";
+
+    // This version uses JSON so the browser sends a CORS preflight (OPTIONS)
+    async function getSignature() {
+      const r = await fetch(`${API}/uploads/cloudinary-signature`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      });
+      return r.json();
+    }
+
+    async function uploadToCloudinary(file, sig) {
+      const url = `https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`;
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("api_key", sig.apiKey);
+      fd.append("timestamp", sig.timestamp);
+      fd.append("signature", sig.signature);
+      fd.append("folder", sig.folder);
+      const res = await fetch(url, { method: "POST", body: fd });
+      return res.json();
+    }
+
+    document.getElementById("uploadBtn").addEventListener("click", async () => {
+      const file = document.getElementById("file").files[0];
+      const status = document.getElementById("status");
+      const out = document.getElementById("out");
+      const preview = document.getElementById("preview");
+      out.textContent = ""; preview.src = ""; status.textContent = "";
+
+      if (!file) { status.textContent = "Please choose an image first."; return; }
+
+      try {
+        status.textContent = "Requesting signature…";
+        const sig = await getSignature();
+        if (!sig.ok) throw new Error("Signature request failed.");
+
+        status.textContent = "Uploading to Cloudinary…";
+        const result = await uploadToCloudinary(file, sig);
+
+        if (result.secure_url) {
+          status.textContent = "✅ Upload complete";
+          preview.src = result.secure_url;
+        } else {
+          status.textContent = "❌ Upload failed (see details below)";
+        }
+        out.textContent = JSON.stringify(result, null, 2);
+      } catch (err) {
+        status.textContent = "❌ Error: " + err.message;
+      }
+    });
+  </script>
+<script src="header.js"></script>
+</body>
+</html>

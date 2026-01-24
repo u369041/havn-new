@@ -1,175 +1,112 @@
 ﻿import { Router } from "express";
-import prisma from "../prisma";
+import { prisma } from "../lib/prisma";
+import requireAuth from "../middleware/requireAuth";
+import { sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
 
-/**
- * Admin Properties router (release-safe)
- * Endpoints:
- *  - POST   /api/admin/properties/:id/approve      -> PUBLISHED
- *  - POST   /api/admin/properties/:id/reject       -> REJECTED
- *  - POST   /api/admin/properties/:id/moderate     -> SUBMITTED (Pending queue)
- *  - POST   /api/admin/properties/:id/close        -> CLOSED
- *  - PATCH  /api/admin/properties/:id              -> allowlist patch (safe)
- *
- * Key fixes:
- *  - Numeric id lookup to match Int id schemas
- *  - Async wrapper to prevent 502/500 from unhandled promise errors
- *  - Strict allowlist patch so Prisma won’t blow up on unknown fields
- */
-
-function wrap(fn: any) {
-  return (req: any, res: any, next: any) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
+function safeText(v: any) {
+  return v === null || v === undefined ? "" : String(v);
 }
 
-const ALLOWED_STATUSES = new Set([
-  "DRAFT",
-  "SUBMITTED",
-  "PUBLISHED",
-  "REJECTED",
-  "CLOSED",
-]);
-
-async function findPropertyByIdOrSlug(idOrSlug: string) {
-  // If numeric, try by Int id first
-  if (/^\d+$/.test(idOrSlug)) {
-    const intId = Number(idOrSlug);
-    const byId = await prisma.property.findUnique({
-      where: { id: intId as any },
-    });
-    if (byId) return byId;
-  }
-
-  // Then try slug
-  const bySlug = await prisma.property.findUnique({
-    where: { slug: idOrSlug as any },
-  });
-
-  return bySlug;
+function normOutcome(raw: any): "SOLD" | "RENTED" | "CANCELLED" | "OTHER" | "" {
+  const s = safeText(raw).trim().toUpperCase();
+  if (s === "SOLD" || s === "RENTED" || s === "CANCELLED" || s === "OTHER") return s;
+  return "";
 }
 
-async function requireProperty(req: any, res: any) {
-  const key = String(req.params.id || "");
-  const prop = await findPropertyByIdOrSlug(key);
-  if (!prop) {
-    res.status(404).json({ ok: false, error: "PROPERTY_NOT_FOUND" });
+async function getUserEmailById(userId: number): Promise<string | null> {
+  try {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    return u?.email || null;
+  } catch {
     return null;
   }
-  return prop;
 }
 
-/** Approve -> PUBLISHED */
-router.post(
-  "/:id/approve",
-  wrap(async (req: any, res: any) => {
-    const prop = await requireProperty(req, res);
-    if (!prop) return;
+/**
+ * GET /api/admin/properties
+ * Simple admin list (optional; your admin.html primarily hits /api/properties/_admin)
+ */
+router.get("/", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    const updated = await prisma.property.update({
-      where: { id: prop.id as any },
-      data: { listingStatus: "PUBLISHED" as any },
+    const items = await prisma.property.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: 100,
     });
 
-    res.json({ ok: true, action: "approve", property: updated });
-  })
-);
-
-/** Reject -> REJECTED */
-router.post(
-  "/:id/reject",
-  wrap(async (req: any, res: any) => {
-    const prop = await requireProperty(req, res);
-    if (!prop) return;
-
-    const updated = await prisma.property.update({
-      where: { id: prop.id as any },
-      data: { listingStatus: "REJECTED" as any },
-    });
-
-    res.json({ ok: true, action: "reject", property: updated });
-  })
-);
-
-/** Moderate -> SUBMITTED (Pending queue) */
-router.post(
-  "/:id/moderate",
-  wrap(async (req: any, res: any) => {
-    const prop = await requireProperty(req, res);
-    if (!prop) return;
-
-    const updated = await prisma.property.update({
-      where: { id: prop.id as any },
-      data: { listingStatus: "SUBMITTED" as any },
-    });
-
-    res.json({ ok: true, action: "moderate", property: updated });
-  })
-);
-
-/** Close listing -> CLOSED (dedicated endpoint, avoids PATCH ambiguity) */
-router.post(
-  "/:id/close",
-  wrap(async (req: any, res: any) => {
-    const prop = await requireProperty(req, res);
-    if (!prop) return;
-
-    const updated = await prisma.property.update({
-      where: { id: prop.id as any },
-      data: { listingStatus: "CLOSED" as any },
-    });
-
-    res.json({ ok: true, action: "close", property: updated });
-  })
-);
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("GET /api/admin/properties error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 /**
- * PATCH /api/admin/properties/:id
- * Safe allowlist patch: only update fields we explicitly allow.
- * This prevents Prisma from 500-ing on unknown fields.
+ * POST /api/admin/properties/:id/close
+ * Close = archive listing (DB uses ARCHIVED per schema)
+ * Body: { outcome?: "SOLD"|"RENTED"|"CANCELLED"|"OTHER" }
  */
-router.patch(
-  "/:id",
-  wrap(async (req: any, res: any) => {
-    const prop = await requireProperty(req, res);
-    if (!prop) return;
+router.post("/:id/close", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    const b = req.body || {};
-    const data: any = {};
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-    // Allowlist fields (expand later if needed)
-    if (typeof b.title === "string") data.title = b.title;
-    if (typeof b.description === "string") data.description = b.description;
-    if (typeof b.price === "number") data.price = b.price;
-    if (typeof b.address === "string") data.address = b.address;
-    if (typeof b.eircode === "string") data.eircode = b.eircode;
-    if (typeof b.mode === "string") data.mode = b.mode;
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
-    if (typeof b.listingStatus === "string") {
-      const s = b.listingStatus.toUpperCase();
-      if (!ALLOWED_STATUSES.has(s)) {
-        return res.status(400).json({
-          ok: false,
-          error: "INVALID_LISTING_STATUS",
-          allowed: Array.from(ALLOWED_STATUSES),
-        });
-      }
-      data.listingStatus = s;
+    // Only allow close from PUBLISHED (your call; this is safest)
+    if (existing.listingStatus !== "PUBLISHED") {
+      return res.status(409).json({
+        ok: false,
+        message: `Cannot close listing from status ${existing.listingStatus}`,
+      });
     }
 
-    // No-op
-    if (Object.keys(data).length === 0) {
-      return res.json({ ok: true, action: "patch", updated: false, property: prop });
-    }
+    const outcome = normOutcome(req.body?.outcome);
 
     const updated = await prisma.property.update({
-      where: { id: prop.id as any },
-      data,
+      where: { id },
+      data: {
+        listingStatus: "ARCHIVED",
+        archivedAt: new Date(),
+      },
     });
 
-    res.json({ ok: true, action: "patch", updated: true, property: updated });
-  })
-);
+    // Email customer (fire-and-forget; never breaks flow)
+    void (async () => {
+      try {
+        const to = await getUserEmailById(updated.userId);
+        if (!to) return;
+
+        // If you later add a dedicated "closeOutcome" column, we’ll store it too.
+        // For now we include it in the email (metrics can come later with schema change).
+        await sendUserListingEmail({
+          to,
+          event: "CLOSED", // keep your email templates consistent; you can map this server-side
+          listingTitle: updated.title || "Untitled listing",
+          slug: updated.slug,
+          listingId: updated.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+          // Optional extra info for template usage (safe if template ignores unknown fields)
+          outcome: outcome || undefined,
+        } as any);
+      } catch (e) {
+        console.warn("Close email failed (non-fatal):", e);
+      }
+    })();
+
+    return res.json({ ok: true, item: updated, outcome: outcome || null });
+  } catch (err: any) {
+    console.error("POST /api/admin/properties/:id/close error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
 
 export default router;

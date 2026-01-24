@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>havn.ie — Browse properties</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+  <header class="nav">
+    <div class="brand">
+      <div class="logo"></div>
+      <div>
+        <div class="name">havn.ie</div>
+        <div class="tag">Ireland’s most curated property marketplace.</div>
+      </div>
+    </div>
+
+    <nav class="navlinks">
+      <a href="properties.html?saleType=BUY">Buy</a>
+      <a href="properties.html?saleType=RENT">Rent</a>
+      <a href="properties.html?saleType=SHARE">Share</a>
+      <a href="#">Sell</a>
+      <a href="#">Agents</a>
+    </nav>
+
+    <div class="navactions">
+      <a class="btn primary" href="property-upload.html">List a property</a>
+    </div>
+  </header>
+
+  <main class="container page">
+    <div class="hero">
+      <h1>Browse properties</h1>
+      <p id="subText">Loading…</p>
+    </div>
+
+    <div class="row">
+      <span class="chip" id="modeChip"></span>
+      <span class="chip" id="countChip"></span>
+    </div>
+
+    <div id="grid" class="grid"></div>
+  </main>
+
+  <script src="/havn-auth.js"></script>
+  <script src="/properties.js"></script>
+</body>
+</html>

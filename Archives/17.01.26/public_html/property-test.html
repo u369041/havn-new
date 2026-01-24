@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="header.css">
+  <meta charset="UTF-8" />
+  <title>HAVN Property Test Form</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    label { display: block; margin-top: 1rem; }
+    input, textarea, select { width: 100%; padding: 0.5rem; }
+    button { margin-top: 1.5rem; padding: 0.75rem; font-size: 1rem; cursor: pointer; }
+    pre { background: #f0f0f0; padding: 1rem; margin-top: 2rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="havn-header"></div>
+  <h1>Create Property (HAVN API Test)</h1>
+  <form id="propertyForm">
+    <label>Title <input name="title" required value="Test Property" /></label>
+    <label>Price <input name="price" type="number" required value="250000" /></label>
+    <label>Description <textarea name="description">Demo listing created via test form.</textarea></label>
+    <label>Listing Type
+      <select name="listingType" required>
+        <option value="SALE">SALE</option>
+        <option value="RENT">RENT</option>
+      </select>
+    </label>
+    <label>Slug (must be unique) <input name="slug" required value="test-property-001" /></label>
+    <label>City <input name="city" value="Dublin" /></label>
+    <label>County <input name="county" value="Dublin" /></label>
+    <label>Bedrooms <input name="bedrooms" type="number" value="2" /></label>
+    <label>Bathrooms <input name="bathrooms" type="number" value="1" /></label>
+    <label>Image URL <input name="imageUrl" value="https://res.cloudinary.com/demo/image/upload/sample.jpg" /></label>
+    <button type="submit">Submit Property</button>
+  </form>
+
+  <pre id="output"></pre>
+
+  <script>
+    const form = document.getElementById("propertyForm");
+    const output = document.getElementById("output");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const data = {
+        title: form.title.value,
+        price: Number(form.price.value),
+        description: form.description.value,
+        listingType: form.listingType.value,
+        slug: form.slug.value,
+        city: form.city.value,
+        county: form.county.value,
+        bedrooms: Number(form.bedrooms.value) || null,
+        bathrooms: Number(form.bathrooms.value) || null,
+        images: [
+          {
+            url: form.imageUrl.value,
+            publicId: "manual-test",
+            format: "jpg"
+          }
+        ]
+      };
+
+      try {
+        const res = await fetch("https://api.havn.ie/api/properties", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+          mode: "cors"
+        });
+
+        const json = await res.json();
+        output.textContent = JSON.stringify(json, null, 2);
+        console.log("Response:", json);
+      } catch (err) {
+        output.textContent = "Error: " + err;
+        console.error(err);
+      }
+    });
+  </script>
+<script src="header.js"></script>
+</body>
+</html>

@@ -25,12 +25,11 @@ const ALLOWED = new Set([
   "https://havn-new.onrender.com",
 ]);
 
-// No TS types here — avoids CorsOptions namespace/type mismatch in your build
 const corsOptions = {
   origin(origin: any, cb: any) {
-    if (!origin) return cb(null, true); // server-to-server/no Origin
+    if (!origin) return cb(null, true);
     if (ALLOWED.has(origin)) return cb(null, true);
-    return cb(null, false); // deny without throwing
+    return cb(null, false);
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
@@ -38,7 +37,6 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// ✅ Key: respond to preflight for ALL routes
 app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
 
@@ -63,7 +61,6 @@ app.use((_req, res) => {
 app.use((err: any, req: any, res: any, _next: any) => {
   console.error("SERVER_ERROR:", err);
 
-  // Best-effort CORS header even on errors (prevents silent ERR_FAILED)
   const origin = req.headers?.origin;
   if (origin && ALLOWED.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
