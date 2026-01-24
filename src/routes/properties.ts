@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+﻿import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
 import requireVerifiedEmail from "../middleware/requireVerifiedEmail";
@@ -7,17 +7,18 @@ import { sendListingStatusEmail, sendUserListingEmail } from "../lib/mail";
 const router = Router();
 
 /**
- * DEPLOY PROBE — safe endpoint to confirm current running code
- * URL: /api/properties/_deploy_probe
+ * ✅ IMPORTANT:
+ * Your frontend is currently sending JSON payloads with Content-Type: text/plain;charset=UTF-8
+ * Express.json() will NOT parse that -> req.body becomes {} -> nothing saves.
+ *
+ * This router middleware accepts text/plain and then we safely JSON.parse it if needed.
  */
-router.get("/_deploy_probe", (req, res) => {
-  res.json({
-    ok: true,
-    service: "havn-new",
-    route: "/api/properties/_deploy_probe",
-    deployedAt: new Date().toISOString(),
-  });
-});
+router.use(
+  express.text({
+    type: ["text/plain", "text/*"],
+    limit: "5mb",
+  })
+);
 
 function isOwnerOrAdmin(user: any, ownerId: number) {
   if (!user) return false;
@@ -73,6 +74,31 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * ✅ SAFE payload normalizer:
+ * - If req.body is a string (from text/plain), attempt JSON.parse
+ * - If parsing fails, return {}
+ * - If req.body is already an object, return it
+ */
+function normalizePayload(body: any): any {
+  if (!body) return {};
+  if (typeof body === "string") {
+    const s = body.trim();
+    if (!s) return {};
+    // only attempt parse if it looks like JSON
+    if (s.startsWith("{") || s.startsWith("[")) {
+      try {
+        return JSON.parse(s);
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+  if (typeof body === "object") return body;
+  return {};
 }
 
 /**
@@ -292,7 +318,7 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
 router.post("/", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const payload = req.body || {};
+    const payload = normalizePayload(req.body);
 
     const title = String(payload.title || "Untitled listing").trim();
     const city = String(payload.city || "").trim();
@@ -389,7 +415,7 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
       return res.status(409).json({ ok: false, message: "Listing is archived." });
     }
 
-    const payload = req.body || {};
+    const payload = normalizePayload(req.body);
 
     // ✅ allow updating mode while in draft (BUY default if provided invalid)
     const nextMode =
