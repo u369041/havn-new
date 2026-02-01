@@ -9,7 +9,9 @@ function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
 
-function normOutcome(raw: any): "SOLD" | "RENTED" | "CANCELLED" | "OTHER" | "" {
+type CloseOutcome = "SOLD" | "RENTED" | "CANCELLED" | "OTHER";
+
+function normOutcome(raw: any): CloseOutcome | "" {
   const s = safeText(raw).trim().toUpperCase();
   if (s === "SOLD" || s === "RENTED" || s === "CANCELLED" || s === "OTHER") return s;
   return "";
@@ -26,16 +28,16 @@ async function getUserEmailById(userId: number): Promise<string | null> {
 
 /**
  * GET /api/admin/properties
- * Simple admin list (optional; your admin.html primarily hits /api/properties/_admin)
+ * (Optional; admin.html may use /api/properties/_admin)
  */
-router.get("/", requireAuth, async (req: any, res) => {
+router.get("/", requireAuth, async (req: any, res: any) => {
   try {
     const user = req.user;
     if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
 
     const items = await prisma.property.findMany({
       orderBy: { updatedAt: "desc" },
-      take: 100,
+      take: 200,
     });
 
     return res.json({ ok: true, items });
@@ -47,10 +49,14 @@ router.get("/", requireAuth, async (req: any, res) => {
 
 /**
  * POST /api/admin/properties/:id/close
- * Close = archive listing (DB uses ARCHIVED per schema)
+ * DB enum: listingStatus = CLOSED
  * Body: { outcome?: "SOLD"|"RENTED"|"CANCELLED"|"OTHER" }
+ *
+ * IMPORTANT:
+ * - DO NOT set archivedAt here (your Prisma client/types on Render are rejecting it)
+ * - Persist outcome in marketStatus (string) for metrics
  */
-router.post("/:id/close", requireAuth, async (req: any, res) => {
+router.post("/:id/close", requireAuth, async (req: any, res: any) => {
   try {
     const user = req.user;
     if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
@@ -61,7 +67,7 @@ router.post("/:id/close", requireAuth, async (req: any, res) => {
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
-    // Only allow close from PUBLISHED (your call; this is safest)
+    // safest rule: only close from PUBLISHED
     if (existing.listingStatus !== "PUBLISHED") {
       return res.status(409).json({
         ok: false,
@@ -70,32 +76,32 @@ router.post("/:id/close", requireAuth, async (req: any, res) => {
     }
 
     const outcome = normOutcome(req.body?.outcome);
+    // If blank, keep whatever marketStatus already is (or set nothing)
+    const nextMarketStatus = outcome || safeText(existing.marketStatus || "");
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        listingStatus: "ARCHIVED",
-        archivedAt: new Date(),
+        listingStatus: "CLOSED",
+        // store the close reason for metrics; harmless string field
+        marketStatus: nextMarketStatus || null,
       },
     });
 
-    // Email customer (fire-and-forget; never breaks flow)
+    // Email customer (non-fatal)
     void (async () => {
       try {
         const to = await getUserEmailById(updated.userId);
         if (!to) return;
 
-        // If you later add a dedicated "closeOutcome" column, we’ll store it too.
-        // For now we include it in the email (metrics can come later with schema change).
         await sendUserListingEmail({
           to,
-          event: "CLOSED", // keep your email templates consistent; you can map this server-side
+          event: "CLOSED",
           listingTitle: updated.title || "Untitled listing",
           slug: updated.slug,
           listingId: updated.id,
           myListingsUrl: "https://havn.ie/my-listings.html",
-          // Optional extra info for template usage (safe if template ignores unknown fields)
-          outcome: outcome || undefined,
+          closeOutcome: outcome || undefined,
         } as any);
       } catch (e) {
         console.warn("Close email failed (non-fatal):", e);
