@@ -13,16 +13,20 @@ function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+function safeText(v: any) {
+  return v === null || v === undefined ? "" : String(v);
+}
+
 /**
- * We store close reason in marketStatus for now:
+ * We store close outcome in `marketStatus` for now:
  * SOLD | RENTED | CANCELLED | OTHER
  * and state in listingStatus = CLOSED
  */
 type CloseOutcome = "SOLD" | "RENTED" | "CANCELLED" | "OTHER";
 
 function inferCloseOutcome(p: any): CloseOutcome {
-  const saleType = String(p?.saleType || "").toLowerCase();
-  const mode = String(p?.mode || "").toUpperCase();
+  const saleType = safeText(p?.saleType).toLowerCase();
+  const mode = safeText(p?.mode).toUpperCase();
 
   if (saleType.includes("rent") || saleType.includes("lease") || saleType.includes("share")) return "RENTED";
   if (mode === "RENT" || mode === "SHARE") return "RENTED";
@@ -31,8 +35,8 @@ function inferCloseOutcome(p: any): CloseOutcome {
 }
 
 function normalizeOutcome(raw: any, fallback: CloseOutcome): CloseOutcome {
-  const s = String(raw || "").trim().toUpperCase();
-  if (s === "SOLD" || s === "RENTED" || s === "CANCELLED" || s === "OTHER") return s;
+  const s = safeText(raw).trim().toUpperCase();
+  if (s === "SOLD" || s === "RENTED" || s === "CANCELLED" || s === "OTHER") return s as CloseOutcome;
   return fallback;
 }
 
@@ -66,19 +70,25 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
         rejectedAt: null,
         rejectedById: null,
         rejectedReason: null,
-        // NOTE: do NOT touch archivedAt here; keep change minimal
       },
       include: { user: true },
     });
 
-    void sendUserListingEmail({
-      to: updated.user.email,
-      event: "APPROVED_LIVE",
-      listingTitle: updated.title,
-      slug: updated.slug,
-      listingId: updated.id,
-      publicUrl: `https://havn.ie/property.html?slug=${updated.slug}`,
-    });
+    // Email (non-fatal)
+    void (async () => {
+      try {
+        await sendUserListingEmail({
+          to: updated.user.email,
+          event: "APPROVED_LIVE",
+          listingTitle: updated.title,
+          slug: updated.slug,
+          listingId: updated.id,
+          publicUrl: `https://havn.ie/property.html?slug=${updated.slug}`,
+        } as any);
+      } catch (e) {
+        console.warn("Approve email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
@@ -97,7 +107,7 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
 
-    const reason = String(req.body?.reason || "").trim();
+    const reason = safeText(req.body?.reason).trim();
 
     const existing = await prisma.property.findUnique({
       where: { id },
@@ -124,15 +134,22 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
       include: { user: true },
     });
 
-    void sendUserListingEmail({
-      to: updated.user.email,
-      event: "REJECTED",
-      listingTitle: updated.title,
-      slug: updated.slug,
-      listingId: updated.id,
-      reason: reason || updated.rejectedReason || "",
-      myListingsUrl: "https://havn.ie/my-listings.html",
-    });
+    // Email (non-fatal)
+    void (async () => {
+      try {
+        await sendUserListingEmail({
+          to: updated.user.email,
+          event: "REJECTED",
+          listingTitle: updated.title,
+          slug: updated.slug,
+          listingId: updated.id,
+          reason: reason || updated.rejectedReason || "",
+          myListingsUrl: "https://havn.ie/my-listings.html",
+        } as any);
+      } catch (e) {
+        console.warn("Reject email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
@@ -148,9 +165,8 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
  * PUBLISHED -> CLOSED
  * marketStatus stores outcome for metrics.
  *
- * IMPORTANT:
- * - We do NOT write archivedAt here (avoids Prisma type mismatch your build is showing).
- * - We do NOT reference ARCHIVED anywhere.
+ * ✅ We also set archivedAt as "closed timestamp" (column exists in schema)
+ * ✅ Supports SOLD / RENTED / CANCELLED / OTHER
  */
 router.post("/properties/:id/close", requireAuth, requireAdmin, async (req: any, res) => {
   try {
@@ -178,22 +194,28 @@ router.post("/properties/:id/close", requireAuth, requireAdmin, async (req: any,
       where: { id },
       data: {
         listingStatus: "CLOSED",
-        marketStatus: outcome,
+        archivedAt: new Date(),     // reuse existing timestamp column as "closedAt"
+        marketStatus: outcome,      // outcome marker
       },
       include: { user: true },
     });
 
-    // Your mail typings currently appear to only accept SOLD|RENTED.
-    // We keep runtime behavior correct and cast to avoid TS build failures.
-    void sendUserListingEmail({
-      to: updated.user.email,
-      event: "CLOSED",
-      listingTitle: updated.title,
-      slug: updated.slug,
-      listingId: updated.id,
-      closeOutcome: outcome as any,
-      myListingsUrl: "https://havn.ie/my-listings.html",
-    } as any);
+    // Email (non-fatal). Use a single generic key `outcome` so templates can ignore if unsupported.
+    void (async () => {
+      try {
+        await sendUserListingEmail({
+          to: updated.user.email,
+          event: "CLOSED",
+          listingTitle: updated.title,
+          slug: updated.slug,
+          listingId: updated.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+          outcome, // SOLD/RENTED/CANCELLED/OTHER
+        } as any);
+      } catch (e) {
+        console.warn("Close email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: updated, outcome });
   } catch (err: any) {
