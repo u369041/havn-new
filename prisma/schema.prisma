@@ -80,14 +80,7 @@ model Property {
 
   listingStatus  ListingStatus @default(DRAFT)
   publishedAt    DateTime?
-
-  // ✅ Keep DB column name archivedAt, but expose as "closedAt" in Prisma
-  closedAt       DateTime?     @map("archivedAt")
-
-  // ✅ Close metrics
-  closeOutcome   CloseOutcome?
-  closeOutcomeNote String?
-
+  archivedAt     DateTime?
   approvedAt     DateTime?
   approvedById   Int?
   rejectedAt     DateTime?
@@ -121,11 +114,5 @@ enum ListingStatus {
   PUBLISHED
   REJECTED
   CLOSED
-}
-
-enum CloseOutcome {
-  SOLD
-  RENTED
-  CANCELLED
-  OTHER
+  ARCHIVED
 }

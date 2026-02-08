@@ -1,11 +1,13 @@
-@'
 -- CreateTable
 CREATE TABLE "PasswordResetToken" (
   "id" SERIAL NOT NULL,
   "userId" INTEGER NOT NULL,
   "tokenHash" TEXT NOT NULL,
   "expiresAt" TIMESTAMP(3) NOT NULL,
+  "usedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "ip" TEXT,
+  "userAgent" TEXT,
 
   CONSTRAINT "PasswordResetToken_pkey" PRIMARY KEY ("id")
 );
@@ -24,4 +26,3 @@ ALTER TABLE "PasswordResetToken"
 ADD CONSTRAINT "PasswordResetToken_userId_fkey"
 FOREIGN KEY ("userId") REFERENCES "User"("id")
 ON DELETE CASCADE ON UPDATE CASCADE;
-'@ | Set-Content -Encoding UTF8 prisma\migrations\20260116_password_reset_tokens\migration.sql

@@ -102,6 +102,26 @@ function normalizePayload(body: any): any {
 }
 
 /**
+ * ✅ ListingStatus guard (prevents feeding random strings into Prisma)
+ */
+type ListingStatus = "DRAFT" | "SUBMITTED" | "PUBLISHED" | "REJECTED" | "CLOSED" | "ARCHIVED";
+
+function asListingStatus(raw: any): ListingStatus | null {
+  const s = safeText(raw).trim().toUpperCase();
+  if (
+    s === "DRAFT" ||
+    s === "SUBMITTED" ||
+    s === "PUBLISHED" ||
+    s === "REJECTED" ||
+    s === "CLOSED" ||
+    s === "ARCHIVED"
+  ) {
+    return s;
+  }
+  return null;
+}
+
+/**
  * GET /api/properties/mine
  * Returns all listings owned by user (admins see all)
  */
@@ -166,7 +186,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 
       if (idRaw) {
         const id = parseInt(String(idRaw), 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+        if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id see schema" });
         item = await prisma.property.findUnique({ where: { id } });
       } else if (slugRaw) {
         const slug = String(slugRaw);
@@ -191,8 +211,21 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     const modeRaw = String(req.query.mode || "").trim();
     const mode = modeRaw ? clampMode(modeRaw) : "";
 
-    const statusRaw = String(req.query.listingStatus || "").trim().toUpperCase();
-    const status = statusRaw === "PENDING" ? "SUBMITTED" : statusRaw;
+    /**
+     * ✅ Status filter mapping
+     * UI/legacy callers might send:
+     * - PENDING  -> DB SUBMITTED
+     * - CLOSED   -> DB CLOSED
+     * - ARCHIVED -> treat as CLOSED for backwards compat (your UI label is "Closed")
+     */
+    const statusRaw = safeText(req.query.listingStatus).trim().toUpperCase();
+    let mappedStatus: ListingStatus | null = null;
+
+    if (statusRaw) {
+      if (statusRaw === "PENDING") mappedStatus = "SUBMITTED";
+      else if (statusRaw === "ARCHIVED") mappedStatus = "CLOSED"; // legacy/back-compat
+      else mappedStatus = asListingStatus(statusRaw);
+    }
 
     if (q) {
       where.OR = [
@@ -209,7 +242,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     if (county) where.county = { contains: county, mode: "insensitive" };
     if (city) where.city = { contains: city, mode: "insensitive" };
     if (type) where.propertyType = type;
-    if (status) where.listingStatus = status;
+    if (mappedStatus) where.listingStatus = mappedStatus;
     if (mode) where.mode = mode;
 
     const [total, items] = await Promise.all([
@@ -411,6 +444,10 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     if (existing.listingStatus === "SUBMITTED") {
       return res.status(409).json({ ok: false, message: "Listing is submitted and locked." });
     }
+    if (existing.listingStatus === "CLOSED") {
+      return res.status(409).json({ ok: false, message: "Listing is closed." });
+    }
+    // keep this guard for safety (even if you don't use ARCHIVED operationally)
     if (existing.listingStatus === "ARCHIVED") {
       return res.status(409).json({ ok: false, message: "Listing is archived." });
     }
