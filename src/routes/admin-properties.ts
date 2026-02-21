@@ -48,6 +48,50 @@ router.get("/", requireAuth, async (req: any, res: any) => {
 });
 
 /**
+ * POST /api/admin/properties/:id/reopen
+ * Admin-only: CLOSED -> PUBLISHED
+ * Resets:
+ *   archivedAt = null
+ *   marketStatus = null
+ * Ensures:
+ *   publishedAt exists (keeps existing if present, otherwise sets now)
+ */
+router.post("/:id/reopen", requireAuth, async (req: any, res: any) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (existing.listingStatus !== "CLOSED") {
+      return res.status(409).json({
+        ok: false,
+        message: `Cannot reopen listing from status ${existing.listingStatus}`,
+      });
+    }
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        listingStatus: "PUBLISHED",
+        publishedAt: existing.publishedAt || new Date(),
+        archivedAt: null,
+        marketStatus: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("POST /api/admin/properties/:id/reopen error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
  * POST /api/admin/properties/:id/close
  * Canonical close:
  *   listingStatus = "CLOSED"
@@ -84,7 +128,7 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
       });
     }
 
-    // ✅ Force archivedAt on close (we can reintroduce idempotency later once stable)
+    // ✅ Force archivedAt on close (correctness first)
     const updated = await prisma.property.update({
       where: { id },
       data: {
