@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+﻿﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 import { sendUserListingEmail } from "../lib/mail";
@@ -49,12 +49,13 @@ router.get("/", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/close
- * DB enum: listingStatus = CLOSED
- * Body: { outcome?: "SOLD"|"RENTED"|"CANCELLED"|"OTHER" }
+ * Canonical close:
+ *   listingStatus = "CLOSED"
+ *   archivedAt    = new Date()
+ *   marketStatus  = outcome ("SOLD"|"RENTED"|"CANCELLED"|"OTHER")
  *
  * IMPORTANT:
- * - DO NOT set archivedAt here (your Prisma client/types on Render are rejecting it)
- * - Persist outcome in marketStatus (string) for metrics
+ * - Do NOT reference closedAt / closeOutcome / closeOutcomeNote (do not exist)
  */
 router.post("/:id/close", requireAuth, async (req: any, res: any) => {
   try {
@@ -62,7 +63,7 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
     if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
 
     const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, message: "Invalid id" });
 
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
@@ -76,15 +77,20 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
     }
 
     const outcome = normOutcome(req.body?.outcome);
-    // If blank, keep whatever marketStatus already is (or set nothing)
-    const nextMarketStatus = outcome || safeText(existing.marketStatus || "");
+    if (!outcome) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid outcome. Allowed: SOLD, RENTED, CANCELLED, OTHER",
+      });
+    }
 
+    // ✅ Force archivedAt on close (we can reintroduce idempotency later once stable)
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "CLOSED",
-        // store the close reason for metrics; harmless string field
-        marketStatus: nextMarketStatus || null,
+        archivedAt: new Date(),
+        marketStatus: outcome,
       },
     });
 
@@ -101,14 +107,14 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
           slug: updated.slug,
           listingId: updated.id,
           myListingsUrl: "https://havn.ie/my-listings.html",
-          closeOutcome: outcome || undefined,
+          closeOutcome: outcome,
         } as any);
       } catch (e) {
         console.warn("Close email failed (non-fatal):", e);
       }
     })();
 
-    return res.json({ ok: true, item: updated, outcome: outcome || null });
+    return res.json({ ok: true, item: updated, outcome });
   } catch (err: any) {
     console.error("POST /api/admin/properties/:id/close error", err);
     return res.status(500).json({ ok: false, message: "Server error" });

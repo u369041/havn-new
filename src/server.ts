@@ -33,7 +33,8 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  // ✅ include x-admin-key for legacy/admin tools (harmless if unused)
+  allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
   optionsSuccessStatus: 204,
 };
 
