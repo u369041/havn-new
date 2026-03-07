@@ -87,7 +87,6 @@ function normalizePayload(body: any): any {
   if (typeof body === "string") {
     const s = body.trim();
     if (!s) return {};
-    // only attempt parse if it looks like JSON
     if (s.startsWith("{") || s.startsWith("[")) {
       try {
         return JSON.parse(s);
@@ -207,23 +206,15 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
 
-    // ✅ optional admin filter by mode
     const modeRaw = String(req.query.mode || "").trim();
     const mode = modeRaw ? clampMode(modeRaw) : "";
 
-    /**
-     * ✅ Status filter mapping
-     * UI/legacy callers might send:
-     * - PENDING  -> DB SUBMITTED
-     * - CLOSED   -> DB CLOSED
-     * - ARCHIVED -> treat as CLOSED for backwards compat (your UI label is "Closed")
-     */
     const statusRaw = safeText(req.query.listingStatus).trim().toUpperCase();
     let mappedStatus: ListingStatus | null = null;
 
     if (statusRaw) {
       if (statusRaw === "PENDING") mappedStatus = "SUBMITTED";
-      else if (statusRaw === "ARCHIVED") mappedStatus = "CLOSED"; // legacy/back-compat
+      else if (statusRaw === "ARCHIVED") mappedStatus = "CLOSED";
       else mappedStatus = asListingStatus(statusRaw);
     }
 
@@ -263,6 +254,83 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * ✅ NEW: POST /api/properties/:id/contact
+ * Public lead capture for published listings.
+ *
+ * This version:
+ * - validates input
+ * - only allows contact on published listings
+ * - looks up owner email
+ * - logs clean lead payload server-side for immediate operational use
+ *
+ * Next step (after you share lib/mail.ts):
+ * - email seller directly
+ * - optionally store lead in DB
+ */
+router.post("/:id/contact", async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const payload = normalizePayload(req.body);
+
+    const name = safeText(payload.name).trim();
+    const email = safeText(payload.email).trim().toLowerCase();
+    const phone = safeText(payload.phone).trim();
+    const message = safeText(payload.message).trim();
+    const intent = safeText(payload.intent).trim() || "GENERAL";
+    const sourceUrl = safeText(payload.sourceUrl).trim();
+
+    if (!name || name.length < 2) {
+      return res.status(400).json({ ok: false, message: "Please enter your name." });
+    }
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailOk) {
+      return res.status(400).json({ ok: false, message: "Please enter a valid email address." });
+    }
+
+    if (!message || message.length < 8) {
+      return res.status(400).json({ ok: false, message: "Please enter a longer message." });
+    }
+
+    const property = await prisma.property.findUnique({ where: { id } });
+    if (!property || property.listingStatus !== "PUBLISHED") {
+      return res.status(404).json({ ok: false, message: "Property not found." });
+    }
+
+    const ownerEmail = await getUserEmailById(property.userId);
+
+    console.log("HAVN_LEAD_CAPTURE", {
+      propertyId: property.id,
+      propertySlug: property.slug,
+      propertyTitle: property.title,
+      ownerUserId: property.userId,
+      ownerEmail: ownerEmail || null,
+      lead: {
+        name,
+        email,
+        phone: phone || null,
+        message,
+        intent,
+        sourceUrl: sourceUrl || null,
+      },
+      receivedAt: new Date().toISOString(),
+    });
+
+    return res.json({
+      ok: true,
+      message: "Your message has been sent to HAVN.",
+    });
+  } catch (err: any) {
+    console.error("POST /api/properties/:id/contact error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
  * GET /api/properties
  * Public browse endpoint: returns PUBLISHED listings only.
  *
@@ -282,7 +350,6 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
 
-    // ✅ mode filter (optional, but powers Buy/Rent/Share)
     const modeRaw = String(req.query.mode || "").trim();
     if (modeRaw) {
       where.mode = clampMode(modeRaw);
@@ -366,7 +433,6 @@ router.post("/", requireAuth, async (req: any, res) => {
       if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
 
-    // ✅ mode (BUY default)
     const mode = clampMode(payload.mode || payload.marketMode || payload.listingMode);
 
     const created = await prisma.property.create({
@@ -391,13 +457,10 @@ router.post("/", requireAuth, async (req: any, res) => {
         photos: Array.isArray(payload.photos) ? payload.photos : [],
         listingStatus: "DRAFT",
         userId: user.userId,
-
-        // ✅ Option 1 field
         mode,
       },
     });
 
-    // ✅ CUSTOMER EMAIL: Draft created (fire-and-forget)
     void (async () => {
       try {
         const to =
@@ -451,14 +514,12 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     if (existing.listingStatus === "CLOSED") {
       return res.status(409).json({ ok: false, message: "Listing is closed." });
     }
-    // keep this guard for safety (even if you don't use ARCHIVED operationally)
     if (existing.listingStatus === "ARCHIVED") {
       return res.status(409).json({ ok: false, message: "Listing is archived." });
     }
 
     const payload = normalizePayload(req.body);
 
-    // ✅ allow updating mode while in draft (BUY default if provided invalid)
     const nextMode =
       payload.mode || payload.marketMode || payload.listingMode
         ? clampMode(payload.mode || payload.marketMode || payload.listingMode)
@@ -484,13 +545,10 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         description: payload.description ?? existing.description,
         features: Array.isArray(payload.features) ? payload.features : existing.features,
         photos: Array.isArray(payload.photos) ? payload.photos : existing.photos,
-
-        // ✅ Option 1 field
         mode: nextMode,
       },
     });
 
-    // ✅ CUSTOMER EMAIL: Draft saved (fire-and-forget)
     void (async () => {
       try {
         const to =
@@ -547,7 +605,6 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
       },
     });
 
-    // ✅ ADMIN EMAIL: Submitted listing
     void (async () => {
       try {
         await sendListingStatusEmail({
@@ -562,7 +619,6 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
       }
     })();
 
-    // ✅ CUSTOMER EMAIL: Submitted confirmation
     void (async () => {
       try {
         const to =
