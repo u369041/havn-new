@@ -12,25 +12,27 @@ const ADMIN_NOTIFY_EMAIL =
  * ----------------------------
  * ADMIN EMAIL (status-based)
  * ----------------------------
- * Used for: "New listing submitted" etc.
- * This MUST accept { status: ... } payloads because properties.ts already calls it that way.
+ * Accepts BOTH:
+ * - { status: "SUBMITTED" }
+ * - { event: "SUBMITTED" }
  */
 export type ListingStatusEmailPayload = {
-  status: string; // e.g. "SUBMITTED"
+  status?: string;
+  event?: string;
   listingTitle?: string;
   slug?: string;
   listingId?: string | number;
   adminUrl?: string;
-
-  // allow future fields without breaking TS
   [key: string]: any;
 };
 
 export async function sendListingStatusEmail(payload: ListingStatusEmailPayload) {
   try {
     const title = payload.listingTitle || "Untitled listing";
+    const statusLike = String(payload.status || payload.event || "").toUpperCase();
+
     const subject =
-      String(payload.status || "").toUpperCase() === "SUBMITTED"
+      statusLike === "SUBMITTED"
         ? `New listing submitted: ${title}`
         : `Listing update: ${title}`;
 
@@ -59,7 +61,6 @@ export async function sendListingStatusEmail(payload: ListingStatusEmailPayload)
  * ----------------------------
  * USER EMAIL (event-based)
  * ----------------------------
- * Used for: DRAFT_CREATED, DRAFT_SAVED, APPROVED_LIVE, REJECTED, CLOSED, SUBMITTED (optional)
  */
 export type ListingEmailEvent =
   | "DRAFT_CREATED"
@@ -72,16 +73,13 @@ export type ListingEmailEvent =
 export type UserListingEmailPayload = {
   to: string;
   event: ListingEmailEvent;
-
   listingTitle?: string;
   slug?: string;
   listingId?: string | number;
-
   reason?: string;
   publicUrl?: string;
   myListingsUrl?: string;
   closeOutcome?: "SOLD" | "RENTED";
-
   [key: string]: any;
 };
 
@@ -178,7 +176,78 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
 
 /**
  * ----------------------------
- * WELCOME EMAIL (signup)
+ * PROPERTY LEAD EMAIL
+ * ----------------------------
+ * TO: listing owner
+ * BCC: admin@havn.ie
+ * Reply-To: buyer email
+ */
+export type PropertyLeadEmailPayload = {
+  to: string;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone?: string;
+  message: string;
+  intent?: "VIEWING" | "QUESTION" | string;
+  listingTitle?: string;
+  slug?: string;
+  listingId?: string | number;
+  propertyUrl?: string;
+};
+
+export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
+  try {
+    const listingTitle = payload.listingTitle || "your HAVN listing";
+    const intent = String(payload.intent || "QUESTION").toUpperCase();
+
+    const subject =
+      intent === "VIEWING"
+        ? `New viewing request for: ${listingTitle}`
+        : `New enquiry for: ${listingTitle}`;
+
+    const html = `
+      <h2>${escapeHtml(subject)}</h2>
+
+      <p><strong>Property:</strong> ${escapeHtml(listingTitle)}</p>
+      ${payload.slug ? `<p><strong>Slug:</strong> ${escapeHtml(String(payload.slug))}</p>` : ""}
+      ${payload.listingId ? `<p><strong>ID:</strong> ${escapeHtml(String(payload.listingId))}</p>` : ""}
+      ${payload.propertyUrl ? `<p><a href="${escapeAttr(payload.propertyUrl)}">View listing</a></p>` : ""}
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0" />
+
+      <p><strong>Name:</strong> ${escapeHtml(payload.buyerName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(payload.buyerEmail)}</p>
+      ${payload.buyerPhone ? `<p><strong>Phone:</strong> ${escapeHtml(payload.buyerPhone)}</p>` : ""}
+      <p><strong>Intent:</strong> ${escapeHtml(intent)}</p>
+
+      <div style="margin-top:16px">
+        <p><strong>Message:</strong></p>
+        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#fafafa;white-space:pre-wrap;line-height:1.55;color:#0f172a;">
+          ${escapeHtml(payload.message)}
+        </div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
+      <p style="color:#64748b;font-size:12px">Sent via HAVN.ie</p>
+    `;
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      bcc: ADMIN_NOTIFY_EMAIL,
+      replyTo: payload.buyerEmail,
+      subject,
+      html,
+    });
+  } catch (err) {
+    console.error("sendPropertyLeadEmail failed:", err);
+    return null;
+  }
+}
+
+/**
+ * ----------------------------
+ * WELCOME EMAIL
  * ----------------------------
  */
 export async function sendWelcomeEmail(args: { to: string; name?: string | null }) {
@@ -212,7 +281,6 @@ export async function sendWelcomeEmail(args: { to: string; name?: string | null 
  * ----------------------------
  * PASSWORD RESET EMAIL
  * ----------------------------
- * Used by POST /api/auth/forgot-password
  */
 export async function sendPasswordResetEmail(args: {
   to: string;
@@ -251,7 +319,6 @@ export async function sendPasswordResetEmail(args: {
  * ----------------------------
  * EMAIL VERIFICATION EMAIL
  * ----------------------------
- * Used by POST /api/auth/request-email-verify and also on signup (register)
  */
 export async function sendEmailVerificationEmail(args: {
   to: string;
@@ -286,9 +353,6 @@ export async function sendEmailVerificationEmail(args: {
   }
 }
 
-/**
- * Helpers
- */
 function escapeHtml(input: string) {
   return String(input || "")
     .replace(/&/g, "&amp;")
@@ -299,6 +363,5 @@ function escapeHtml(input: string) {
 }
 
 function escapeAttr(input: string) {
-  // for href attributes etc.
   return escapeHtml(String(input || ""));
 }

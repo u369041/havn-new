@@ -2,17 +2,14 @@
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
 import requireVerifiedEmail from "../middleware/requireVerifiedEmail";
-import { sendListingStatusEmail, sendUserListingEmail } from "../lib/mail";
+import {
+  sendListingStatusEmail,
+  sendUserListingEmail,
+  sendPropertyLeadEmail,
+} from "../lib/mail";
 
 const router = Router();
 
-/**
- * ✅ IMPORTANT:
- * Your frontend is currently sending JSON payloads with Content-Type: text/plain;charset=UTF-8
- * Express.json() will NOT parse that -> req.body becomes {} -> nothing saves.
- *
- * This router middleware accepts text/plain and then we safely JSON.parse it if needed.
- */
 router.use(
   express.text({
     type: ["text/plain", "text/*"],
@@ -30,11 +27,6 @@ function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
 
-/**
- * ✅ MARKET MODE normalizer
- * Accepts: BUY|RENT|SHARE (any casing), plus buy/rent/share
- * Defaults: BUY
- */
 function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
   const m = safeText(raw).trim().toUpperCase();
   if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
@@ -66,7 +58,6 @@ async function generateUniqueSlug(base: string) {
   }
 }
 
-// ✅ helper: always find the user's email (token may/may not contain it)
 async function getUserEmailById(userId: number): Promise<string | null> {
   try {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
@@ -76,12 +67,6 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   }
 }
 
-/**
- * ✅ SAFE payload normalizer:
- * - If req.body is a string (from text/plain), attempt JSON.parse
- * - If parsing fails, return {}
- * - If req.body is already an object, return it
- */
 function normalizePayload(body: any): any {
   if (!body) return {};
   if (typeof body === "string") {
@@ -100,9 +85,6 @@ function normalizePayload(body: any): any {
   return {};
 }
 
-/**
- * ✅ ListingStatus guard (prevents feeding random strings into Prisma)
- */
 type ListingStatus = "DRAFT" | "SUBMITTED" | "PUBLISHED" | "REJECTED" | "CLOSED" | "ARCHIVED";
 
 function asListingStatus(raw: any): ListingStatus | null {
@@ -120,10 +102,6 @@ function asListingStatus(raw: any): ListingStatus | null {
   return null;
 }
 
-/**
- * GET /api/properties/mine
- * Returns all listings owned by user (admins see all)
- */
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -135,9 +113,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
     const where =
       user.role === "admin"
         ? {}
-        : {
-            userId: user.userId,
-          };
+        : { userId: user.userId };
 
     const items = await prisma.property.findMany({
       where,
@@ -166,9 +142,6 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   }
 });
 
-/**
- * ✅ GET /api/properties/_admin
- */
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -205,7 +178,6 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     const county = String(req.query.county || "").trim();
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
-
     const modeRaw = String(req.query.mode || "").trim();
     const mode = modeRaw ? clampMode(modeRaw) : "";
 
@@ -253,20 +225,6 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
   }
 });
 
-/**
- * ✅ NEW: POST /api/properties/:id/contact
- * Public lead capture for published listings.
- *
- * This version:
- * - validates input
- * - only allows contact on published listings
- * - looks up owner email
- * - logs clean lead payload server-side for immediate operational use
- *
- * Next step (after you share lib/mail.ts):
- * - email seller directly
- * - optionally store lead in DB
- */
 router.post("/:id/contact", async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -302,13 +260,20 @@ router.post("/:id/contact", async (req: any, res) => {
     }
 
     const ownerEmail = await getUserEmailById(property.userId);
+    if (!ownerEmail) {
+      console.error("Property contact failed: owner email missing", {
+        propertyId: property.id,
+        ownerUserId: property.userId,
+      });
+      return res.status(500).json({ ok: false, message: "Could not deliver your message right now." });
+    }
 
     console.log("HAVN_LEAD_CAPTURE", {
       propertyId: property.id,
       propertySlug: property.slug,
       propertyTitle: property.title,
       ownerUserId: property.userId,
-      ownerEmail: ownerEmail || null,
+      ownerEmail,
       lead: {
         name,
         email,
@@ -320,9 +285,26 @@ router.post("/:id/contact", async (req: any, res) => {
       receivedAt: new Date().toISOString(),
     });
 
+    const sent = await sendPropertyLeadEmail({
+      to: ownerEmail,
+      buyerName: name,
+      buyerEmail: email,
+      buyerPhone: phone || undefined,
+      message,
+      intent,
+      listingTitle: property.title || "HAVN listing",
+      slug: property.slug,
+      listingId: property.id,
+      propertyUrl: sourceUrl || `https://havn.ie/property.html?slug=${encodeURIComponent(property.slug)}`,
+    });
+
+    if (!sent) {
+      return res.status(500).json({ ok: false, message: "Could not deliver your message right now." });
+    }
+
     return res.json({
       ok: true,
-      message: "Your message has been sent to HAVN.",
+      message: "Your message has been sent to the seller.",
     });
   } catch (err: any) {
     console.error("POST /api/properties/:id/contact error", err);
@@ -330,14 +312,6 @@ router.post("/:id/contact", async (req: any, res) => {
   }
 });
 
-/**
- * GET /api/properties
- * Public browse endpoint: returns PUBLISHED listings only.
- *
- * ✅ Option 1: mode-aware browsing
- * - /api/properties?mode=BUY|RENT|SHARE
- * - If mode is omitted: return ALL PUBLISHED (backwards compatible)
- */
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
     const where: any = { listingStatus: "PUBLISHED" };
@@ -385,11 +359,6 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
   }
 });
 
-/**
- * GET /api/properties/:slug
- * Public: published only.
- * Owners/admin: can view non-published.
- */
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
@@ -411,10 +380,6 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   }
 });
 
-/**
- * POST /api/properties
- * Create new draft listing (owner = logged in user)
- */
 router.post("/", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -490,10 +455,6 @@ router.post("/", requireAuth, async (req: any, res) => {
   }
 });
 
-/**
- * PATCH /api/properties/:id
- * Update draft listing (owner/admin)
- */
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -578,10 +539,6 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
   }
 });
 
-/**
- * POST /api/properties/:id/submit
- * Owner submits draft -> SUBMITTED (locked)
- */
 router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -608,12 +565,12 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
     void (async () => {
       try {
         await sendListingStatusEmail({
-          event: "SUBMITTED",
+          status: "SUBMITTED",
           listingTitle: updated.title || "Untitled listing",
           slug: updated.slug,
           listingId: updated.id,
           adminUrl: "https://havn.ie/admin.html",
-        } as any);
+        });
       } catch (e) {
         console.warn("Admin submitted email failed (non-fatal):", e);
       }
