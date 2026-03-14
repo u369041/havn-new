@@ -226,9 +226,9 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 });
 
 /**
- * ✅ CONTACT SELLER
+ * CONTACT SELLER
  * Public lead capture for published listings.
- * Saves enquiry in DB + sends email to seller + BCC to admin.
+ * Saves enquiry in DB if available, but does not block email delivery if DB write fails.
  */
 router.post("/:id/contact", async (req: any, res) => {
   try {
@@ -290,20 +290,26 @@ router.post("/:id/contact", async (req: any, res) => {
       receivedAt: new Date().toISOString(),
     });
 
-    /**
-     * ✅ NEW: store enquiry in database
-     */
-    await prisma.enquiry.create({
-      data: {
-        propertyId: property.id,
-        buyerName: name,
-        buyerEmail: email,
-        buyerPhone: phone || null,
-        message,
-        intent,
-        sourceUrl: sourceUrl || null,
-      },
-    });
+    // Try to save enquiry, but do not fail the lead if DB insert has drift issues.
+    try {
+      await prisma.enquiry.create({
+        data: {
+          propertyId: property.id,
+          buyerName: name,
+          buyerEmail: email,
+          buyerPhone: phone || null,
+          message,
+          intent,
+          sourceUrl: sourceUrl || null,
+        },
+      });
+    } catch (dbErr: any) {
+      console.warn("Enquiry DB save failed, continuing with email delivery:", {
+        message: dbErr?.message,
+        code: dbErr?.code,
+        meta: dbErr?.meta,
+      });
+    }
 
     const sent = await sendPropertyLeadEmail({
       to: ownerEmail,
