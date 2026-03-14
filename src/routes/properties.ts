@@ -226,6 +226,78 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * NEW: admin enquiries feed
+ * MUST appear before /:slug route
+ */
+router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 100);
+    const q = safeText(req.query.q).trim();
+
+    const where: any = {};
+
+    if (q) {
+      where.OR = [
+        { buyerName: { contains: q, mode: "insensitive" } },
+        { buyerEmail: { contains: q, mode: "insensitive" } },
+        { buyerPhone: { contains: q, mode: "insensitive" } },
+        { message: { contains: q, mode: "insensitive" } },
+        { intent: { contains: q, mode: "insensitive" } },
+        {
+          property: {
+            OR: [
+              { title: { contains: q, mode: "insensitive" } },
+              { slug: { contains: q, mode: "insensitive" } },
+              { address1: { contains: q, mode: "insensitive" } },
+              { city: { contains: q, mode: "insensitive" } },
+              { county: { contains: q, mode: "insensitive" } },
+              { eircode: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    const [total, items] = await Promise.all([
+      prisma.enquiry.count({ where }),
+      prisma.enquiry.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          property: {
+            select: {
+              id: true,
+              slug: true,
+              title: true,
+              address1: true,
+              city: true,
+              county: true,
+              eircode: true,
+              listingStatus: true,
+              userId: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return res.json({ ok: true, page, limit, total, items });
+  } catch (err: any) {
+    console.error("GET /api/properties/_admin/enquiries error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
  * CONTACT SELLER
  * Public lead capture for published listings.
  * Saves enquiry in DB if available, but does not block email delivery if DB write fails.
@@ -290,7 +362,6 @@ router.post("/:id/contact", async (req: any, res) => {
       receivedAt: new Date().toISOString(),
     });
 
-    // Try to save enquiry, but do not fail the lead if DB insert has drift issues.
     try {
       await prisma.enquiry.create({
         data: {
