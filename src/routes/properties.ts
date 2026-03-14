@@ -225,6 +225,11 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * ✅ CONTACT SELLER
+ * Public lead capture for published listings.
+ * Saves enquiry in DB + sends email to seller + BCC to admin.
+ */
 router.post("/:id/contact", async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -283,6 +288,21 @@ router.post("/:id/contact", async (req: any, res) => {
         sourceUrl: sourceUrl || null,
       },
       receivedAt: new Date().toISOString(),
+    });
+
+    /**
+     * ✅ NEW: store enquiry in database
+     */
+    await prisma.enquiry.create({
+      data: {
+        propertyId: property.id,
+        buyerName: name,
+        buyerEmail: email,
+        buyerPhone: phone || null,
+        message,
+        intent,
+        sourceUrl: sourceUrl || null,
+      },
     });
 
     const sent = await sendPropertyLeadEmail({
