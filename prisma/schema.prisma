@@ -92,9 +92,29 @@ model Property {
   rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
   user           User          @relation(fields: [userId], references: [id])
 
+  enquiries      Enquiry[]
+
   @@index([userId])
   @@index([listingStatus])
   @@index([mode])
+}
+
+model Enquiry {
+  id         Int      @id @default(autoincrement())
+  propertyId Int
+  buyerName  String
+  buyerEmail String
+  buyerPhone String?
+  message    String
+  intent     String?
+  sourceUrl  String?
+  createdAt  DateTime @default(now())
+
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([buyerEmail])
+  @@index([createdAt])
 }
 
 enum MarketMode {
