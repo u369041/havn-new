@@ -54,8 +54,6 @@ model Property {
   county         String
   eircode        String?
 
-  // ✅ OPTION 1: MARKET MODE (SOURCE OF TRUTH)
-  // BUY | RENT | SHARE
   mode           MarketMode    @default(BUY)
 
   price          Int
