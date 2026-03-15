@@ -142,6 +142,103 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * NEW: seller enquiries feed
+ * MUST appear before /:slug route
+ */
+router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || !Number.isFinite(Number(user.userId))) {
+      return res.status(401).json({ ok: false, message: "Invalid auth session" });
+    }
+
+    const propertyWhere =
+      user.role === "admin"
+        ? {}
+        : { userId: user.userId };
+
+    const properties = await prisma.property.findMany({
+      where: propertyWhere,
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        address1: true,
+        address2: true,
+        city: true,
+        county: true,
+        eircode: true,
+        price: true,
+        bedrooms: true,
+        bathrooms: true,
+        propertyType: true,
+        listingStatus: true,
+        createdAt: true,
+        updatedAt: true,
+        photos: true,
+        userId: true,
+      },
+    });
+
+    const propertyIds = properties.map((p) => p.id);
+
+    if (!propertyIds.length) {
+      return res.json({
+        ok: true,
+        properties,
+        enquiries: [],
+      });
+    }
+
+    const enquiries = await prisma.enquiry.findMany({
+      where: {
+        propertyId: { in: propertyIds },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        property: {
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            address1: true,
+            city: true,
+            county: true,
+            eircode: true,
+            listingStatus: true,
+            userId: true,
+          },
+        },
+      },
+    });
+
+    return res.json({
+      ok: true,
+      properties,
+      enquiries,
+    });
+  } catch (err: any) {
+    console.error("GET /api/properties/mine/enquiries error", {
+      message: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: err?.stack,
+      name: err?.name,
+    });
+
+    return res.status(500).json({
+      ok: false,
+      message: "Failed to load seller enquiries",
+      error: err?.message || String(err),
+      code: err?.code || null,
+      meta: err?.meta || null,
+    });
+  }
+});
+
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
