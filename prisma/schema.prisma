@@ -98,21 +98,25 @@ model Property {
 }
 
 model Enquiry {
-  id         Int      @id @default(autoincrement())
-  propertyId Int
-  buyerName  String
-  buyerEmail String
-  buyerPhone String?
-  message    String
-  intent     String?
-  sourceUrl  String?
-  createdAt  DateTime @default(now())
+  id              Int           @id @default(autoincrement())
+  propertyId      Int
+  buyerName       String
+  buyerEmail      String
+  buyerPhone      String?
+  message         String
+  intent          String?
+  sourceUrl       String?
+  status          EnquiryStatus @default(NEW)
+  internalNote    String?
+  statusUpdatedAt DateTime?
+  createdAt       DateTime      @default(now())
 
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([propertyId])
   @@index([buyerEmail])
   @@index([createdAt])
+  @@index([status])
 }
 
 enum MarketMode {
@@ -131,6 +135,15 @@ enum ListingStatus {
   SUBMITTED
   PUBLISHED
   REJECTED
+  CLOSED
+  ARCHIVED
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  VIEWING_BOOKED
+  OFFER_IN_PROGRESS
   CLOSED
   ARCHIVED
 }
