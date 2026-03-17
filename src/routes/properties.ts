@@ -86,6 +86,7 @@ function normalizePayload(body: any): any {
 }
 
 type ListingStatus = "DRAFT" | "SUBMITTED" | "PUBLISHED" | "REJECTED" | "CLOSED" | "ARCHIVED";
+type EnquiryStatus = "NEW" | "CONTACTED" | "VIEWING_BOOKED" | "OFFER_IN_PROGRESS" | "CLOSED" | "ARCHIVED";
 
 function asListingStatus(raw: any): ListingStatus | null {
   const s = safeText(raw).trim().toUpperCase();
@@ -98,6 +99,21 @@ function asListingStatus(raw: any): ListingStatus | null {
     s === "ARCHIVED"
   ) {
     return s;
+  }
+  return null;
+}
+
+function asEnquiryStatus(raw: any): EnquiryStatus | null {
+  const s = safeText(raw).trim().toUpperCase();
+  if (
+    s === "NEW" ||
+    s === "CONTACTED" ||
+    s === "VIEWING_BOOKED" ||
+    s === "OFFER_IN_PROGRESS" ||
+    s === "CLOSED" ||
+    s === "ARCHIVED"
+  ) {
+    return s as EnquiryStatus;
   }
   return null;
 }
@@ -143,7 +159,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
 });
 
 /**
- * NEW: seller enquiries feed
+ * seller enquiries feed
  * MUST appear before /:slug route
  */
 router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
@@ -239,6 +255,81 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * seller updates own enquiry status / note
+ * MUST appear before /:slug route
+ */
+router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any, res) => {
+  try {
+    const user = req.user;
+    if (!user || !Number.isFinite(Number(user.userId))) {
+      return res.status(401).json({ ok: false, message: "Invalid auth session" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
+    }
+
+    const payload = normalizePayload(req.body);
+    const nextStatus = asEnquiryStatus(payload.status);
+    const internalNote = safeText(payload.internalNote).trim();
+
+    if (!nextStatus && payload.status !== undefined) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry status" });
+    }
+
+    const existing = await prisma.enquiry.findUnique({
+      where: { id },
+      include: {
+        property: {
+          select: {
+            id: true,
+            userId: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ ok: false, message: "Enquiry not found" });
+    }
+
+    if (!existing.property || !isOwnerOrAdmin(user, existing.property.userId)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const updated = await prisma.enquiry.update({
+      where: { id },
+      data: {
+        status: nextStatus ?? existing.status,
+        internalNote: payload.internalNote !== undefined ? (internalNote || null) : existing.internalNote,
+        statusUpdatedAt: nextStatus && nextStatus !== existing.status ? new Date() : existing.statusUpdatedAt,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            address1: true,
+            city: true,
+            county: true,
+            eircode: true,
+            listingStatus: true,
+            userId: true,
+          },
+        },
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("PATCH /api/properties/mine/enquiries/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
 router.get("/_admin", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -323,7 +414,7 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
 });
 
 /**
- * NEW: admin enquiries feed
+ * admin enquiries feed
  * MUST appear before /:slug route
  */
 router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
@@ -337,6 +428,7 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 100);
     const q = safeText(req.query.q).trim();
+    const status = asEnquiryStatus(req.query.status);
 
     const where: any = {};
 
@@ -347,6 +439,7 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
         { buyerPhone: { contains: q, mode: "insensitive" } },
         { message: { contains: q, mode: "insensitive" } },
         { intent: { contains: q, mode: "insensitive" } },
+        { internalNote: { contains: q, mode: "insensitive" } },
         {
           property: {
             OR: [
@@ -361,6 +454,8 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
         },
       ];
     }
+
+    if (status) where.status = status;
 
     const [total, items] = await Promise.all([
       prisma.enquiry.count({ where }),
@@ -390,6 +485,67 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
     return res.json({ ok: true, page, limit, total, items });
   } catch (err: any) {
     console.error("GET /api/properties/_admin/enquiries error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * admin updates enquiry status / note
+ * MUST appear before /:slug route
+ */
+router.patch("/_admin/enquiries/:id", requireAuth, express.json(), async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
+    }
+
+    const payload = normalizePayload(req.body);
+    const nextStatus = asEnquiryStatus(payload.status);
+    const internalNote = safeText(payload.internalNote).trim();
+
+    if (!nextStatus && payload.status !== undefined) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry status" });
+    }
+
+    const existing = await prisma.enquiry.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ ok: false, message: "Enquiry not found" });
+    }
+
+    const updated = await prisma.enquiry.update({
+      where: { id },
+      data: {
+        status: nextStatus ?? existing.status,
+        internalNote: payload.internalNote !== undefined ? (internalNote || null) : existing.internalNote,
+        statusUpdatedAt: nextStatus && nextStatus !== existing.status ? new Date() : existing.statusUpdatedAt,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            address1: true,
+            city: true,
+            county: true,
+            eircode: true,
+            listingStatus: true,
+            userId: true,
+          },
+        },
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("PATCH /api/properties/_admin/enquiries/:id error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
@@ -469,6 +625,7 @@ router.post("/:id/contact", async (req: any, res) => {
           message,
           intent,
           sourceUrl: sourceUrl || null,
+          status: "NEW",
         },
       });
     } catch (dbErr: any) {
