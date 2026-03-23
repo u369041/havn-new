@@ -1,10 +1,11 @@
 // src/routes/moderation.ts
-import { Router } from "express";
+import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 import { sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
+router.use(express.json());
 
 type ListingStatus =
   | "DRAFT"
@@ -23,6 +24,21 @@ function requireAdmin(req: any, res: any, next: any) {
 
 function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
+}
+
+function normalizePayload(body: any): any {
+  if (!body) return {};
+  if (typeof body === "string") {
+    const s = body.trim();
+    if (!s) return {};
+    try {
+      return JSON.parse(s);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof body === "object") return body;
+  return {};
 }
 
 function asListingStatus(raw: any): ListingStatus | null {
@@ -44,7 +60,12 @@ function asListingStatus(raw: any): ListingStatus | null {
   return null;
 }
 
-function buildModerationData(existing: any, nextStatus: ListingStatus, adminUserId: number, reason: string) {
+function buildModerationData(
+  existing: any,
+  nextStatus: ListingStatus,
+  adminUserId: number,
+  reason: string
+) {
   const now = new Date();
 
   const base: any = {
@@ -82,21 +103,26 @@ function buildModerationData(existing: any, nextStatus: ListingStatus, adminUser
     base.approvedById = null;
   }
 
-  if (nextStatus === "CLOSED" || nextStatus === "ARCHIVED") {
-    base.publishedAt = nextStatus === "ARCHIVED" ? null : existing.publishedAt;
+  if (nextStatus === "CLOSED") {
+    base.publishedAt = existing.publishedAt || null;
+  }
+
+  if (nextStatus === "ARCHIVED") {
+    base.publishedAt = null;
   }
 
   return base;
 }
 
 /**
- * NEW:
  * PATCH /api/admin/properties/:id
  * Body:
  * {
  *   listingStatus: "DRAFT"|"SUBMITTED"|"PUBLISHED"|"REJECTED"|"CLOSED"|"ARCHIVED",
  *   reason?: string
  * }
+ *
+ * This is the new generic admin moderation route.
  */
 router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
   try {
@@ -105,11 +131,16 @@ router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res)
       return res.status(400).json({ ok: false, message: "Invalid id" });
     }
 
-    const nextStatus = asListingStatus(req.body?.listingStatus ?? req.body?.status);
-    const reason = safeText(req.body?.reason).trim();
+    const payload = normalizePayload(req.body);
+    const nextStatus = asListingStatus(payload.listingStatus ?? payload.status);
+    const reason = safeText(payload.reason).trim();
 
     if (!nextStatus) {
-      return res.status(400).json({ ok: false, message: "Invalid listingStatus" });
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid listingStatus",
+        received: payload.listingStatus ?? payload.status ?? null,
+      });
     }
 
     const existing = await prisma.property.findUnique({
@@ -209,7 +240,8 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
       return res.status(400).json({ ok: false, message: "Invalid id" });
     }
 
-    const reason = safeText(req.body?.reason).trim();
+    const payload = normalizePayload(req.body);
+    const reason = safeText(payload.reason).trim();
 
     const existing = await prisma.property.findUnique({
       where: { id },
