@@ -118,6 +118,83 @@ function asEnquiryStatus(raw: any): EnquiryStatus | null {
   return null;
 }
 
+function asOptionalString(raw: any): string | null {
+  if (raw === undefined) return null;
+  if (raw === null) return null;
+  const s = String(raw).trim();
+  return s ? s : null;
+}
+
+function asOptionalInt(raw: any): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n);
+}
+
+function asOptionalFloat(raw: any): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+function asOptionalBoolean(raw: any): boolean | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "yes") return true;
+  if (s === "false" || s === "0" || s === "no") return false;
+  return null;
+}
+
+function asOptionalDate(raw: any): Date | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function asStringArray(raw: any): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return [];
+
+    if (s.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) {
+          return parsed.map((v) => String(v ?? "").trim()).filter(Boolean);
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    return s
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getIncomingMode(payload: any): "BUY" | "RENT" | "SHARE" {
+  return clampMode(
+    payload.mode ||
+      payload.marketMode ||
+      payload.listingMode ||
+      payload.marketStatus
+  );
+}
+
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -155,6 +232,35 @@ router.get("/mine", requireAuth, async (req: any, res) => {
       hint:
         "Likely Prisma/DB drift. Check Render logs for full stack. Common causes: missing column, wrong type for text[] (photos/features), or migration drift.",
     });
+  }
+});
+
+/**
+ * draft hydration by numeric id
+ * MUST appear before /:slug route
+ */
+router.get("/id/:id", requireAuth, async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const user = req.user;
+    const item = await prisma.property.findUnique({ where: { id } });
+
+    if (!item) {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+
+    if (!isOwnerOrAdmin(user, item.userId)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    return res.json({ ok: true, item });
+  } catch (err: any) {
+    console.error("GET /api/properties/id/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
@@ -749,28 +855,37 @@ router.post("/", requireAuth, async (req: any, res) => {
       if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
     }
 
-    const mode = clampMode(payload.mode || payload.marketMode || payload.listingMode);
+    const mode = getIncomingMode(payload);
 
     const created = await prisma.property.create({
       data: {
         slug,
         title,
-        address1: payload.address1 || "",
-        address2: payload.address2 || null,
-        city: payload.city || "",
-        county: payload.county || "",
-        eircode: payload.eircode || null,
-        price: payload.price || 0,
-        ber: payload.ber || null,
-        berNo: payload.berNo || null,
-        bedrooms: payload.bedrooms || null,
-        bathrooms: payload.bathrooms || null,
-        propertyType: payload.propertyType || "house",
-        saleType: payload.saleType || null,
-        marketStatus: payload.marketStatus || payload.status || null,
-        description: payload.description || null,
-        features: Array.isArray(payload.features) ? payload.features : [],
-        photos: Array.isArray(payload.photos) ? payload.photos : [],
+        address1: safeText(payload.address1).trim(),
+        address2: asOptionalString(payload.address2),
+        city: safeText(payload.city).trim(),
+        county: safeText(payload.county).trim(),
+        eircode: asOptionalString(payload.eircode),
+        price: asOptionalInt(payload.price) ?? 0,
+        ber: asOptionalString(payload.berRating ?? payload.ber),
+        berRating: asOptionalString(payload.berRating ?? payload.ber),
+        berNo: asOptionalString(payload.berNo),
+        bedrooms: asOptionalInt(payload.bedrooms),
+        bathrooms: asOptionalInt(payload.bathrooms),
+        size: asOptionalFloat(payload.size),
+        sizeUnit: asOptionalString(payload.sizeUnit),
+        propertyType: asOptionalString(payload.propertyType) || "house",
+        saleType: asOptionalString(payload.saleType),
+        marketStatus: asOptionalString(payload.marketStatus ?? payload.status),
+        description: asOptionalString(payload.description),
+        features: asStringArray(payload.features),
+        photos: asStringArray(payload.photos),
+        rentFrequency: asOptionalString(payload.rentFrequency),
+        deposit: asOptionalInt(payload.deposit),
+        availableFrom: asOptionalDate(payload.availableFrom),
+        furnished: asOptionalBoolean(payload.furnished),
+        parking: asOptionalString(payload.parking),
+        outdoorSpace: asOptionalString(payload.outdoorSpace),
         listingStatus: "DRAFT",
         userId: user.userId,
         mode,
@@ -817,46 +932,68 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
     if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
-    if (existing.listingStatus === "PUBLISHED") {
-      return res.status(400).json({ ok: false, message: "Published listings cannot be edited directly." });
-    }
-    if (existing.listingStatus === "SUBMITTED") {
-      return res.status(409).json({ ok: false, message: "Listing is submitted and locked." });
-    }
-    if (existing.listingStatus === "CLOSED") {
-      return res.status(409).json({ ok: false, message: "Listing is closed." });
-    }
-    if (existing.listingStatus === "ARCHIVED") {
-      return res.status(409).json({ ok: false, message: "Listing is archived." });
+    if (existing.listingStatus !== "DRAFT") {
+      return res.status(409).json({ ok: false, message: "Only drafts can be edited." });
     }
 
     const payload = normalizePayload(req.body);
 
     const nextMode =
-      payload.mode || payload.marketMode || payload.listingMode
-        ? clampMode(payload.mode || payload.marketMode || payload.listingMode)
-        : (existing as any).mode;
+      payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
+        ? getIncomingMode(payload)
+        : existing.mode;
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
         title: payload.title ?? existing.title,
         address1: payload.address1 ?? existing.address1,
-        address2: payload.address2 ?? existing.address2,
+        address2: payload.address2 !== undefined ? asOptionalString(payload.address2) : existing.address2,
         city: payload.city ?? existing.city,
         county: payload.county ?? existing.county,
-        eircode: payload.eircode ?? existing.eircode,
-        price: payload.price ?? existing.price,
-        ber: payload.ber ?? existing.ber,
-        berNo: payload.berNo ?? existing.berNo,
-        bedrooms: payload.bedrooms ?? existing.bedrooms,
-        bathrooms: payload.bathrooms ?? existing.bathrooms,
+        eircode: payload.eircode !== undefined ? asOptionalString(payload.eircode) : existing.eircode,
+        price: payload.price !== undefined ? (asOptionalInt(payload.price) ?? 0) : existing.price,
+        ber: payload.berRating !== undefined || payload.ber !== undefined
+          ? asOptionalString(payload.berRating ?? payload.ber)
+          : existing.ber,
+        berRating: payload.berRating !== undefined || payload.ber !== undefined
+          ? asOptionalString(payload.berRating ?? payload.ber)
+          : (existing as any).berRating,
+        berNo: payload.berNo !== undefined ? asOptionalString(payload.berNo) : existing.berNo,
+        bedrooms: payload.bedrooms !== undefined ? asOptionalInt(payload.bedrooms) : existing.bedrooms,
+        bathrooms: payload.bathrooms !== undefined ? asOptionalInt(payload.bathrooms) : existing.bathrooms,
+        size: payload.size !== undefined ? asOptionalFloat(payload.size) : (existing as any).size,
+        sizeUnit: payload.sizeUnit !== undefined ? asOptionalString(payload.sizeUnit) : (existing as any).sizeUnit,
         propertyType: payload.propertyType ?? existing.propertyType,
-        saleType: payload.saleType ?? existing.saleType,
-        marketStatus: payload.marketStatus ?? payload.status ?? existing.marketStatus,
-        description: payload.description ?? existing.description,
-        features: Array.isArray(payload.features) ? payload.features : existing.features,
-        photos: Array.isArray(payload.photos) ? payload.photos : existing.photos,
+        saleType: payload.saleType !== undefined ? asOptionalString(payload.saleType) : existing.saleType,
+        marketStatus: payload.marketStatus !== undefined || payload.status !== undefined
+          ? asOptionalString(payload.marketStatus ?? payload.status)
+          : existing.marketStatus,
+        description: payload.description !== undefined ? asOptionalString(payload.description) : existing.description,
+        features: Array.isArray(payload.features) || typeof payload.features === "string"
+          ? asStringArray(payload.features)
+          : existing.features,
+        photos: Array.isArray(payload.photos) || typeof payload.photos === "string"
+          ? asStringArray(payload.photos)
+          : existing.photos,
+        rentFrequency: payload.rentFrequency !== undefined
+          ? asOptionalString(payload.rentFrequency)
+          : (existing as any).rentFrequency,
+        deposit: payload.deposit !== undefined
+          ? asOptionalInt(payload.deposit)
+          : (existing as any).deposit,
+        availableFrom: payload.availableFrom !== undefined
+          ? asOptionalDate(payload.availableFrom)
+          : (existing as any).availableFrom,
+        furnished: payload.furnished !== undefined
+          ? asOptionalBoolean(payload.furnished)
+          : (existing as any).furnished,
+        parking: payload.parking !== undefined
+          ? asOptionalString(payload.parking)
+          : (existing as any).parking,
+        outdoorSpace: payload.outdoorSpace !== undefined
+          ? asOptionalString(payload.outdoorSpace)
+          : (existing as any).outdoorSpace,
         mode: nextMode,
       },
     });

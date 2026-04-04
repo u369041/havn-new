@@ -58,14 +58,24 @@ model Property {
 
   price          Int
   ber            String?
+  berRating      String?
+  berNo          String?
   bedrooms       Int?
   bathrooms      Int?
+  size           Float?
+  sizeUnit       String?
   features       String[]
   description    String?
   photos         String[]
 
+  rentFrequency  String?
+  deposit        Int?
+  availableFrom  DateTime?
+  furnished      Boolean?
+  parking        String?
+  outdoorSpace   String?
+
   userId         Int
-  berNo          String?
 
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
