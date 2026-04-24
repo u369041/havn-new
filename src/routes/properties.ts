@@ -1,6 +1,6 @@
 ﻿import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
-import requireAuth from "../middleware/requireAuth";
+import requireAuth from "../middleware/requireAuth"; // default import
 import requireVerifiedEmail from "../middleware/requireVerifiedEmail";
 import {
   sendListingStatusEmail,
@@ -235,6 +235,10 @@ router.get("/mine", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * draft hydration by numeric id
+ * MUST appear before /:slug route
+ */
 router.get("/id/:id", requireAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
@@ -260,6 +264,10 @@ router.get("/id/:id", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * seller enquiries feed
+ * MUST appear before /:slug route
+ */
 router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -353,6 +361,10 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
   }
 });
 
+/**
+ * seller updates own enquiry status / note
+ * MUST appear before /:slug route
+ */
 router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any, res) => {
   try {
     const user = req.user;
@@ -506,6 +518,11 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
+
+/**
+ * admin enquiries feed
+ * MUST appear before /:slug route
+ */
 router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -514,82 +531,309 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
-    const enquiries = await prisma.enquiry.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        property: true,
-      },
-    });
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 100);
+    const q = safeText(req.query.q).trim();
+    const status = asEnquiryStatus(req.query.status);
 
-    return res.json({ ok: true, items: enquiries });
+    const where: any = {};
+
+    if (q) {
+      where.OR = [
+        { buyerName: { contains: q, mode: "insensitive" } },
+        { buyerEmail: { contains: q, mode: "insensitive" } },
+        { buyerPhone: { contains: q, mode: "insensitive" } },
+        { message: { contains: q, mode: "insensitive" } },
+        { intent: { contains: q, mode: "insensitive" } },
+        { internalNote: { contains: q, mode: "insensitive" } },
+        {
+          property: {
+            OR: [
+              { title: { contains: q, mode: "insensitive" } },
+              { slug: { contains: q, mode: "insensitive" } },
+              { address1: { contains: q, mode: "insensitive" } },
+              { city: { contains: q, mode: "insensitive" } },
+              { county: { contains: q, mode: "insensitive" } },
+              { eircode: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    if (status) where.status = status;
+
+    const [total, items] = await Promise.all([
+      prisma.enquiry.count({ where }),
+      prisma.enquiry.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          property: {
+            select: {
+              id: true,
+              slug: true,
+              title: true,
+              address1: true,
+              city: true,
+              county: true,
+              eircode: true,
+              listingStatus: true,
+              userId: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return res.json({ ok: true, page, limit, total, items });
   } catch (err: any) {
-    console.error("GET /_admin/enquiries error", err);
+    console.error("GET /api/properties/_admin/enquiries error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
+/**
+ * admin updates enquiry status / note
+ * MUST appear before /:slug route
+ */
+router.patch("/_admin/enquiries/:id", requireAuth, express.json(), async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
+    }
+
+    const payload = normalizePayload(req.body);
+    const nextStatus = asEnquiryStatus(payload.status);
+    const internalNote = safeText(payload.internalNote).trim();
+
+    if (!nextStatus && payload.status !== undefined) {
+      return res.status(400).json({ ok: false, message: "Invalid enquiry status" });
+    }
+
+    const existing = await prisma.enquiry.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ ok: false, message: "Enquiry not found" });
+    }
+
+    const updated = await prisma.enquiry.update({
+      where: { id },
+      data: {
+        status: nextStatus ?? existing.status,
+        internalNote: payload.internalNote !== undefined ? (internalNote || null) : existing.internalNote,
+        statusUpdatedAt: nextStatus && nextStatus !== existing.status ? new Date() : existing.statusUpdatedAt,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            address1: true,
+            city: true,
+            county: true,
+            eircode: true,
+            listingStatus: true,
+            userId: true,
+          },
+        },
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("PATCH /api/properties/_admin/enquiries/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+/**
+ * CONTACT SELLER
+ * Public lead capture for published listings.
+ * Saves enquiry in DB if available, but does not block email delivery if DB write fails.
+ */
 router.post("/:id/contact", async (req: any, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
     const payload = normalizePayload(req.body);
+
+    const name = safeText(payload.name).trim();
+    const email = safeText(payload.email).trim().toLowerCase();
+    const phone = safeText(payload.phone).trim();
+    const message = safeText(payload.message).trim();
+    const intent = safeText(payload.intent).trim() || "GENERAL";
+    const sourceUrl = safeText(payload.sourceUrl).trim();
+
+    if (!name || name.length < 2) {
+      return res.status(400).json({ ok: false, message: "Please enter your name." });
+    }
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailOk) {
+      return res.status(400).json({ ok: false, message: "Please enter a valid email address." });
+    }
+
+    if (!message || message.length < 8) {
+      return res.status(400).json({ ok: false, message: "Please enter a longer message." });
+    }
 
     const property = await prisma.property.findUnique({ where: { id } });
     if (!property || property.listingStatus !== "PUBLISHED") {
-      return res.status(404).json({ ok: false });
+      return res.status(404).json({ ok: false, message: "Property not found." });
     }
 
     const ownerEmail = await getUserEmailById(property.userId);
+    if (!ownerEmail) {
+      console.error("Property contact failed: owner email missing", {
+        propertyId: property.id,
+        ownerUserId: property.userId,
+      });
+      return res.status(500).json({ ok: false, message: "Could not deliver your message right now." });
+    }
 
-    console.log("📨 CONTACT ATTEMPT", {
+    console.log("HAVN_LEAD_CAPTURE", {
+      propertyId: property.id,
+      propertySlug: property.slug,
+      propertyTitle: property.title,
+      ownerUserId: property.userId,
       ownerEmail,
-      payload,
+      lead: {
+        name,
+        email,
+        phone: phone || null,
+        message,
+        intent,
+        sourceUrl: sourceUrl || null,
+      },
+      receivedAt: new Date().toISOString(),
     });
+
+    try {
+      await prisma.enquiry.create({
+        data: {
+          propertyId: property.id,
+          buyerName: name,
+          buyerEmail: email,
+          buyerPhone: phone || null,
+          message,
+          intent,
+          sourceUrl: sourceUrl || null,
+          status: "NEW",
+        },
+      });
+    } catch (dbErr: any) {
+      console.warn("Enquiry DB save failed, continuing with email delivery:", {
+        message: dbErr?.message,
+        code: dbErr?.code,
+        meta: dbErr?.meta,
+      });
+    }
 
     const sent = await sendPropertyLeadEmail({
-      to: ownerEmail!,
-      buyerName: payload.name,
-      buyerEmail: payload.email,
-      message: payload.message,
-      listingTitle: property.title,
+      to: ownerEmail,
+      buyerName: name,
+      buyerEmail: email,
+      buyerPhone: phone || undefined,
+      message,
+      intent,
+      listingTitle: property.title || "HAVN listing",
       slug: property.slug,
       listingId: property.id,
+      propertyUrl: sourceUrl || `https://havn.ie/property.html?slug=${encodeURIComponent(property.slug)}`,
     });
 
-    console.log("📨 CONTACT RESULT:", sent);
+    if (!sent) {
+      return res.status(500).json({ ok: false, message: "Could not deliver your message right now." });
+    }
 
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false });
+    return res.json({
+      ok: true,
+      message: "Your message has been sent to the seller.",
+    });
+  } catch (err: any) {
+    console.error("POST /api/properties/:id/contact error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
-    const items = await prisma.property.findMany({
-      where: { listingStatus: "PUBLISHED" },
-      orderBy: { publishedAt: "desc" },
-    });
+    const where: any = { listingStatus: "PUBLISHED" };
 
-    return res.json({ ok: true, items });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false });
+    const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10), 1), 50);
+
+    const q = String(req.query.q || "").trim();
+    const county = String(req.query.county || "").trim();
+    const city = String(req.query.city || "").trim();
+    const type = String(req.query.type || "").trim();
+
+    const modeRaw = String(req.query.mode || "").trim();
+    if (modeRaw) {
+      where.mode = clampMode(modeRaw);
+    }
+
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: "insensitive" } },
+        { city: { contains: q, mode: "insensitive" } },
+        { county: { contains: q, mode: "insensitive" } },
+        { eircode: { contains: q, mode: "insensitive" } },
+      ];
+    }
+
+    if (county) where.county = { contains: county, mode: "insensitive" };
+    if (city) where.city = { contains: city, mode: "insensitive" };
+    if (type) where.propertyType = type;
+
+    const [total, items] = await Promise.all([
+      prisma.property.count({ where }),
+      prisma.property.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { publishedAt: "desc" },
+      }),
+    ]);
+
+    return res.json({ ok: true, page, limit, total, items });
+  } catch (err: any) {
+    console.error("GET /api/properties error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
-    const property = await prisma.property.findUnique({
-      where: { slug: req.params.slug },
-    });
+    const slug = String(req.params.slug);
+    const user = req.user || null;
 
-    if (!property) return res.status(404).json({ ok: false });
+    const property = await prisma.property.findUnique({ where: { slug } });
+    if (!property) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (property.listingStatus !== "PUBLISHED") {
+      if (!user || !isOwnerOrAdmin(user, property.userId)) {
+        return res.status(404).json({ ok: false, message: "Not found" });
+      }
+    }
 
     return res.json({ ok: true, item: property });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false });
+  } catch (err: any) {
+    console.error("GET /properties/:slug error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
@@ -598,68 +842,205 @@ router.post("/", requireAuth, async (req: any, res) => {
     const user = req.user;
     const payload = normalizePayload(req.body);
 
-    const slug = await generateUniqueSlug(payload.title || "listing");
+    const title = String(payload.title || "Untitled listing").trim();
+    const city = String(payload.city || "").trim();
+    const eircode = String(payload.eircode || "").trim();
+
+    let slug = String(payload.slug || "").trim();
+    if (!slug) {
+      const base = [title, city, eircode].filter(Boolean).join(" ");
+      slug = await generateUniqueSlug(base);
+    } else {
+      const existing = await prisma.property.findUnique({ where: { slug } });
+      if (existing) return res.status(409).json({ ok: false, message: "Slug already exists" });
+    }
+
+    const mode = getIncomingMode(payload);
 
     const created = await prisma.property.create({
       data: {
-        title: payload.title,
         slug,
-        userId: user.userId,
-        listingStatus: "DRAFT",
+        title,
+        address1: safeText(payload.address1).trim(),
+        address2: asOptionalString(payload.address2),
+        city: safeText(payload.city).trim(),
+        county: safeText(payload.county).trim(),
+        eircode: asOptionalString(payload.eircode),
+        price: asOptionalInt(payload.price) ?? 0,
+        ber: asOptionalString(payload.berRating ?? payload.ber),
+        berRating: asOptionalString(payload.berRating ?? payload.ber),
+        berNo: asOptionalString(payload.berNo),
+        bedrooms: asOptionalInt(payload.bedrooms),
+        bathrooms: asOptionalInt(payload.bathrooms),
+        size: asOptionalFloat(payload.size),
+        sizeUnit: asOptionalString(payload.sizeUnit),
+        propertyType: asOptionalString(payload.propertyType) || "house",
+        saleType: asOptionalString(payload.saleType),
+        marketStatus: asOptionalString(payload.marketStatus ?? payload.status),
+        description: asOptionalString(payload.description),
+        features: asStringArray(payload.features),
         photos: asStringArray(payload.photos),
+        rentFrequency: asOptionalString(payload.rentFrequency),
+        deposit: asOptionalInt(payload.deposit),
+        availableFrom: asOptionalDate(payload.availableFrom),
+        furnished: asOptionalBoolean(payload.furnished),
+        parking: asOptionalString(payload.parking),
+        outdoorSpace: asOptionalString(payload.outdoorSpace),
+        listingStatus: "DRAFT",
+        userId: user.userId,
+        mode,
       },
     });
 
-    const to = user.email || (await getUserEmailById(user.userId));
+    void (async () => {
+      try {
+        const to =
+          user?.email ||
+          (user?.userId ? await getUserEmailById(user.userId) : null) ||
+          (created?.userId ? await getUserEmailById(created.userId) : null);
 
-    console.log("📨 DRAFT EMAIL DEBUG:", { to });
+        if (!to) return;
 
-    await sendUserListingEmail({
-      to,
-      event: "DRAFT_CREATED",
-      listingTitle: created.title,
-      slug: created.slug,
-      listingId: created.id,
-    });
+        await sendUserListingEmail({
+          to,
+          event: "DRAFT_CREATED",
+          listingTitle: created.title || "Untitled listing",
+          slug: created.slug,
+          listingId: created.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+        });
+      } catch (e) {
+        console.warn("Draft created email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: created });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false });
+  } catch (err: any) {
+    console.error("POST /properties error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+
+    const user = req.user;
+    const existing = await prisma.property.findUnique({ where: { id } });
+
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+    if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
+
+    if (existing.listingStatus !== "DRAFT") {
+      return res.status(409).json({ ok: false, message: "Only drafts can be edited." });
+    }
+
     const payload = normalizePayload(req.body);
+
+    const nextMode =
+      payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
+        ? getIncomingMode(payload)
+        : existing.mode;
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        title: payload.title,
-        photos: asStringArray(payload.photos),
+        title: payload.title ?? existing.title,
+        address1: payload.address1 ?? existing.address1,
+        address2: payload.address2 !== undefined ? asOptionalString(payload.address2) : existing.address2,
+        city: payload.city ?? existing.city,
+        county: payload.county ?? existing.county,
+        eircode: payload.eircode !== undefined ? asOptionalString(payload.eircode) : existing.eircode,
+        price: payload.price !== undefined ? (asOptionalInt(payload.price) ?? 0) : existing.price,
+        ber: payload.berRating !== undefined || payload.ber !== undefined
+          ? asOptionalString(payload.berRating ?? payload.ber)
+          : existing.ber,
+        berRating: payload.berRating !== undefined || payload.ber !== undefined
+          ? asOptionalString(payload.berRating ?? payload.ber)
+          : (existing as any).berRating,
+        berNo: payload.berNo !== undefined ? asOptionalString(payload.berNo) : existing.berNo,
+        bedrooms: payload.bedrooms !== undefined ? asOptionalInt(payload.bedrooms) : existing.bedrooms,
+        bathrooms: payload.bathrooms !== undefined ? asOptionalInt(payload.bathrooms) : existing.bathrooms,
+        size: payload.size !== undefined ? asOptionalFloat(payload.size) : (existing as any).size,
+        sizeUnit: payload.sizeUnit !== undefined ? asOptionalString(payload.sizeUnit) : (existing as any).sizeUnit,
+        propertyType: payload.propertyType ?? existing.propertyType,
+        saleType: payload.saleType !== undefined ? asOptionalString(payload.saleType) : existing.saleType,
+        marketStatus: payload.marketStatus !== undefined || payload.status !== undefined
+          ? asOptionalString(payload.marketStatus ?? payload.status)
+          : existing.marketStatus,
+        description: payload.description !== undefined ? asOptionalString(payload.description) : existing.description,
+        features: Array.isArray(payload.features) || typeof payload.features === "string"
+          ? asStringArray(payload.features)
+          : existing.features,
+        photos: Array.isArray(payload.photos) || typeof payload.photos === "string"
+          ? asStringArray(payload.photos)
+          : existing.photos,
+        rentFrequency: payload.rentFrequency !== undefined
+          ? asOptionalString(payload.rentFrequency)
+          : (existing as any).rentFrequency,
+        deposit: payload.deposit !== undefined
+          ? asOptionalInt(payload.deposit)
+          : (existing as any).deposit,
+        availableFrom: payload.availableFrom !== undefined
+          ? asOptionalDate(payload.availableFrom)
+          : (existing as any).availableFrom,
+        furnished: payload.furnished !== undefined
+          ? asOptionalBoolean(payload.furnished)
+          : (existing as any).furnished,
+        parking: payload.parking !== undefined
+          ? asOptionalString(payload.parking)
+          : (existing as any).parking,
+        outdoorSpace: payload.outdoorSpace !== undefined
+          ? asOptionalString(payload.outdoorSpace)
+          : (existing as any).outdoorSpace,
+        mode: nextMode,
       },
     });
 
+    void (async () => {
+      try {
+        const to =
+          user?.email ||
+          (user?.userId ? await getUserEmailById(user.userId) : null) ||
+          (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+        if (!to) return;
+
+        await sendUserListingEmail({
+          to,
+          event: "DRAFT_SAVED",
+          listingTitle: updated.title || "Untitled listing",
+          slug: updated.slug,
+          listingId: updated.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+        });
+      } catch (e) {
+        console.warn("Draft saved email failed (non-fatal):", e);
+      }
+    })();
+
     return res.json({ ok: true, item: updated });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false });
+  } catch (err: any) {
+    console.error("PATCH /properties/:id error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
-/**
- * 🔥 FIXED SUBMIT ROUTE WITH FULL DEBUG
- */
 router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const user = req.user;
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
 
+    const user = req.user;
     const existing = await prisma.property.findUnique({ where: { id } });
 
-    if (!existing) return res.status(404).json({ ok: false });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+    if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
+
+    if (existing.listingStatus !== "DRAFT") {
+      return res.status(409).json({ ok: false, message: "Only drafts can be submitted." });
+    }
 
     const updated = await prisma.property.update({
       where: { id },
@@ -669,54 +1050,46 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
       },
     });
 
-    const userEmail =
-      user?.email ||
-      (user?.userId ? await getUserEmailById(user.userId) : null);
-
-    console.log("🚨 SUBMIT EMAIL DEBUG", {
-      userEmail,
-      adminEmail: process.env.ADMIN_NOTIFY_EMAIL,
-      resendKeyExists: !!process.env.RESEND_API_KEY,
-    });
-
-    // ADMIN EMAIL
-    try {
-      const adminResult = await sendListingStatusEmail({
-        status: "SUBMITTED",
-        listingTitle: updated.title,
-        slug: updated.slug,
-        listingId: updated.id,
-        adminUrl: "https://havn.ie/admin.html",
-      });
-
-      console.log("📨 ADMIN EMAIL RESULT:", adminResult);
-    } catch (e) {
-      console.error("❌ ADMIN EMAIL FAILED", e);
-    }
-
-    // USER EMAIL
-    try {
-      if (userEmail) {
-        const userResult = await sendUserListingEmail({
-          to: userEmail,
-          event: "SUBMITTED",
-          listingTitle: updated.title,
+    void (async () => {
+      try {
+        await sendListingStatusEmail({
+          status: "SUBMITTED",
+          listingTitle: updated.title || "Untitled listing",
           slug: updated.slug,
           listingId: updated.id,
+          adminUrl: "https://havn.ie/admin.html",
         });
-
-        console.log("📨 USER EMAIL RESULT:", userResult);
-      } else {
-        console.warn("❌ NO USER EMAIL FOUND");
+      } catch (e) {
+        console.warn("Admin submitted email failed (non-fatal):", e);
       }
-    } catch (e) {
-      console.error("❌ USER EMAIL FAILED", e);
-    }
+    })();
+
+    void (async () => {
+      try {
+        const to =
+          user?.email ||
+          (user?.userId ? await getUserEmailById(user.userId) : null) ||
+          (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+        if (!to) return;
+
+        await sendUserListingEmail({
+          to,
+          event: "SUBMITTED",
+          listingTitle: updated.title || "Untitled listing",
+          slug: updated.slug,
+          listingId: updated.id,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+        });
+      } catch (e) {
+        console.warn("Submit email failed (non-fatal):", e);
+      }
+    })();
 
     return res.json({ ok: true, item: updated });
-  } catch (err) {
-    console.error("SUBMIT ERROR", err);
-    return res.status(500).json({ ok: false });
+  } catch (err: any) {
+    console.error("POST /properties/:id/submit error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 
