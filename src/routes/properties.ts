@@ -1050,30 +1050,50 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
       },
     });
 
-    void (async () => {
-      try {
-        await sendListingStatusEmail({
-          status: "SUBMITTED",
-          listingTitle: updated.title || "Untitled listing",
-          slug: updated.slug,
+    const to =
+      user?.email ||
+      (user?.userId ? await getUserEmailById(user.userId) : null) ||
+      (existing?.userId ? await getUserEmailById(existing.userId) : null);
+
+    console.log("HAVN_SUBMIT_EMAIL_DEBUG", {
+      listingId: updated.id,
+      slug: updated.slug,
+      title: updated.title,
+      userId: user?.userId || null,
+      userEmail: to || null,
+      adminNotifyEmail: process.env.ADMIN_NOTIFY_EMAIL || null,
+      resendFrom: process.env.RESEND_FROM || null,
+      resendApiKeyPresent: !!process.env.RESEND_API_KEY,
+    });
+
+    try {
+      const adminResult = await sendListingStatusEmail({
+        status: "SUBMITTED",
+        listingTitle: updated.title || "Untitled listing",
+        slug: updated.slug,
+        listingId: updated.id,
+        adminUrl: "https://havn.ie/admin.html",
+      });
+
+      console.log("HAVN_SUBMIT_ADMIN_EMAIL_RESULT", {
+        listingId: updated.id,
+        result: adminResult,
+      });
+    } catch (e: any) {
+      console.warn("HAVN_SUBMIT_ADMIN_EMAIL_FAILED", {
+        listingId: updated.id,
+        message: e?.message || String(e),
+      });
+    }
+
+    try {
+      if (!to) {
+        console.warn("HAVN_SUBMIT_USER_EMAIL_SKIPPED_NO_EMAIL", {
           listingId: updated.id,
-          adminUrl: "https://havn.ie/admin.html",
+          userId: existing.userId,
         });
-      } catch (e) {
-        console.warn("Admin submitted email failed (non-fatal):", e);
-      }
-    })();
-
-    void (async () => {
-      try {
-        const to =
-          user?.email ||
-          (user?.userId ? await getUserEmailById(user.userId) : null) ||
-          (existing?.userId ? await getUserEmailById(existing.userId) : null);
-
-        if (!to) return;
-
-        await sendUserListingEmail({
+      } else {
+        const userResult = await sendUserListingEmail({
           to,
           event: "SUBMITTED",
           listingTitle: updated.title || "Untitled listing",
@@ -1081,10 +1101,20 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, r
           listingId: updated.id,
           myListingsUrl: "https://havn.ie/my-listings.html",
         });
-      } catch (e) {
-        console.warn("Submit email failed (non-fatal):", e);
+
+        console.log("HAVN_SUBMIT_USER_EMAIL_RESULT", {
+          listingId: updated.id,
+          to,
+          result: userResult,
+        });
       }
-    })();
+    } catch (e: any) {
+      console.warn("HAVN_SUBMIT_USER_EMAIL_FAILED", {
+        listingId: updated.id,
+        to,
+        message: e?.message || String(e),
+      });
+    }
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
