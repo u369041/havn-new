@@ -302,6 +302,8 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
         updatedAt: true,
         photos: true,
         userId: true,
+        isFeatured: true,
+        featuredUntil: true,
       },
     });
 
@@ -332,6 +334,8 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
             eircode: true,
             listingStatus: true,
             userId: true,
+            isFeatured: true,
+            featuredUntil: true,
           },
         },
       },
@@ -424,6 +428,8 @@ router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any
             eircode: true,
             listingStatus: true,
             userId: true,
+            isFeatured: true,
+            featuredUntil: true,
           },
         },
       },
@@ -508,7 +514,10 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { updatedAt: "desc" },
+        orderBy: [
+          { isFeatured: "desc" },
+          { updatedAt: "desc" },
+        ],
       }),
     ]);
 
@@ -582,6 +591,8 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
               eircode: true,
               listingStatus: true,
               userId: true,
+              isFeatured: true,
+              featuredUntil: true,
             },
           },
         },
@@ -644,6 +655,8 @@ router.patch("/_admin/enquiries/:id", requireAuth, express.json(), async (req: a
             eircode: true,
             listingStatus: true,
             userId: true,
+            isFeatured: true,
+            featuredUntil: true,
           },
         },
       },
@@ -805,7 +818,10 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { publishedAt: "desc" },
+        orderBy: [
+          { isFeatured: "desc" },
+          { publishedAt: "desc" },
+        ],
       }),
     ]);
 
@@ -887,6 +903,8 @@ router.post("/", requireAuth, async (req: any, res) => {
         parking: asOptionalString(payload.parking),
         outdoorSpace: asOptionalString(payload.outdoorSpace),
         listingStatus: "DRAFT",
+        isFeatured: false,
+        featuredUntil: null,
         userId: user.userId,
         mode,
       },

@@ -8,7 +8,7 @@ import propertiesRouter from "./routes/properties";
 import uploadsRouter from "./routes/uploads";
 import debugRouter from "./routes/debug";
 import adminPropertiesRouter from "./routes/admin-properties";
-import moderationRouter from "./routes/moderation"; // ✅ ADD THIS
+import moderationRouter from "./routes/moderation";
 
 const app = express();
 
@@ -34,7 +34,6 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-  // ✅ include x-admin-key for any legacy tooling (harmless if unused)
   allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
   optionsSuccessStatus: 204,
 };
@@ -52,11 +51,15 @@ app.use("/api/auth", authRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/properties", propertiesRouter);
 
-// ✅ Admin actions (close / reopen live here)
-app.use("/api/admin/properties", adminPropertiesRouter);
-
-// ✅ Moderation actions (approve / reject live here)
+/**
+ * IMPORTANT:
+ * moderationRouter must come BEFORE adminPropertiesRouter
+ * so PATCH /api/admin/properties/:id hits moderationRouter first.
+ */
 app.use("/api/admin", moderationRouter);
+
+/* Admin actions like close / reopen */
+app.use("/api/admin/properties", adminPropertiesRouter);
 
 app.use("/api/debug", debugRouter);
 
