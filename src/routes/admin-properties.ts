@@ -1,4 +1,4 @@
-﻿﻿import { Router } from "express";
+﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 import { sendUserListingEmail } from "../lib/mail";
@@ -17,6 +17,12 @@ function normOutcome(raw: any): CloseOutcome | "" {
   return "";
 }
 
+function parseFeatureDays(raw: any): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 7;
+  return Math.min(Math.max(Math.round(n), 1), 365);
+}
+
 async function getUserEmailById(userId: number): Promise<string | null> {
   try {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
@@ -26,14 +32,21 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   }
 }
 
+function requireAdmin(user: any, res: any) {
+  if (!user || user.role !== "admin") {
+    res.status(403).json({ ok: false, message: "Forbidden" });
+    return false;
+  }
+  return true;
+}
+
 /**
  * GET /api/admin/properties
- * (Optional; admin.html may use /api/properties/_admin)
  */
 router.get("/", requireAuth, async (req: any, res: any) => {
   try {
     const user = req.user;
-    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (!requireAdmin(user, res)) return;
 
     const items = await prisma.property.findMany({
       orderBy: { updatedAt: "desc" },
@@ -48,18 +61,94 @@ router.get("/", requireAuth, async (req: any, res: any) => {
 });
 
 /**
+ * POST /api/admin/properties/:id/feature
+ * Admin-only: marks a published listing as featured.
+ */
+router.post("/:id/feature", requireAuth, async (req: any, res: any) => {
+  try {
+    const user = req.user;
+    if (!requireAdmin(user, res)) return;
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    if (existing.listingStatus !== "PUBLISHED") {
+      return res.status(409).json({
+        ok: false,
+        message: `Only PUBLISHED listings can be featured. Current status: ${existing.listingStatus}`,
+      });
+    }
+
+    const days = parseFeatureDays(req.body?.days ?? req.body?.durationDays ?? 7);
+    const featuredUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        isFeatured: true,
+        featuredUntil,
+      },
+    });
+
+    return res.json({ ok: true, item: updated, featuredUntil, days });
+  } catch (err: any) {
+    console.error("POST /api/admin/properties/:id/feature error", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err?.message || String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/admin/properties/:id/unfeature
+ * Admin-only: removes featured status.
+ */
+router.post("/:id/unfeature", requireAuth, async (req: any, res: any) => {
+  try {
+    const user = req.user;
+    if (!requireAdmin(user, res)) return;
+
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const existing = await prisma.property.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        isFeatured: false,
+        featuredUntil: null,
+      },
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (err: any) {
+    console.error("POST /api/admin/properties/:id/unfeature error", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err?.message || String(err),
+    });
+  }
+});
+
+/**
  * POST /api/admin/properties/:id/reopen
- * Admin-only: CLOSED -> PUBLISHED
- * Resets:
- *   archivedAt = null
- *   marketStatus = null
- * Ensures:
- *   publishedAt exists (keeps existing if present, otherwise sets now)
  */
 router.post("/:id/reopen", requireAuth, async (req: any, res: any) => {
   try {
     const user = req.user;
-    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (!requireAdmin(user, res)) return;
 
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, message: "Invalid id" });
@@ -93,18 +182,11 @@ router.post("/:id/reopen", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/close
- * Canonical close:
- *   listingStatus = "CLOSED"
- *   archivedAt    = new Date()
- *   marketStatus  = outcome ("SOLD"|"RENTED"|"CANCELLED"|"OTHER")
- *
- * IMPORTANT:
- * - Do NOT reference closedAt / closeOutcome / closeOutcomeNote (do not exist)
  */
 router.post("/:id/close", requireAuth, async (req: any, res: any) => {
   try {
     const user = req.user;
-    if (!user || user.role !== "admin") return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (!requireAdmin(user, res)) return;
 
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, message: "Invalid id" });
@@ -112,7 +194,6 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
     const existing = await prisma.property.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
 
-    // safest rule: only close from PUBLISHED
     if (existing.listingStatus !== "PUBLISHED") {
       return res.status(409).json({
         ok: false,
@@ -128,17 +209,17 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
       });
     }
 
-    // ✅ Force archivedAt on close (correctness first)
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "CLOSED",
         archivedAt: new Date(),
         marketStatus: outcome,
+        isFeatured: false,
+        featuredUntil: null,
       },
     });
 
-    // Email customer (non-fatal)
     void (async () => {
       try {
         const to = await getUserEmailById(updated.userId);
