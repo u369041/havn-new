@@ -14,12 +14,21 @@ const app = express();
 
 /* security */
 app.use(helmet());
-app.use(rateLimit({ windowMs: 60 * 1000, max: 60 }));
+
+/*
+  STRICT limiter (keep protection where it matters)
+*/
+const strictLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /* body */
 app.use(express.json({ limit: "2mb" }));
 
-/* CORS — PRE-FLIGHT SAFE */
+/* CORS */
 const ALLOWED = new Set([
   "https://havn.ie",
   "https://www.havn.ie",
@@ -46,24 +55,22 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-/* routes */
-app.use("/api/auth", authRouter);
-app.use("/api/uploads", uploadsRouter);
+/*
+  ROUTES
+  ✅ NO limiter on properties → unlimited browsing
+*/
 app.use("/api/properties", propertiesRouter);
 
-/**
- * IMPORTANT:
- * moderationRouter must come BEFORE adminPropertiesRouter
- * so PATCH /api/admin/properties/:id hits moderationRouter first.
- */
-app.use("/api/admin", moderationRouter);
+/*
+  🔒 Protected routes stay rate-limited
+*/
+app.use("/api/auth", strictLimiter, authRouter);
+app.use("/api/uploads", strictLimiter, uploadsRouter);
+app.use("/api/admin", strictLimiter, moderationRouter);
+app.use("/api/admin/properties", strictLimiter, adminPropertiesRouter);
+app.use("/api/debug", strictLimiter, debugRouter);
 
-/* Admin actions like close / reopen */
-app.use("/api/admin/properties", adminPropertiesRouter);
-
-app.use("/api/debug", debugRouter);
-
-/* 404 fallback */
+/* 404 */
 app.use((_req, res) => {
   res.status(404).json({ ok: false, error: "NOT_FOUND" });
 });
