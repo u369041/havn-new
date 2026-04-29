@@ -20,6 +20,9 @@ model User {
   lastLoginAt         DateTime?
   loginCount          Int                 @default(0)
 
+  lastSearch          Json?
+  lastSearchAt        DateTime?
+
   approvals           Property[]          @relation("PropertyApprovedBy")
   rejections          Property[]          @relation("PropertyRejectedBy")
   properties          Property[]
