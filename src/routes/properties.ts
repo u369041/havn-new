@@ -306,7 +306,6 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
         featuredUntil: true,
       },
     });
-
     const propertyIds = properties.map((p) => p.id);
 
     if (!propertyIds.length) {
@@ -605,7 +604,6 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
-
 /**
  * admin updates enquiry status / note
  * MUST appear before /:slug route
@@ -832,6 +830,35 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
   }
 });
 
+/**
+ * Public property detail route used by property.html:
+ * GET /api/properties/slug/:slug
+ *
+ * This MUST appear before /:slug, otherwise Express treats "slug" as the slug value.
+ */
+router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
+  try {
+    const slug = String(req.params.slug);
+    const user = req.user || null;
+
+    const property = await prisma.property.findUnique({ where: { slug } });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+    }
+
+    if (property.listingStatus !== "PUBLISHED") {
+      if (!user || !isOwnerOrAdmin(user, property.userId)) {
+        return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+      }
+    }
+
+    return res.json({ ok: true, item: property });
+  } catch (err: any) {
+    console.error("GET /api/properties/slug/:slug error", err);
+    return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
+  }
+});
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
