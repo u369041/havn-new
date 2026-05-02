@@ -13,14 +13,12 @@ import stripeRouter from "./routes/stripe";
 
 const app = express();
 
+/* Render proxy fix */
 app.set("trust proxy", 1);
 
 /* security */
 app.use(helmet());
 
-/*
-  STRICT limiter (keep protection where it matters)
-*/
 const strictLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
@@ -30,7 +28,6 @@ const strictLimiter = rateLimit({
 
 /* body */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
-
 app.use(express.json({ limit: "2mb" }));
 
 /* CORS */
@@ -60,21 +57,15 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-/*
-  ROUTES
-  ✅ NO limiter on properties → unlimited browsing
-*/
+/* routes */
 app.use("/api/properties", propertiesRouter);
 
-/*
-  🔒 Protected routes stay rate-limited
-*/
 app.use("/api/auth", strictLimiter, authRouter);
 app.use("/api/uploads", strictLimiter, uploadsRouter);
+app.use("/api/stripe", strictLimiter, stripeRouter);
 app.use("/api/admin", strictLimiter, moderationRouter);
 app.use("/api/admin/properties", strictLimiter, adminPropertiesRouter);
 app.use("/api/debug", strictLimiter, debugRouter);
-app.use("/api/stripe", strictLimiter, stripeRouter);
 
 /* 404 */
 app.use((_req, res) => {
