@@ -13,6 +13,8 @@ import stripeRouter from "./routes/stripe";
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 /* security */
 app.use(helmet());
 
