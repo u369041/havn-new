@@ -72,6 +72,7 @@ app.use("/api/uploads", strictLimiter, uploadsRouter);
 app.use("/api/admin", strictLimiter, moderationRouter);
 app.use("/api/admin/properties", strictLimiter, adminPropertiesRouter);
 app.use("/api/debug", strictLimiter, debugRouter);
+app.use("/api/stripe", strictLimiter, stripeRouter);
 
 /* 404 */
 app.use((_req, res) => {
