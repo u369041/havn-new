@@ -9,6 +9,7 @@ import uploadsRouter from "./routes/uploads";
 import debugRouter from "./routes/debug";
 import adminPropertiesRouter from "./routes/admin-properties";
 import moderationRouter from "./routes/moderation";
+import stripeRouter from "./routes/stripe";
 
 const app = express();
 
@@ -26,6 +27,8 @@ const strictLimiter = rateLimit({
 });
 
 /* body */
+app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json({ limit: "2mb" }));
 
 /* CORS */
