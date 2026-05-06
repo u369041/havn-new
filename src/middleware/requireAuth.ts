@@ -17,46 +17,67 @@ function toInt(value: any): number {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function parseBearerToken(req: any): string | null {
+  const header = String(req.headers.authorization || "").trim();
+  if (!header) return null;
+
+  const parts = header.split(/\s+/);
+  if (parts.length !== 2) return null;
+
+  const scheme = parts[0];
+  const token = parts[1];
+
+  if (scheme.toLowerCase() !== "bearer" || !token) return null;
+
+  return token;
+}
+
+function decodeUserFromToken(token: string): UserPayload {
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret) {
+    throw new Error("JWT_SECRET missing");
+  }
+
+  const decoded = jwt.verify(token, secret);
+  const payload: any = decoded;
+
+  const rawId = payload.sub ?? payload.userId ?? payload.id;
+  const userId = toInt(rawId);
+
+  if (!Number.isFinite(userId)) {
+    throw new Error("Invalid token payload");
+  }
+
+  return {
+    userId,
+    role: payload.role || "user",
+    email: payload.email || null,
+    raw: payload,
+  };
+}
+
 /**
  * Strict auth middleware.
  * Requires Authorization: Bearer <token>
  */
 const requireAuth: AuthMiddleware = ((req: any, res: Response, next: NextFunction) => {
   try {
-    const header = String(req.headers.authorization || "");
-    const [scheme, token] = header.split(" ");
+    const token = parseBearerToken(req);
 
-    if (scheme !== "Bearer" || !token) {
+    if (!token) {
       return res.status(401).json({ ok: false, message: "Missing token" });
     }
 
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
+    req.user = decodeUserFromToken(token);
+
+    return next();
+  } catch (err: any) {
+    if (err?.message === "JWT_SECRET missing") {
       console.error("JWT_SECRET missing");
       return res.status(500).json({ ok: false, message: "Server misconfigured" });
     }
 
-    const decoded = jwt.verify(token, secret);
-    const payload: any = decoded;
-
-    // ✅ Accept user id from common fields, ALWAYS coerce to number
-    const rawId = payload.sub ?? payload.userId ?? payload.id;
-    const userId = toInt(rawId);
-
-    if (!Number.isFinite(userId)) {
-      console.error("Invalid userId in token payload:", payload);
-      return res.status(401).json({ ok: false, message: "Invalid token payload" });
-    }
-
-    req.user = {
-      userId,
-      role: payload.role || "user",
-      email: payload.email || null,
-      raw: payload
-    } satisfies UserPayload;
-
-    return next();
-  } catch (err: any) {
     console.error("Auth error:", err?.message || err);
     return res.status(401).json({ ok: false, message: "Invalid token" });
   }
@@ -69,28 +90,10 @@ const requireAuth: AuthMiddleware = ((req: any, res: Response, next: NextFunctio
  */
 requireAuth.optional = (req: any, res: Response, next: NextFunction) => {
   try {
-    const header = String(req.headers.authorization || "");
-    const [scheme, token] = header.split(" ");
+    const token = parseBearerToken(req);
+    if (!token) return next();
 
-    if (scheme !== "Bearer" || !token) return next();
-
-    const secret = process.env.JWT_SECRET;
-    if (!secret) return next();
-
-    const decoded = jwt.verify(token, secret);
-    const payload: any = decoded;
-
-    const rawId = payload.sub ?? payload.userId ?? payload.id;
-    const userId = toInt(rawId);
-    if (!Number.isFinite(userId)) return next();
-
-    req.user = {
-      userId,
-      role: payload.role || "user",
-      email: payload.email || null,
-      raw: payload
-    } satisfies UserPayload;
-
+    req.user = decodeUserFromToken(token);
     return next();
   } catch {
     return next();
