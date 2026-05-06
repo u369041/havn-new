@@ -26,8 +26,23 @@ model User {
   approvals           Property[]          @relation("PropertyApprovedBy")
   rejections          Property[]          @relation("PropertyRejectedBy")
   properties          Property[]
+  savedSearches       SavedSearch[]
 
   passwordResetTokens PasswordResetToken[]
+}
+
+model SavedSearch {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String?   // optional = better UX
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model PasswordResetToken {
