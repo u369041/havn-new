@@ -27,6 +27,7 @@ model User {
   rejections          Property[]          @relation("PropertyRejectedBy")
   properties          Property[]
   savedSearches       SavedSearch[]
+  savedProperties     SavedProperty[]
 
   passwordResetTokens PasswordResetToken[]
 }
@@ -34,7 +35,7 @@ model User {
 model SavedSearch {
   id        Int      @id @default(autoincrement())
   userId    Int
-  name      String?   // optional = better UX
+  name      String?
   filters   Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -42,6 +43,21 @@ model SavedSearch {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([createdAt])
+}
+
+model SavedProperty {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  propertyId Int
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@index([propertyId])
   @@index([createdAt])
 }
 
@@ -122,6 +138,7 @@ model Property {
   user           User          @relation(fields: [userId], references: [id])
 
   enquiries      Enquiry[]
+  savedBy        SavedProperty[]
 
   @@index([userId])
   @@index([listingStatus])
