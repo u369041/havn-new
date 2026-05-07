@@ -216,6 +216,120 @@ router.delete("/saved-searches/:id", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * ============================
+ * SAVED PROPERTIES
+ * ============================
+ */
+
+/**
+ * POST /api/auth/saved-properties
+ * Body: { propertyId }
+ */
+router.post("/saved-properties", requireAuth, async (req: any, res) => {
+  try {
+    const userId = req.user.userId;
+    const propertyId = Number(req.body.propertyId);
+
+    if (!Number.isFinite(propertyId) || propertyId <= 0) {
+      return res.status(400).json({ ok: false, message: "Valid propertyId required" });
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        id: true,
+        listingStatus: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    if (property.listingStatus !== "PUBLISHED") {
+      return res.status(403).json({ ok: false, message: "Only published properties can be saved" });
+    }
+
+    const saved = await prisma.savedProperty.upsert({
+      where: {
+        userId_propertyId: {
+          userId,
+          propertyId,
+        },
+      },
+      update: {},
+      create: {
+        userId,
+        propertyId,
+      },
+      include: {
+        property: true,
+      },
+    });
+
+    res.json({ ok: true, saved });
+  } catch (err) {
+    console.error("POST /auth/saved-properties error", err);
+    res.status(500).json({ ok: false, message: "Could not save property" });
+  }
+});
+
+/**
+ * GET /api/auth/saved-properties
+ */
+router.get("/saved-properties", requireAuth, async (req: any, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const savedProperties = await prisma.savedProperty.findMany({
+      where: {
+        userId,
+        property: {
+          listingStatus: "PUBLISHED",
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      include: {
+        property: true,
+      },
+    });
+
+    res.json({ ok: true, savedProperties });
+  } catch (err) {
+    console.error("GET /auth/saved-properties error", err);
+    res.status(500).json({ ok: false, message: "Could not load saved properties" });
+  }
+});
+
+/**
+ * DELETE /api/auth/saved-properties/:propertyId
+ */
+router.delete("/saved-properties/:propertyId", requireAuth, async (req: any, res) => {
+  try {
+    const userId = req.user.userId;
+    const propertyId = Number(req.params.propertyId);
+
+    if (!Number.isFinite(propertyId) || propertyId <= 0) {
+      return res.status(400).json({ ok: false, message: "Valid propertyId required" });
+    }
+
+    await prisma.savedProperty.deleteMany({
+      where: {
+        userId,
+        propertyId,
+      },
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE /auth/saved-properties error", err);
+    res.status(500).json({ ok: false, message: "Could not remove saved property" });
+  }
+});
+
+/**
  * FORGOT PASSWORD
  */
 router.post("/forgot-password", async (req, res) => {
