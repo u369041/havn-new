@@ -195,6 +195,30 @@ function getIncomingMode(payload: any): "BUY" | "RENT" | "SHARE" {
   );
 }
 
+function isActiveFeaturedProperty(p: any) {
+  if (!p || !p.isFeatured) return false;
+  if (!p.featuredUntil) return true;
+
+  const d = new Date(p.featuredUntil);
+  if (Number.isNaN(d.getTime())) return true;
+
+  return d.getTime() > Date.now();
+}
+
+function sortActiveFeaturedFirst(items: any[]) {
+  return [...items].sort((a, b) => {
+    const af = isActiveFeaturedProperty(a) ? 1 : 0;
+    const bf = isActiveFeaturedProperty(b) ? 1 : 0;
+
+    if (af !== bf) return bf - af;
+
+    const ap = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+    const bp = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+
+    return bp - ap;
+  });
+}
+
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -823,7 +847,13 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
       }),
     ]);
 
-    return res.json({ ok: true, page, limit, total, items });
+  return res.json({
+  ok: true,
+  page,
+  limit,
+  total,
+  items: sortActiveFeaturedFirst(items),
+});
   } catch (err: any) {
     console.error("GET /api/properties error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
