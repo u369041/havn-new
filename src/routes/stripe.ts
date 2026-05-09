@@ -122,7 +122,7 @@ router.post(
 router.post("/webhook", async (req: any, res) => {
   const sig = req.headers["stripe-signature"];
 
-  let event: Stripe.Event;
+  let event: any;
 
   try {
     event = stripe.webhooks.constructEvent(
@@ -138,8 +138,8 @@ router.post("/webhook", async (req: any, res) => {
 
   try {
     if (event.type === "checkout.session.completed") {
-      const session =
-        event.data.object as Stripe.Checkout.Session;
+      const session = event.data.object as any;
+     
 
       const propertyId = Number(
         session.metadata?.propertyId
