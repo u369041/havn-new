@@ -860,12 +860,79 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
   }
 });
 
+router.post("/:id/view", async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, listingStatus: true },
+    });
+
+    if (!property || property.listingStatus !== "PUBLISHED") {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    await prisma.property.update({
+      where: { id },
+      data: {
+        views: {
+          increment: 1,
+        },
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /api/properties/:id/view error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
 /**
  * Public property detail route used by property.html:
  * GET /api/properties/slug/:slug
  *
  * This MUST appear before /:slug, otherwise Express treats "slug" as the slug value.
  */
+
+router.post("/:id/view", async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: { id: true, listingStatus: true },
+    });
+
+    if (!property || property.listingStatus !== "PUBLISHED") {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    await prisma.property.update({
+      where: { id },
+      data: {
+        views: {
+          increment: 1,
+        },
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("POST /api/properties/:id/view error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
 router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
