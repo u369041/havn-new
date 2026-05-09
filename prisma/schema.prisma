@@ -133,6 +133,8 @@ model Property {
   isFeatured     Boolean       @default(false)
   featuredUntil  DateTime?
 
+  views          Int           @default(0)
+
   approvedBy     User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
   rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
   user           User          @relation(fields: [userId], references: [id])
