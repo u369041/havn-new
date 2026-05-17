@@ -102,12 +102,27 @@ model Property {
   description    String?
   photos         String[]
 
-  rentFrequency  String?
-  deposit        Int?
-  availableFrom  DateTime?
-  furnished      Boolean?
-  parking        String?
-  outdoorSpace   String?
+  rentFrequency    String?
+  deposit          Int?
+  availableFrom    DateTime?
+  furnished        Boolean?
+  parking          String?
+  outdoorSpace     String?
+
+  saleCondition    String?
+  yearBuilt        Int?
+  heatingType      String?
+  viewingDetails   String?
+
+  leaseLength      String?
+  minimumTerm      String?
+  billsIncluded    String?
+  petsAllowed      String?
+
+  roomType         String?
+  ensuite          String?
+  currentOccupants Int?
+  couplesAllowed   String?
 
   userId         Int
 
