@@ -187,12 +187,35 @@ function asStringArray(raw: any): string[] {
 }
 
 function getIncomingMode(payload: any): "BUY" | "RENT" | "SHARE" {
-  return clampMode(
-    payload.mode ||
-      payload.marketMode ||
-      payload.listingMode ||
-      payload.marketStatus
-  );
+  const raw = String(
+    payload.mode ??
+    payload.marketStatus ??
+    payload.status ??
+    ""
+  ).trim().toLowerCase();
+
+  if (
+    raw === "rent" ||
+    raw === "to-rent" ||
+    raw === "to_rent" ||
+    raw === "rental" ||
+    raw === "RENT".toLowerCase()
+  ) {
+    return "RENT";
+  }
+
+  if (
+    raw === "share" ||
+    raw === "room-share" ||
+    raw === "room_share" ||
+    raw === "flatshare" ||
+    raw === "house-share" ||
+    raw === "house_share"
+  ) {
+    return "SHARE";
+  }
+
+  return "BUY";
 }
 
 function isActiveFeaturedProperty(p: any) {
