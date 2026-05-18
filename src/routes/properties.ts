@@ -49,10 +49,10 @@ async function geocodeIrishEircode(
     return { lat: null, lng: null };
   }
 
-  const apiKey = process.env.LOCATIONIQ_API_KEY;
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   if (!apiKey) {
-    console.log("LOCATIONIQ_STATUS:", {
+    console.log("GOOGLE_GEOCODE_STATUS:", {
       eircode,
       status: "NO_API_KEY"
     });
@@ -63,26 +63,29 @@ async function geocodeIrishEircode(
   try {
 
     const url =
-      "https://us1.locationiq.com/v1/search?" +
+      "https://maps.googleapis.com/maps/api/geocode/json?" +
       new URLSearchParams({
-        key: apiKey,
-        q: `${eircode}, Ireland`,
-        format: "json",
-        limit: "1"
+        address: `${eircode}, Ireland`,
+        key: apiKey
       }).toString();
 
     const response = await fetch(url);
     const data: any = await response.json();
 
-    console.log("LOCATIONIQ_STATUS:", {
+    console.log("GOOGLE_GEOCODE_STATUS:", {
       eircode,
-      results: Array.isArray(data) ? data.length : 0
+      status: data?.status || null,
+      error: data?.error_message || null,
+      results: Array.isArray(data?.results)
+        ? data.results.length
+        : 0
     });
 
-    const first = Array.isArray(data) ? data[0] : null;
+    const first = data?.results?.[0];
+    const loc = first?.geometry?.location;
 
-    const lat = Number(first?.lat);
-    const lng = Number(first?.lon);
+    const lat = Number(loc?.lat);
+    const lng = Number(loc?.lng);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       return { lat: null, lng: null };
@@ -93,7 +96,7 @@ async function geocodeIrishEircode(
   } catch (err: any) {
 
     console.warn(
-      "LocationIQ geocode failed:",
+      "Google geocode failed:",
       eircode,
       err?.message || err
     );
@@ -101,6 +104,7 @@ async function geocodeIrishEircode(
     return { lat: null, lng: null };
   }
 }
+
 function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
   const m = safeText(raw).trim().toUpperCase();
   if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
