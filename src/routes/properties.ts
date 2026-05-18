@@ -1182,19 +1182,22 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 const payload = normalizePayload(req.body);
 
 const nextEircode =
-     payload.eircode !== undefined
-       ? normalizeEircode(payload.eircode)
-       : existing.eircode;
+  payload.eircode !== undefined
+    ? normalizeEircode(payload.eircode)
+    : existing.eircode;
 
-   const shouldGeocode =
-     payload.eircode !== undefined &&
-     normalizeEircode(payload.eircode) !== existing.eircode;
+const shouldGeocode =
+  payload.eircode !== undefined &&
+  normalizeEircode(payload.eircode) !== existing.eircode;
 
-   const geo = shouldGeocode
-     ? await geocodeIrishEircode(nextEircode)
-     : { lat: existing.lat, lng: existing.lng };
+const geo = shouldGeocode
+  ? await geocodeIrishEircode(nextEircode)
+  : { lat: existing.lat, lng: existing.lng };
 
-    const nextMode =
+const nextMode =
+  payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
+    ? getIncomingMode(payload)
+    : existing.mode;
 
     const updated = await prisma.property.update({
       where: { id },
