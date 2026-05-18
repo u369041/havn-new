@@ -39,54 +39,65 @@ function normalizeEircode(raw: any): string | null {
   return `${compact.slice(0, 3)} ${compact.slice(3)}`;
 }
 
-async function geocodeIrishEircode(eircodeRaw: any): Promise<{ lat: number | null; lng: number | null }> {
+async function geocodeIrishEircode(
+  eircodeRaw: any
+): Promise<{ lat: number | null; lng: number | null }> {
+
   const eircode = normalizeEircode(eircodeRaw);
 
-  if (!eircode) return { lat: null, lng: null };
+  if (!eircode) {
+    return { lat: null, lng: null };
+  }
 
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const apiKey = process.env.LOCATIONIQ_API_KEY;
+
   if (!apiKey) {
-    console.log("GOOGLE_GEOCODE_STATUS:", {
+    console.log("LOCATIONIQ_STATUS:", {
       eircode,
-      status: "NO_API_KEY",
-      error: "GOOGLE_MAPS_API_KEY is missing",
-      results: 0,
+      status: "NO_API_KEY"
     });
 
     return { lat: null, lng: null };
   }
 
   try {
+
     const url =
-      "https://maps.googleapis.com/maps/api/geocode/json?" +
+      "https://us1.locationiq.com/v1/search?" +
       new URLSearchParams({
-        address: `${eircode}, Ireland`,
         key: apiKey,
+        q: `${eircode}, Ireland`,
+        format: "json",
+        limit: "1"
       }).toString();
 
     const response = await fetch(url);
     const data: any = await response.json();
 
-    console.log("GOOGLE_GEOCODE_STATUS:", {
+    console.log("LOCATIONIQ_STATUS:", {
       eircode,
-      status: data?.status || null,
-      error: data?.error_message || null,
-      results: Array.isArray(data?.results) ? data.results.length : 0,
+      results: Array.isArray(data) ? data.length : 0
     });
 
-    const first = data?.results?.[0];
-    const loc = first?.geometry?.location;
+    const first = Array.isArray(data) ? data[0] : null;
 
-    const lat = Number(loc?.lat);
-    const lng = Number(loc?.lng);
+    const lat = Number(first?.lat);
+    const lng = Number(first?.lon);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       return { lat: null, lng: null };
     }
 
     return { lat, lng };
+
   } catch (err: any) {
-    console.warn("Google Eircode geocode failed:", eircode, err?.message || err);
+
+    console.warn(
+      "LocationIQ geocode failed:",
+      eircode,
+      err?.message || err
+    );
+
     return { lat: null, lng: null };
   }
 }
