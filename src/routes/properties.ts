@@ -1026,6 +1026,18 @@ router.post("/", requireAuth, async (req: any, res) => {
         furnished: asOptionalBoolean(payload.furnished),
         parking: asOptionalString(payload.parking),
         outdoorSpace: asOptionalString(payload.outdoorSpace),
+	saleCondition: asOptionalString(payload.saleCondition),
+        yearBuilt: asOptionalInt(payload.yearBuilt),
+        heatingType: asOptionalString(payload.heatingType),
+        viewingDetails: asOptionalString(payload.viewingDetails),
+        leaseLength: asOptionalString(payload.leaseLength),
+        minimumTerm: asOptionalString(payload.minimumTerm),
+        billsIncluded: asOptionalString(payload.billsIncluded),
+        petsAllowed: asOptionalString(payload.petsAllowed),
+        roomType: asOptionalString(payload.roomType),
+        ensuite: asOptionalString(payload.ensuite),
+        currentOccupants: asOptionalInt(payload.currentOccupants),
+        couplesAllowed: asOptionalString(payload.couplesAllowed),
         listingStatus: "DRAFT",
         isFeatured: false,
         featuredUntil: null,
@@ -1136,6 +1148,53 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         outdoorSpace: payload.outdoorSpace !== undefined
           ? asOptionalString(payload.outdoorSpace)
           : (existing as any).outdoorSpace,
+	saleCondition: payload.saleCondition !== undefined
+  	? asOptionalString(payload.saleCondition)
+  	: (existing as any).saleCondition,
+
+	yearBuilt: payload.yearBuilt !== undefined
+  	? asOptionalInt(payload.yearBuilt)
+  	: (existing as any).yearBuilt,
+
+	heatingType: payload.heatingType !== undefined
+  	? asOptionalString(payload.heatingType)
+  	: (existing as any).heatingType,
+
+	viewingDetails: payload.viewingDetails !== undefined
+  	? asOptionalString(payload.viewingDetails)
+  	: (existing as any).viewingDetails,
+
+	leaseLength: payload.leaseLength !== undefined
+  	? asOptionalString(payload.leaseLength)
+  	: (existing as any).leaseLength,
+
+	minimumTerm: payload.minimumTerm !== undefined
+  	? asOptionalString(payload.minimumTerm)
+  	: (existing as any).minimumTerm,
+
+	billsIncluded: payload.billsIncluded !== undefined
+  	? asOptionalString(payload.billsIncluded)
+  	: (existing as any).billsIncluded,
+
+	petsAllowed: payload.petsAllowed !== undefined
+  	? asOptionalString(payload.petsAllowed)
+  	: (existing as any).petsAllowed,
+
+	roomType: payload.roomType !== undefined
+  	? asOptionalString(payload.roomType)
+  	: (existing as any).roomType,
+
+	ensuite: payload.ensuite !== undefined
+  	? asOptionalString(payload.ensuite)
+  	: (existing as any).ensuite,
+
+	currentOccupants: payload.currentOccupants !== undefined
+  	? asOptionalInt(payload.currentOccupants)
+  	: (existing as any).currentOccupants,
+
+	couplesAllowed: payload.couplesAllowed !== undefined
+  	? asOptionalString(payload.couplesAllowed)
+  	: (existing as any).couplesAllowed,
         mode: nextMode,
       },
     });
