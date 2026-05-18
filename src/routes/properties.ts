@@ -27,6 +27,61 @@ function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
 
+function normalizeEircode(raw: any): string | null {
+  const compact = safeText(raw).toUpperCase().replace(/\s+/g, "").trim();
+
+  if (!compact) return null;
+
+  if (!/^[A-Z0-9]{7}$/.test(compact)) {
+    return safeText(raw).trim().toUpperCase() || null;
+  }
+
+  return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+}
+
+async function geocodeIrishEircode(eircodeRaw: any): Promise<{ lat: number | null; lng: number | null }> {
+  const eircode = normalizeEircode(eircodeRaw);
+
+  if (!eircode) return { lat: null, lng: null };
+
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return { lat: null, lng: null };
+
+  try {
+    const url =
+      "https://maps.googleapis.com/maps/api/geocode/json?" +
+      new URLSearchParams({
+        address: `${eircode}, Ireland`,
+        key: apiKey,
+      }).toString();
+
+   const response = await fetch(url);
+   const data: any = await response.json();
+
+   console.log("GOOGLE_GEOCODE_STATUS:", {
+     eircode,
+     status: data?.status,
+     error: data?.error_message || null,
+     results: Array.isArray(data?.results) ? data.results.length : 0
+   });
+
+    const first = data?.results?.[0];
+    const loc = first?.geometry?.location;
+
+    const lat = Number(loc?.lat);
+    const lng = Number(loc?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return { lat: null, lng: null };
+    }
+
+    return { lat, lng };
+  } catch (err) {
+    console.warn("Google Eircode geocode failed:", eircode, err);
+    return { lat: null, lng: null };
+  }
+}
+
 function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
   const m = safeText(raw).trim().toUpperCase();
   if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
@@ -1007,7 +1062,8 @@ router.post("/", requireAuth, async (req: any, res) => {
 
     const title = String(payload.title || "Untitled listing").trim();
     const city = String(payload.city || "").trim();
-    const eircode = String(payload.eircode || "").trim();
+    const eircode = normalizeEircode(payload.eircode) || "";
+    const geo = await geocodeIrishEircode(eircode);
 
     let slug = String(payload.slug || "").trim();
     if (!slug) {
@@ -1028,7 +1084,9 @@ router.post("/", requireAuth, async (req: any, res) => {
         address2: asOptionalString(payload.address2),
         city: safeText(payload.city).trim(),
         county: safeText(payload.county).trim(),
-        eircode: asOptionalString(payload.eircode),
+        eircode: eircode || null,
+        lat: geo.lat,
+        lng: geo.lng,
         price: asOptionalInt(payload.price) ?? 0,
         ber: asOptionalString(payload.berRating ?? payload.ber),
         berRating: asOptionalString(payload.berRating ?? payload.ber),
@@ -1113,12 +1171,22 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
       return res.status(409).json({ ok: false, message: "Only drafts can be edited." });
     }
 
-    const payload = normalizePayload(req.body);
+const payload = normalizePayload(req.body);
+
+const nextEircode =
+     payload.eircode !== undefined
+       ? normalizeEircode(payload.eircode)
+       : existing.eircode;
+
+   const shouldGeocode =
+     payload.eircode !== undefined &&
+     normalizeEircode(payload.eircode) !== existing.eircode;
+
+   const geo = shouldGeocode
+     ? await geocodeIrishEircode(nextEircode)
+     : { lat: existing.lat, lng: existing.lng };
 
     const nextMode =
-      payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
-        ? getIncomingMode(payload)
-        : existing.mode;
 
     const updated = await prisma.property.update({
       where: { id },
@@ -1128,7 +1196,9 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         address2: payload.address2 !== undefined ? asOptionalString(payload.address2) : existing.address2,
         city: payload.city ?? existing.city,
         county: payload.county ?? existing.county,
-        eircode: payload.eircode !== undefined ? asOptionalString(payload.eircode) : existing.eircode,
+        eircode: nextEircode,
+        lat: geo.lat,
+        lng: geo.lng,
         price: payload.price !== undefined ? (asOptionalInt(payload.price) ?? 0) : existing.price,
         ber: payload.berRating !== undefined || payload.ber !== undefined
           ? asOptionalString(payload.berRating ?? payload.ber)
