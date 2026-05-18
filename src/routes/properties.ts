@@ -45,7 +45,16 @@ async function geocodeIrishEircode(eircodeRaw: any): Promise<{ lat: number | nul
   if (!eircode) return { lat: null, lng: null };
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return { lat: null, lng: null };
+  if (!apiKey) {
+    console.log("GOOGLE_GEOCODE_STATUS:", {
+      eircode,
+      status: "NO_API_KEY",
+      error: "GOOGLE_MAPS_API_KEY is missing",
+      results: 0,
+    });
+
+    return { lat: null, lng: null };
+  }
 
   try {
     const url =
@@ -55,15 +64,15 @@ async function geocodeIrishEircode(eircodeRaw: any): Promise<{ lat: number | nul
         key: apiKey,
       }).toString();
 
-   const response = await fetch(url);
-   const data: any = await response.json();
+    const response = await fetch(url);
+    const data: any = await response.json();
 
-   console.log("GOOGLE_GEOCODE_STATUS:", {
-     eircode,
-     status: data?.status,
-     error: data?.error_message || null,
-     results: Array.isArray(data?.results) ? data.results.length : 0
-   });
+    console.log("GOOGLE_GEOCODE_STATUS:", {
+      eircode,
+      status: data?.status || null,
+      error: data?.error_message || null,
+      results: Array.isArray(data?.results) ? data.results.length : 0,
+    });
 
     const first = data?.results?.[0];
     const loc = first?.geometry?.location;
@@ -76,12 +85,11 @@ async function geocodeIrishEircode(eircodeRaw: any): Promise<{ lat: number | nul
     }
 
     return { lat, lng };
-  } catch (err) {
-    console.warn("Google Eircode geocode failed:", eircode, err);
+  } catch (err: any) {
+    console.warn("Google Eircode geocode failed:", eircode, err?.message || err);
     return { lat: null, lng: null };
   }
 }
-
 function clampMode(raw: any): "BUY" | "RENT" | "SHARE" {
   const m = safeText(raw).trim().toUpperCase();
   if (m === "BUY" || m === "RENT" || m === "SHARE") return m;
