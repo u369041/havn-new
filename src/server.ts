@@ -11,6 +11,7 @@ import adminPropertiesRouter from "./routes/admin-properties";
 import moderationRouter from "./routes/moderation";
 import stripeRouter from "./routes/stripe";
 import adminRouter from "./routes/admin";
+import digestRouter from "./routes/digest";
 
 const app = express();
 
@@ -66,6 +67,7 @@ app.use("/api/stripe", strictLimiter, stripeRouter);
 app.use("/api/admin", strictLimiter, adminRouter);
 app.use("/api/admin/moderation", strictLimiter, moderationRouter);
 app.use("/api/admin/properties", strictLimiter, adminPropertiesRouter);
+app.use("/api/digest", strictLimiter, digestRouter);
 app.use("/api/debug", strictLimiter, debugRouter);
 
 /* 404 */
