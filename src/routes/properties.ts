@@ -905,6 +905,76 @@ router.post("/:id/contact", async (req: any, res) => {
   }
 });
 
+/**
+ * PRICE DROP ENGINE V1
+ * Owner/admin can update price on a PUBLISHED listing only.
+ */
+router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const user = req.user;
+    const existing = await prisma.property.findUnique({ where: { id } });
+
+    if (!existing) {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    if (!isOwnerOrAdmin(user, existing.userId)) {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    if (existing.listingStatus !== "PUBLISHED") {
+      return res.status(409).json({
+        ok: false,
+        message: "Only published listings can use price update.",
+      });
+    }
+
+    const payload = normalizePayload(req.body);
+    const nextPrice = asOptionalInt(payload.price);
+
+    if (!Number.isFinite(Number(nextPrice)) || Number(nextPrice) <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Valid price required.",
+      });
+    }
+
+    const currentPrice = Number(existing.price || 0);
+    const newPrice = Number(nextPrice);
+    const isPriceDrop = currentPrice > 0 && newPrice < currentPrice;
+
+    const updated = await prisma.property.update({
+      where: { id },
+      data: {
+        price: newPrice,
+        previousPrice: isPriceDrop ? currentPrice : (existing as any).previousPrice,
+        priceDroppedAt: isPriceDrop ? new Date() : (existing as any).priceDroppedAt,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      item: updated,
+      priceDrop: isPriceDrop
+        ? {
+            previousPrice: currentPrice,
+            newPrice,
+            reduction: currentPrice - newPrice,
+          }
+        : null,
+    });
+  } catch (err: any) {
+    console.error("PATCH /api/properties/:id/price error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
     const where: any = { listingStatus: "PUBLISHED" };

@@ -95,6 +95,8 @@ model Property {
   mode           MarketMode    @default(BUY)
 
   price          Int
+  previousPrice   Int?
+  priceDroppedAt  DateTime?
   ber            String?
   berRating      String?
   berNo          String?
