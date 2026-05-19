@@ -127,8 +127,10 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
         body = `
           <h2>Your listing is now live on HAVN</h2>
           <p>Congratulations — your listing has been approved and is now live.</p>
+          <p><strong>${escapeHtml(title)}</strong></p>
           ${payload.slug ? `<p><strong>Listing reference:</strong> ${escapeHtml(String(payload.slug))}</p>` : ""}
           ${payload.publicUrl ? `<p><a href="${escapeAttr(payload.publicUrl)}">View your listing</a></p>` : ""}
+          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
         `;
         break;
 
@@ -176,11 +178,62 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
 
 /**
  * ----------------------------
+ * SAVED SEARCH MATCH EMAIL
+ * ----------------------------
+ */
+export async function sendSavedSearchMatchEmail(args: {
+  to: string;
+  propertyTitle: string;
+  propertyPrice?: number | null;
+  propertyLocation?: string | null;
+  propertyUrl: string;
+  mode?: string | null;
+}) {
+  try {
+    const price =
+      typeof args.propertyPrice === "number" && Number.isFinite(args.propertyPrice)
+        ? new Intl.NumberFormat("en-IE", {
+            style: "currency",
+            currency: "EUR",
+            maximumFractionDigits: 0,
+          }).format(args.propertyPrice)
+        : "Price on request";
+
+    const subject = `New matching property on HAVN: ${args.propertyTitle}`;
+
+    const html = `
+      <h2>New matching property on HAVN</h2>
+      <p>A new property matching one of your saved alerts has just gone live.</p>
+
+      <div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin:18px 0;background:#fafafa;">
+        <p style="margin:0 0 8px;"><strong>${escapeHtml(args.propertyTitle)}</strong></p>
+        <p style="margin:0 0 8px;"><strong>${escapeHtml(price)}</strong></p>
+        ${args.propertyLocation ? `<p style="margin:0 0 8px;color:#64748b;">${escapeHtml(args.propertyLocation)}</p>` : ""}
+        ${args.mode ? `<p style="margin:0;color:#64748b;">${escapeHtml(String(args.mode).toUpperCase())}</p>` : ""}
+      </div>
+
+      <p><a href="${escapeAttr(args.propertyUrl)}">View property on HAVN</a></p>
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
+      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
+    `;
+
+    return await resend.emails.send({
+      from: FROM,
+      to: args.to,
+      subject,
+      html,
+    });
+  } catch (err) {
+    console.error("sendSavedSearchMatchEmail failed:", err);
+    return null;
+  }
+}
+
+/**
+ * ----------------------------
  * PROPERTY LEAD EMAIL
  * ----------------------------
- * TO: listing owner
- * BCC: admin@havn.ie
- * Reply-To: buyer email
  */
 export type PropertyLeadEmailPayload = {
   to: string;

@@ -1,7 +1,7 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
-import { sendUserListingEmail } from "../lib/mail";
+import { sendUserListingEmail, sendSavedSearchMatchEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -70,6 +70,173 @@ async function getUserEmailById(userId: number): Promise<string | null> {
   }
 }
 
+function normText(v: any) {
+  return String(v || "").trim().toLowerCase();
+}
+
+function propertyLocation(p: any) {
+  const city = safeText(p.city).trim();
+  const county = safeText(p.county).trim();
+  if (city && county) return `${city}, ${county}`;
+  return city || county || "";
+}
+
+function berMatches(filter: any, property: any) {
+  const band = safeText(filter).trim().toLowerCase();
+  if (!band) return true;
+
+  const ber = safeText(property.berRating || property.ber).trim().toUpperCase();
+
+  if (band === "a-b") return ["A1", "A2", "A3", "B1", "B2", "B3"].includes(ber);
+  if (band === "c-d") return ["C1", "C2", "C3", "D1", "D2"].includes(ber);
+  if (band === "e-g") return ["E1", "E2", "F", "G"].includes(ber);
+
+  return true;
+}
+
+function yesNoMatches(filter: any, value: any) {
+  const f = normText(filter);
+  if (!f) return true;
+
+  const v = normText(value);
+
+  if (f === "yes") return v === "yes" || v === "true" || value === true;
+  if (f === "no") return !(v === "yes" || v === "true" || value === true);
+
+  return true;
+}
+
+function priceBandMatches(filter: any, property: any) {
+  const band = safeText(filter).trim().toLowerCase();
+  if (!band) return true;
+
+  const price = Number(property.price);
+  if (!Number.isFinite(price)) return false;
+
+  if (band === "under-300k") return price < 300000;
+  if (band === "300-500k") return price >= 300000 && price <= 500000;
+  if (band === "500-800k") return price >= 500000 && price <= 800000;
+  if (band === "800k-plus") return price >= 800000;
+
+  if (band === "under-1500") return price < 1500;
+  if (band === "1500-2500") return price >= 1500 && price <= 2500;
+  if (band === "2500-3500") return price >= 2500 && price <= 3500;
+  if (band === "3500-plus") return price >= 3500;
+
+  if (band === "under-700") return price < 700;
+  if (band === "700-1000") return price >= 700 && price <= 1000;
+  if (band === "1000-1500") return price >= 1000 && price <= 1500;
+  if (band === "1500-plus") return price >= 1500;
+
+  return true;
+}
+
+function roomTypeMatches(filter: any, property: any) {
+  const wanted = safeText(filter).trim().toLowerCase();
+  if (!wanted) return true;
+
+  const roomType = normText(property.roomType);
+  const hay = [
+    property.title,
+    property.description,
+    property.propertyType,
+    property.roomType,
+  ].map(normText).join(" ");
+
+  if (wanted === "single-room") return roomType.includes("single") || hay.includes("single room");
+  if (wanted === "double-room") return roomType.includes("double") || hay.includes("double room");
+  if (wanted === "studio") return roomType.includes("studio") || hay.includes("studio");
+
+  return true;
+}
+
+function savedSearchMatchesProperty(filters: any, property: any) {
+  if (!filters || typeof filters !== "object") return false;
+
+  const wantedMode = safeText(filters.mode).trim().toUpperCase();
+  if (wantedMode && wantedMode !== safeText(property.mode).trim().toUpperCase()) return false;
+
+  const q = normText(filters.q);
+  if (q) {
+    const hay = [
+      property.title,
+      property.address1,
+      property.address2,
+      property.city,
+      property.county,
+      property.eircode,
+      property.description,
+    ].map(normText).join(" ");
+
+    if (!hay.includes(q)) return false;
+  }
+
+  if (!priceBandMatches(filters.price, property)) return false;
+
+  const beds = Number(filters.beds);
+  if (Number.isFinite(beds) && beds > 0) {
+    const actualBeds = Number(property.bedrooms);
+    if (!Number.isFinite(actualBeds) || actualBeds < beds) return false;
+  }
+
+  const baths = Number(filters.baths);
+  if (Number.isFinite(baths) && baths > 0) {
+    const actualBaths = Number(property.bathrooms);
+    if (!Number.isFinite(actualBaths) || actualBaths < baths) return false;
+  }
+
+  const type = safeText(filters.type).trim().toUpperCase();
+  if (type && safeText(property.propertyType).trim().toUpperCase() !== type) return false;
+
+  if (!roomTypeMatches(filters.roomType, property)) return false;
+  if (!berMatches(filters.berBand, property)) return false;
+  if (!yesNoMatches(filters.furnished, property.furnished)) return false;
+  if (!yesNoMatches(filters.ensuite, property.ensuite)) return false;
+  if (!yesNoMatches(filters.couplesAllowed, property.couplesAllowed)) return false;
+  if (!yesNoMatches(filters.billsIncluded, property.billsIncluded)) return false;
+
+  return true;
+}
+
+async function notifyMatchingSavedSearches(property: any) {
+  try {
+    const savedSearches = await prisma.savedSearch.findMany({
+      where: {
+        userId: { not: property.userId },
+      },
+      include: {
+        user: {
+          select: {
+            email: true,
+          },
+        },
+      },
+      take: 500,
+    });
+
+    const propertyUrl = `https://havn.ie/property.html?slug=${encodeURIComponent(property.slug)}`;
+
+    for (const saved of savedSearches) {
+      const filters: any = saved.filters || {};
+
+      if (filters.alertsEnabled !== true) continue;
+      if (!saved.user?.email) continue;
+      if (!savedSearchMatchesProperty(filters, property)) continue;
+
+      await sendSavedSearchMatchEmail({
+        to: saved.user.email,
+        propertyTitle: property.title || "New HAVN property",
+        propertyPrice: property.price,
+        propertyLocation: propertyLocation(property),
+        propertyUrl,
+        mode: property.mode,
+      });
+    }
+  } catch (err) {
+    console.warn("Saved-search alert matching failed (non-fatal):", err);
+  }
+}
+
 function requireAdmin(user: any, res: any) {
   if (!user || user.role !== "admin") {
     res.status(403).json({ ok: false, message: "Forbidden" });
@@ -100,7 +267,6 @@ router.get("/", requireAuth, async (req: any, res: any) => {
 
 /**
  * PATCH /api/admin/properties/:id
- * Admin-only: saves moderation status/admin note from dashboard.
  */
 router.patch("/:id", requireAuth, async (req: any, res: any) => {
   try {
@@ -159,6 +325,10 @@ router.patch("/:id", requireAuth, async (req: any, res: any) => {
       data,
     });
 
+    if (updated.listingStatus === "PUBLISHED") {
+      void notifyMatchingSavedSearches(updated);
+    }
+
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     console.error("PATCH /api/admin/properties/:id error", err);
@@ -172,7 +342,6 @@ router.patch("/:id", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/approve
- * Admin-only: moves SUBMITTED listing to PUBLISHED.
  */
 router.post("/:id/approve", requireAuth, async (req: any, res: any) => {
   try {
@@ -216,16 +385,19 @@ router.post("/:id/approve", requireAuth, async (req: any, res: any) => {
 
         await sendUserListingEmail({
           to,
-          event: "APPROVED",
+          event: "APPROVED_LIVE",
           listingTitle: updated.title || "Untitled listing",
           slug: updated.slug,
           listingId: updated.id,
+          publicUrl: `https://havn.ie/property.html?slug=${encodeURIComponent(updated.slug)}`,
           myListingsUrl: "https://havn.ie/my-listings.html",
         } as any);
       } catch (e) {
         console.warn("Approve email failed (non-fatal):", e);
       }
     })();
+
+    void notifyMatchingSavedSearches(updated);
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
@@ -240,7 +412,6 @@ router.post("/:id/approve", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/reject
- * Admin-only: moves SUBMITTED listing to REJECTED.
  */
 router.post("/:id/reject", requireAuth, async (req: any, res: any) => {
   try {
@@ -309,7 +480,6 @@ router.post("/:id/reject", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/feature
- * Admin-only: marks a published listing as featured.
  */
 router.post("/:id/feature", requireAuth, async (req: any, res: any) => {
   try {
@@ -358,7 +528,6 @@ router.post("/:id/feature", requireAuth, async (req: any, res: any) => {
 
 /**
  * POST /api/admin/properties/:id/unfeature
- * Admin-only: removes featured status.
  */
 router.post("/:id/unfeature", requireAuth, async (req: any, res: any) => {
   try {
@@ -422,6 +591,8 @@ router.post("/:id/reopen", requireAuth, async (req: any, res: any) => {
         marketStatus: null,
       },
     });
+
+    void notifyMatchingSavedSearches(updated);
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
