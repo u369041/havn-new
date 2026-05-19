@@ -463,12 +463,12 @@ export async function sendHavnWeeklyDigestEmail(args: {
       ].filter(Boolean).join(" • ");
 
       return `
-        <td style="width:25%;padding:8px;vertical-align:top;">
+        <td width="25%" style="width:25%;max-width:170px;padding:8px;vertical-align:top;">
           <a href="${escapeAttr(p.url)}" style="text-decoration:none;color:#071326;display:block;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
-            <div style="height:120px;background:#e5e7eb;position:relative;">
+            <div style="height:120px;max-height:120px;overflow:hidden;background:#e5e7eb;position:relative;">
               ${
                 p.imageUrl
-                  ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" style="width:100%;height:120px;object-fit:cover;display:block;" />`
+                  ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" width="170" style="width:100%;max-width:170px;height:120px;max-height:120px;object-fit:cover;display:block;border:0;" />`
                   : `<div style="height:120px;background:linear-gradient(135deg,#eef2ff,#f8fafc);"></div>`
               }
               ${
