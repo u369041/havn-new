@@ -7,6 +7,9 @@ const router = Router();
 const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
 const DIGEST_CRON_SECRET = process.env.DIGEST_CRON_SECRET || "";
 
+const PRICE_DROP_ACTIVE_DAYS = 14;
+const PRICE_DROP_ACTIVE_MS = PRICE_DROP_ACTIVE_DAYS * 24 * 60 * 60 * 1000;
+
 function isAuthorised(req: any) {
   const auth = String(req.headers.authorization || "");
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -19,6 +22,22 @@ function safeStr(v: any, fallback = "") {
   if (v === null || v === undefined) return fallback;
   const s = String(v).trim();
   return s || fallback;
+}
+
+function isActivePriceDrop(property: any) {
+  const price = Number(property?.price || 0);
+  const previousPrice = Number(property?.previousPrice || 0);
+  const droppedAtRaw = property?.priceDroppedAt;
+
+  if (!Number.isFinite(price) || !Number.isFinite(previousPrice)) return false;
+  if (price <= 0 || previousPrice <= 0 || previousPrice <= price) return false;
+  if (!droppedAtRaw) return false;
+
+  const droppedAt = new Date(droppedAtRaw).getTime();
+
+  if (!Number.isFinite(droppedAt)) return false;
+
+  return Date.now() - droppedAt <= PRICE_DROP_ACTIVE_MS;
 }
 
 function modeFromFilters(filters: any) {
@@ -161,6 +180,8 @@ router.post("/run-weekly", async (req, res) => {
       return new Date(p.featuredUntil).getTime() > Date.now();
     });
 
+    const activePriceDropProperties = publishedProperties.filter(isActivePriceDrop);
+
     const searchesByUser = new Map<number, typeof savedSearches>();
 
     for (const search of savedSearches) {
@@ -195,12 +216,14 @@ router.post("/run-weekly", async (req, res) => {
         : weeklyCutoff;
 
       const matched = new Map<number, any>();
+      const matchedPriceDrops = new Map<number, any>();
 
       for (const search of searches) {
         const filters = search.filters || {};
 
         for (const property of publishedProperties) {
           const publishedAt = property.publishedAt || property.createdAt;
+
           if (!force && publishedAt && new Date(publishedAt).getTime() <= digestSince.getTime()) {
             continue;
           }
@@ -209,9 +232,33 @@ router.post("/run-weekly", async (req, res) => {
             matched.set(property.id, property);
           }
         }
+
+        for (const property of activePriceDropProperties) {
+          if (matchesSearch(filters, property)) {
+            matchedPriceDrops.set(property.id, property);
+            matched.set(property.id, property);
+          }
+        }
       }
 
-      const matchedProperties = Array.from(matched.values()).slice(0, 8);
+      const matchedProperties = Array.from(matched.values())
+        .sort((a, b) => {
+          const ad = isActivePriceDrop(a) ? 1 : 0;
+          const bd = isActivePriceDrop(b) ? 1 : 0;
+
+          if (ad !== bd) return bd - ad;
+
+          const af = a.isFeatured ? 1 : 0;
+          const bf = b.isFeatured ? 1 : 0;
+
+          if (af !== bf) return bf - af;
+
+          const at = new Date(a.publishedAt || a.createdAt || 0).getTime();
+          const bt = new Date(b.publishedAt || b.createdAt || 0).getTime();
+
+          return bt - at;
+        })
+        .slice(0, 8);
 
       if (!matchedProperties.length) {
         skippedNoMatches += 1;
@@ -238,7 +285,7 @@ router.post("/run-weekly", async (req, res) => {
         name: user.name || null,
         newMatchesCount: matched.size,
         featuredCount: featuredProperties.length,
-        priceDropsCount: 0,
+        priceDropsCount: matchedPriceDrops.size,
         trendingAreasCount: 3,
         recentlyViewedCount: 0,
         matchesUrl,
@@ -251,7 +298,7 @@ router.post("/run-weekly", async (req, res) => {
           baths: p.bathrooms,
           url: propertyUrl(p),
           imageUrl: propertyImage(p),
-          badge: "NEW",
+          badge: isActivePriceDrop(p) ? "PRICE DROP" : "NEW",
         })),
       });
 
@@ -281,6 +328,7 @@ router.post("/run-weekly", async (req, res) => {
       emailsSent,
       searchesUpdated,
       skippedNoMatches,
+      activePriceDrops: activePriceDropProperties.length,
     });
   } catch (err: any) {
     console.error("weekly digest failed:", err);

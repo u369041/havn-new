@@ -10,6 +10,9 @@ import {
 
 const router = Router();
 
+const PRICE_DROP_ACTIVE_DAYS = 14;
+const PRICE_DROP_ACTIVE_MS = PRICE_DROP_ACTIVE_DAYS * 24 * 60 * 60 * 1000;
+
 router.use(
   express.text({
     type: ["text/plain", "text/*"],
@@ -42,7 +45,6 @@ function normalizeEircode(raw: any): string | null {
 async function geocodeIrishEircode(
   eircodeRaw: any
 ): Promise<{ lat: number | null; lng: number | null }> {
-
   const eircode = normalizeEircode(eircodeRaw);
 
   if (!eircode) {
@@ -54,19 +56,18 @@ async function geocodeIrishEircode(
   if (!apiKey) {
     console.log("GOOGLE_GEOCODE_STATUS:", {
       eircode,
-      status: "NO_API_KEY"
+      status: "NO_API_KEY",
     });
 
     return { lat: null, lng: null };
   }
 
   try {
-
     const url =
       "https://maps.googleapis.com/maps/api/geocode/json?" +
       new URLSearchParams({
         address: `${eircode}, Ireland`,
-        key: apiKey
+        key: apiKey,
       }).toString();
 
     const response = await fetch(url);
@@ -76,9 +77,7 @@ async function geocodeIrishEircode(
       eircode,
       status: data?.status || null,
       error: data?.error_message || null,
-      results: Array.isArray(data?.results)
-        ? data.results.length
-        : 0
+      results: Array.isArray(data?.results) ? data.results.length : 0,
     });
 
     const first = data?.results?.[0];
@@ -92,14 +91,8 @@ async function geocodeIrishEircode(
     }
 
     return { lat, lng };
-
   } catch (err: any) {
-
-    console.warn(
-      "Google geocode failed:",
-      eircode,
-      err?.message || err
-    );
+    console.warn("Google geocode failed:", eircode, err?.message || err);
 
     return { lat: null, lng: null };
   }
@@ -138,7 +131,10 @@ async function generateUniqueSlug(base: string) {
 
 async function getUserEmailById(userId: number): Promise<string | null> {
   try {
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
     return u?.email || null;
   } catch {
     return null;
@@ -235,9 +231,7 @@ function asOptionalDate(raw: any): Date | null {
 
 function asStringArray(raw: any): string[] {
   if (Array.isArray(raw)) {
-    return raw
-      .map((v) => String(v ?? "").trim())
-      .filter(Boolean);
+    return raw.map((v) => String(v ?? "").trim()).filter(Boolean);
   }
 
   if (typeof raw === "string") {
@@ -265,12 +259,9 @@ function asStringArray(raw: any): string[] {
 }
 
 function getIncomingMode(payload: any): "BUY" | "RENT" | "SHARE" {
-  const raw = String(
-    payload.mode ??
-    payload.marketStatus ??
-    payload.status ??
-    ""
-  ).trim().toLowerCase();
+  const raw = String(payload.mode ?? payload.marketStatus ?? payload.status ?? "")
+    .trim()
+    .toLowerCase();
 
   if (
     raw === "rent" ||
@@ -306,12 +297,46 @@ function isActiveFeaturedProperty(p: any) {
   return d.getTime() > Date.now();
 }
 
+function getActivePriceDropData(p: any) {
+  if (!p) return null;
+
+  const price = Number(p.price || 0);
+  const previousPrice = Number((p as any).previousPrice || 0);
+  const droppedAtRaw = (p as any).priceDroppedAt;
+
+  if (!Number.isFinite(price) || !Number.isFinite(previousPrice)) return null;
+  if (price <= 0 || previousPrice <= 0 || previousPrice <= price) return null;
+  if (!droppedAtRaw) return null;
+
+  const droppedAt = new Date(droppedAtRaw).getTime();
+
+  if (!Number.isFinite(droppedAt)) return null;
+  if (Date.now() - droppedAt > PRICE_DROP_ACTIVE_MS) return null;
+
+  return {
+    previousPrice,
+    newPrice: price,
+    reduction: previousPrice - price,
+    priceDroppedAt: new Date(droppedAt),
+    activeDays: PRICE_DROP_ACTIVE_DAYS,
+  };
+}
+
+function isActivePriceDropProperty(p: any) {
+  return !!getActivePriceDropData(p);
+}
+
 function sortActiveFeaturedFirst(items: any[]) {
   return [...items].sort((a, b) => {
     const af = isActiveFeaturedProperty(a) ? 1 : 0;
     const bf = isActiveFeaturedProperty(b) ? 1 : 0;
 
     if (af !== bf) return bf - af;
+
+    const ad = isActivePriceDropProperty(a) ? 1 : 0;
+    const bd = isActivePriceDropProperty(b) ? 1 : 0;
+
+    if (ad !== bd) return bd - ad;
 
     const ap = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
     const bp = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
@@ -328,10 +353,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const where =
-      user.role === "admin"
-        ? {}
-        : { userId: user.userId };
+    const where = user.role === "admin" ? {} : { userId: user.userId };
 
     const items = await prisma.property.findMany({
       where,
@@ -401,10 +423,7 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const propertyWhere =
-      user.role === "admin"
-        ? {}
-        : { userId: user.userId };
+    const propertyWhere = user.role === "admin" ? {} : { userId: user.userId };
 
     const properties = await prisma.property.findMany({
       where: propertyWhere,
@@ -419,6 +438,8 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
         county: true,
         eircode: true,
         price: true,
+        previousPrice: true,
+        priceDroppedAt: true,
         bedrooms: true,
         bathrooms: true,
         propertyType: true,
@@ -729,6 +750,7 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
+
 /**
  * admin updates enquiry status / note
  * MUST appear before /:slug route
@@ -908,6 +930,13 @@ router.post("/:id/contact", async (req: any, res) => {
 /**
  * PRICE DROP ENGINE V1
  * Owner/admin can update price on a PUBLISHED listing only.
+ *
+ * Canonical rules:
+ * - Active price drop = previousPrice > price AND priceDroppedAt within 14 days.
+ * - Drops preserve the earliest previousPrice during an active window.
+ * - Price increases do not create badges.
+ * - If price is raised back to or above previousPrice, the active drop clears.
+ * - If an old drop expired, a new lower price starts a fresh drop window.
  */
 router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) => {
   try {
@@ -947,27 +976,56 @@ router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) =>
 
     const currentPrice = Number(existing.price || 0);
     const newPrice = Number(nextPrice);
-    const isPriceDrop = currentPrice > 0 && newPrice < currentPrice;
+    const currentPreviousPrice = Number((existing as any).previousPrice || 0);
+
+    const existingActiveDrop = getActivePriceDropData(existing);
+    const isLowerPrice = currentPrice > 0 && newPrice < currentPrice;
+    const isRaisedBackToOriginal =
+      currentPreviousPrice > 0 && newPrice >= currentPreviousPrice;
+
+    let nextPreviousPrice: number | null = (existing as any).previousPrice ?? null;
+    let nextPriceDroppedAt: Date | null = (existing as any).priceDroppedAt ?? null;
+    let priceDropResponse: any = null;
+
+    if (isLowerPrice) {
+      if (existingActiveDrop) {
+        nextPreviousPrice = existingActiveDrop.previousPrice;
+        nextPriceDroppedAt = existingActiveDrop.priceDroppedAt;
+      } else {
+        nextPreviousPrice = currentPrice;
+        nextPriceDroppedAt = new Date();
+      }
+
+      priceDropResponse = {
+        previousPrice: nextPreviousPrice,
+        newPrice,
+        reduction: Number(nextPreviousPrice) - newPrice,
+        activeDays: PRICE_DROP_ACTIVE_DAYS,
+      };
+    } else if (isRaisedBackToOriginal) {
+      nextPreviousPrice = null;
+      nextPriceDroppedAt = null;
+      priceDropResponse = null;
+    } else {
+      priceDropResponse = getActivePriceDropData({
+        ...existing,
+        price: newPrice,
+      });
+    }
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
         price: newPrice,
-        previousPrice: isPriceDrop ? currentPrice : (existing as any).previousPrice,
-        priceDroppedAt: isPriceDrop ? new Date() : (existing as any).priceDroppedAt,
+        previousPrice: nextPreviousPrice,
+        priceDroppedAt: nextPriceDroppedAt,
       },
     });
 
     return res.json({
       ok: true,
       item: updated,
-      priceDrop: isPriceDrop
-        ? {
-            previousPrice: currentPrice,
-            newPrice,
-            reduction: currentPrice - newPrice,
-          }
-        : null,
+      priceDrop: priceDropResponse,
     });
   } catch (err: any) {
     console.error("PATCH /api/properties/:id/price error", err);
@@ -1018,13 +1076,13 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
       }),
     ]);
 
-  return res.json({
-  ok: true,
-  page,
-  limit,
-  total,
-  items: sortActiveFeaturedFirst(items),
-});
+    return res.json({
+      ok: true,
+      page,
+      limit,
+      total,
+      items: sortActiveFeaturedFirst(items),
+    });
   } catch (err: any) {
     console.error("GET /api/properties error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -1127,6 +1185,7 @@ router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
     return res.status(500).json({ ok: false, error: "SERVER_ERROR" });
   }
 });
+
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
@@ -1181,6 +1240,8 @@ router.post("/", requireAuth, async (req: any, res) => {
         lat: geo.lat,
         lng: geo.lng,
         price: asOptionalInt(payload.price) ?? 0,
+        previousPrice: null,
+        priceDroppedAt: null,
         ber: asOptionalString(payload.berRating ?? payload.ber),
         berRating: asOptionalString(payload.berRating ?? payload.ber),
         berNo: asOptionalString(payload.berNo),
@@ -1200,7 +1261,7 @@ router.post("/", requireAuth, async (req: any, res) => {
         furnished: asOptionalBoolean(payload.furnished),
         parking: asOptionalString(payload.parking),
         outdoorSpace: asOptionalString(payload.outdoorSpace),
-	saleCondition: asOptionalString(payload.saleCondition),
+        saleCondition: asOptionalString(payload.saleCondition),
         yearBuilt: asOptionalInt(payload.yearBuilt),
         heatingType: asOptionalString(payload.heatingType),
         viewingDetails: asOptionalString(payload.viewingDetails),
@@ -1264,25 +1325,25 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
       return res.status(409).json({ ok: false, message: "Only drafts can be edited." });
     }
 
-const payload = normalizePayload(req.body);
+    const payload = normalizePayload(req.body);
 
-const nextEircode =
-  payload.eircode !== undefined
-    ? normalizeEircode(payload.eircode)
-    : existing.eircode;
+    const nextEircode =
+      payload.eircode !== undefined
+        ? normalizeEircode(payload.eircode)
+        : existing.eircode;
 
-const shouldGeocode =
-  payload.eircode !== undefined &&
-  normalizeEircode(payload.eircode) !== existing.eircode;
+    const shouldGeocode =
+      payload.eircode !== undefined &&
+      normalizeEircode(payload.eircode) !== existing.eircode;
 
-const geo = shouldGeocode
-  ? await geocodeIrishEircode(nextEircode)
-  : { lat: existing.lat, lng: existing.lng };
+    const geo = shouldGeocode
+      ? await geocodeIrishEircode(nextEircode)
+      : { lat: existing.lat, lng: existing.lng };
 
-const nextMode =
-  payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
-    ? getIncomingMode(payload)
-    : existing.mode;
+    const nextMode =
+      payload.mode || payload.marketMode || payload.listingMode || payload.marketStatus
+        ? getIncomingMode(payload)
+        : existing.mode;
 
     const updated = await prisma.property.update({
       where: { id },
@@ -1296,12 +1357,16 @@ const nextMode =
         lat: geo.lat,
         lng: geo.lng,
         price: payload.price !== undefined ? (asOptionalInt(payload.price) ?? 0) : existing.price,
-        ber: payload.berRating !== undefined || payload.ber !== undefined
-          ? asOptionalString(payload.berRating ?? payload.ber)
-          : existing.ber,
-        berRating: payload.berRating !== undefined || payload.ber !== undefined
-          ? asOptionalString(payload.berRating ?? payload.ber)
-          : (existing as any).berRating,
+        previousPrice: null,
+        priceDroppedAt: null,
+        ber:
+          payload.berRating !== undefined || payload.ber !== undefined
+            ? asOptionalString(payload.berRating ?? payload.ber)
+            : existing.ber,
+        berRating:
+          payload.berRating !== undefined || payload.ber !== undefined
+            ? asOptionalString(payload.berRating ?? payload.ber)
+            : (existing as any).berRating,
         berNo: payload.berNo !== undefined ? asOptionalString(payload.berNo) : existing.berNo,
         bedrooms: payload.bedrooms !== undefined ? asOptionalInt(payload.bedrooms) : existing.bedrooms,
         bathrooms: payload.bathrooms !== undefined ? asOptionalInt(payload.bathrooms) : existing.bathrooms,
@@ -1309,81 +1374,91 @@ const nextMode =
         sizeUnit: payload.sizeUnit !== undefined ? asOptionalString(payload.sizeUnit) : (existing as any).sizeUnit,
         propertyType: payload.propertyType ?? existing.propertyType,
         saleType: payload.saleType !== undefined ? asOptionalString(payload.saleType) : existing.saleType,
-        marketStatus: payload.marketStatus !== undefined || payload.status !== undefined
-          ? asOptionalString(payload.marketStatus ?? payload.status)
-          : existing.marketStatus,
+        marketStatus:
+          payload.marketStatus !== undefined || payload.status !== undefined
+            ? asOptionalString(payload.marketStatus ?? payload.status)
+            : existing.marketStatus,
         description: payload.description !== undefined ? asOptionalString(payload.description) : existing.description,
-        features: Array.isArray(payload.features) || typeof payload.features === "string"
-          ? asStringArray(payload.features)
-          : existing.features,
-        photos: Array.isArray(payload.photos) || typeof payload.photos === "string"
-          ? asStringArray(payload.photos)
-          : existing.photos,
-        rentFrequency: payload.rentFrequency !== undefined
-          ? asOptionalString(payload.rentFrequency)
-          : (existing as any).rentFrequency,
-        deposit: payload.deposit !== undefined
-          ? asOptionalInt(payload.deposit)
-          : (existing as any).deposit,
-        availableFrom: payload.availableFrom !== undefined
-          ? asOptionalDate(payload.availableFrom)
-          : (existing as any).availableFrom,
-        furnished: payload.furnished !== undefined
-          ? asOptionalBoolean(payload.furnished)
-          : (existing as any).furnished,
-        parking: payload.parking !== undefined
-          ? asOptionalString(payload.parking)
-          : (existing as any).parking,
-        outdoorSpace: payload.outdoorSpace !== undefined
-          ? asOptionalString(payload.outdoorSpace)
-          : (existing as any).outdoorSpace,
-	saleCondition: payload.saleCondition !== undefined
-  	? asOptionalString(payload.saleCondition)
-  	: (existing as any).saleCondition,
-
-	yearBuilt: payload.yearBuilt !== undefined
-  	? asOptionalInt(payload.yearBuilt)
-  	: (existing as any).yearBuilt,
-
-	heatingType: payload.heatingType !== undefined
-  	? asOptionalString(payload.heatingType)
-  	: (existing as any).heatingType,
-
-	viewingDetails: payload.viewingDetails !== undefined
-  	? asOptionalString(payload.viewingDetails)
-  	: (existing as any).viewingDetails,
-
-	leaseLength: payload.leaseLength !== undefined
-  	? asOptionalString(payload.leaseLength)
-  	: (existing as any).leaseLength,
-
-	minimumTerm: payload.minimumTerm !== undefined
-  	? asOptionalString(payload.minimumTerm)
-  	: (existing as any).minimumTerm,
-
-	billsIncluded: payload.billsIncluded !== undefined
-  	? asOptionalString(payload.billsIncluded)
-  	: (existing as any).billsIncluded,
-
-	petsAllowed: payload.petsAllowed !== undefined
-  	? asOptionalString(payload.petsAllowed)
-  	: (existing as any).petsAllowed,
-
-	roomType: payload.roomType !== undefined
-  	? asOptionalString(payload.roomType)
-  	: (existing as any).roomType,
-
-	ensuite: payload.ensuite !== undefined
-  	? asOptionalString(payload.ensuite)
-  	: (existing as any).ensuite,
-
-	currentOccupants: payload.currentOccupants !== undefined
-  	? asOptionalInt(payload.currentOccupants)
-  	: (existing as any).currentOccupants,
-
-	couplesAllowed: payload.couplesAllowed !== undefined
-  	? asOptionalString(payload.couplesAllowed)
-  	: (existing as any).couplesAllowed,
+        features:
+          Array.isArray(payload.features) || typeof payload.features === "string"
+            ? asStringArray(payload.features)
+            : existing.features,
+        photos:
+          Array.isArray(payload.photos) || typeof payload.photos === "string"
+            ? asStringArray(payload.photos)
+            : existing.photos,
+        rentFrequency:
+          payload.rentFrequency !== undefined
+            ? asOptionalString(payload.rentFrequency)
+            : (existing as any).rentFrequency,
+        deposit:
+          payload.deposit !== undefined
+            ? asOptionalInt(payload.deposit)
+            : (existing as any).deposit,
+        availableFrom:
+          payload.availableFrom !== undefined
+            ? asOptionalDate(payload.availableFrom)
+            : (existing as any).availableFrom,
+        furnished:
+          payload.furnished !== undefined
+            ? asOptionalBoolean(payload.furnished)
+            : (existing as any).furnished,
+        parking:
+          payload.parking !== undefined
+            ? asOptionalString(payload.parking)
+            : (existing as any).parking,
+        outdoorSpace:
+          payload.outdoorSpace !== undefined
+            ? asOptionalString(payload.outdoorSpace)
+            : (existing as any).outdoorSpace,
+        saleCondition:
+          payload.saleCondition !== undefined
+            ? asOptionalString(payload.saleCondition)
+            : (existing as any).saleCondition,
+        yearBuilt:
+          payload.yearBuilt !== undefined
+            ? asOptionalInt(payload.yearBuilt)
+            : (existing as any).yearBuilt,
+        heatingType:
+          payload.heatingType !== undefined
+            ? asOptionalString(payload.heatingType)
+            : (existing as any).heatingType,
+        viewingDetails:
+          payload.viewingDetails !== undefined
+            ? asOptionalString(payload.viewingDetails)
+            : (existing as any).viewingDetails,
+        leaseLength:
+          payload.leaseLength !== undefined
+            ? asOptionalString(payload.leaseLength)
+            : (existing as any).leaseLength,
+        minimumTerm:
+          payload.minimumTerm !== undefined
+            ? asOptionalString(payload.minimumTerm)
+            : (existing as any).minimumTerm,
+        billsIncluded:
+          payload.billsIncluded !== undefined
+            ? asOptionalString(payload.billsIncluded)
+            : (existing as any).billsIncluded,
+        petsAllowed:
+          payload.petsAllowed !== undefined
+            ? asOptionalString(payload.petsAllowed)
+            : (existing as any).petsAllowed,
+        roomType:
+          payload.roomType !== undefined
+            ? asOptionalString(payload.roomType)
+            : (existing as any).roomType,
+        ensuite:
+          payload.ensuite !== undefined
+            ? asOptionalString(payload.ensuite)
+            : (existing as any).ensuite,
+        currentOccupants:
+          payload.currentOccupants !== undefined
+            ? asOptionalInt(payload.currentOccupants)
+            : (existing as any).currentOccupants,
+        couplesAllowed:
+          payload.couplesAllowed !== undefined
+            ? asOptionalString(payload.couplesAllowed)
+            : (existing as any).couplesAllowed,
         mode: nextMode,
       },
     });
