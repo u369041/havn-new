@@ -463,27 +463,66 @@ export async function sendHavnWeeklyDigestEmail(args: {
       ].filter(Boolean).join(" • ");
 
       return `
-        <td width="25%" style="width:25%;max-width:170px;padding:8px;vertical-align:top;">
-          <a href="${escapeAttr(p.url)}" style="text-decoration:none;color:#071326;display:block;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
-            <div style="height:120px;max-height:120px;overflow:hidden;background:#e5e7eb;position:relative;">
-              ${
-                p.imageUrl
-                  ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" width="170" style="width:100%;max-width:170px;height:120px;max-height:120px;object-fit:cover;display:block;border:0;" />`
-                  : `<div style="height:120px;background:linear-gradient(135deg,#eef2ff,#f8fafc);"></div>`
-              }
-              ${
-                p.badge
-                  ? `<div style="position:absolute;left:10px;top:10px;background:#4f46e5;color:#fff;font-size:11px;font-weight:800;padding:5px 8px;border-radius:8px;">${escapeHtml(p.badge)}</div>`
-                  : ``
-              }
-            </div>
-            <div style="padding:12px;">
-              <div style="font-size:17px;font-weight:900;color:#071326;margin-bottom:5px;">${escapeHtml(price)}</div>
-              ${meta ? `<div style="font-size:13px;color:#334155;margin-bottom:5px;">${escapeHtml(meta)}</div>` : ``}
-              <div style="font-size:13px;color:#071326;line-height:1.35;">${escapeHtml(p.title)}</div>
-              ${p.location ? `<div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:4px;">${escapeHtml(p.location)}</div>` : ``}
-            </div>
-          </a>
+        <td width="25%" valign="top" style="width:25%;padding:8px;vertical-align:top;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+            <tr>
+              <td align="center" style="padding:0;">
+                <table role="presentation" width="170" cellspacing="0" cellpadding="0" style="width:170px;">
+                  <tr>
+                    <td width="170" height="120" style="width:170px;height:120px;overflow:hidden;background:#e5e7eb;line-height:0;font-size:0;">
+                      ${
+                        p.imageUrl
+                          ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" width="170" height="120" style="display:block;width:170px;height:120px;border:0;outline:none;text-decoration:none;" />`
+                          : `<div style="width:170px;height:120px;background:linear-gradient(135deg,#eef2ff,#f8fafc);"></div>`
+                      }
+                    </td>
+                  </tr>
+
+                  ${
+                    p.badge
+                      ? `
+                        <tr>
+                          <td style="background:#4f46e5;color:#ffffff;font-size:11px;font-weight:800;padding:6px 10px;text-align:center;">
+                            ${escapeHtml(p.badge)}
+                          </td>
+                        </tr>
+                      `
+                      : ``
+                  }
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:12px;">
+                <div style="font-size:17px;font-weight:900;color:#071326;margin-bottom:5px;">
+                  ${escapeHtml(price)}
+                </div>
+
+                ${
+                  meta
+                    ? `<div style="font-size:13px;color:#334155;margin-bottom:5px;">${escapeHtml(meta)}</div>`
+                    : ``
+                }
+
+                <div style="font-size:13px;color:#071326;line-height:1.35;font-weight:700;">
+                  ${escapeHtml(p.title)}
+                </div>
+
+                ${
+                  p.location
+                    ? `<div style="font-size:12px;color:#64748b;line-height:1.45;margin-top:6px;">${escapeHtml(p.location)}</div>`
+                    : ``
+                }
+
+                <div style="margin-top:12px;">
+                  <a href="${escapeAttr(p.url)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:12px;font-weight:800;padding:9px 14px;border-radius:8px;">
+                    View property →
+                  </a>
+                </div>
+              </td>
+            </tr>
+          </table>
         </td>
       `;
     }).join("");
@@ -622,7 +661,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                       </tr>
                     </table>
                     <div style="border-top:1px solid rgba(255,255,255,0.14);margin-top:18px;padding-top:14px;font-size:11px;color:#94a3b8;">
-                      HAVN Property Group Ltd. Registered in Ireland. 
+                      HAVN Property Group Ltd. Registered in Ireland.
                       <span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Unsubscribe</a></span>
                     </div>
                   </td>
