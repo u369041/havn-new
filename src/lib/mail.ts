@@ -406,6 +406,270 @@ export async function sendEmailVerificationEmail(args: {
   }
 }
 
+/**
+ * ----------------------------
+ * HAVN WEEKLY DIGEST EMAIL
+ * ----------------------------
+ */
+export type HavnWeeklyDigestProperty = {
+  title: string;
+  price?: number | null;
+  location?: string | null;
+  beds?: number | null;
+  baths?: number | null;
+  url: string;
+  imageUrl?: string | null;
+  badge?: string | null;
+};
+
+export async function sendHavnWeeklyDigestEmail(args: {
+  to: string;
+  name?: string | null;
+  newMatchesCount: number;
+  featuredCount: number;
+  priceDropsCount?: number;
+  trendingAreasCount?: number;
+  recentlyViewedCount?: number;
+  matchesUrl: string;
+  manageAlertsUrl?: string;
+  properties: HavnWeeklyDigestProperty[];
+}) {
+  try {
+    const displayName = (args.name || "").trim();
+    const newMatchesCount = Math.max(0, Number(args.newMatchesCount || 0));
+    const featuredCount = Math.max(0, Number(args.featuredCount || 0));
+    const priceDropsCount = Math.max(0, Number(args.priceDropsCount || 0));
+    const trendingAreasCount = Math.max(0, Number(args.trendingAreasCount || 0));
+    const recentlyViewedCount = Math.max(0, Number(args.recentlyViewedCount || 0));
+
+    const subject =
+      newMatchesCount > 0
+        ? `Your HAVN Weekly: ${newMatchesCount} new matching ${newMatchesCount === 1 ? "home" : "homes"}`
+        : "Your HAVN Weekly property update";
+
+    const propertiesHtml = (args.properties || []).slice(0, 4).map((p) => {
+      const price =
+        typeof p.price === "number" && Number.isFinite(p.price)
+          ? new Intl.NumberFormat("en-IE", {
+              style: "currency",
+              currency: "EUR",
+              maximumFractionDigits: 0,
+            }).format(p.price)
+          : "Price on request";
+
+      const meta = [
+        p.beds ? `${p.beds} Bed` : "",
+        p.baths ? `${p.baths} Bath` : "",
+      ].filter(Boolean).join(" • ");
+
+      return `
+        <td style="width:25%;padding:8px;vertical-align:top;">
+          <a href="${escapeAttr(p.url)}" style="text-decoration:none;color:#071326;display:block;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff;">
+            <div style="height:120px;background:#e5e7eb;position:relative;">
+              ${
+                p.imageUrl
+                  ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" style="width:100%;height:120px;object-fit:cover;display:block;" />`
+                  : `<div style="height:120px;background:linear-gradient(135deg,#eef2ff,#f8fafc);"></div>`
+              }
+              ${
+                p.badge
+                  ? `<div style="position:absolute;left:10px;top:10px;background:#4f46e5;color:#fff;font-size:11px;font-weight:800;padding:5px 8px;border-radius:8px;">${escapeHtml(p.badge)}</div>`
+                  : ``
+              }
+            </div>
+            <div style="padding:12px;">
+              <div style="font-size:17px;font-weight:900;color:#071326;margin-bottom:5px;">${escapeHtml(price)}</div>
+              ${meta ? `<div style="font-size:13px;color:#334155;margin-bottom:5px;">${escapeHtml(meta)}</div>` : ``}
+              <div style="font-size:13px;color:#071326;line-height:1.35;">${escapeHtml(p.title)}</div>
+              ${p.location ? `<div style="font-size:12px;color:#64748b;line-height:1.35;margin-top:4px;">${escapeHtml(p.location)}</div>` : ``}
+            </div>
+          </a>
+        </td>
+      `;
+    }).join("");
+
+    const html = `
+      <div style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,Helvetica,sans-serif;color:#071326;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:24px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:760px;max-width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
+                
+                <tr>
+                  <td style="background:#071326;padding:22px 28px;border-top:6px solid #4f46e5;">
+                    <table role="presentation" width="100%">
+                      <tr>
+                        <td>
+                          <div style="display:inline-block;border:1px solid rgba(255,255,255,0.35);border-radius:10px;padding:12px 16px;color:#fff;font-weight:900;letter-spacing:.04em;">LOGO</div>
+                          <span style="font-size:28px;font-weight:900;color:#fff;margin-left:14px;vertical-align:middle;">havn.ie</span>
+                          <div style="font-size:13px;color:#cbd5e1;margin-top:6px;">Ireland’s curated property marketplace.</div>
+                        </td>
+                        <td align="right" style="font-size:13px;">
+                          <a href="${escapeAttr(args.matchesUrl)}" style="color:#e0e7ff;text-decoration:underline;">View in browser</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:42px 34px 30px;background:linear-gradient(90deg,#ffffff 0%,#ffffff 50%,#eff6ff 100%);">
+                    <div style="color:#4f46e5;font-size:14px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px;">Your HAVN Weekly</div>
+                    <h1 style="font-size:42px;line-height:1.05;margin:0 0 16px;color:#071326;letter-spacing:-1.5px;">
+                      Your property <span style="color:#4f46e5;">update</span> is here. 🏡
+                    </h1>
+                    <p style="font-size:17px;line-height:1.55;color:#334155;margin:0 0 24px;max-width:470px;">
+                      ${displayName ? `Hi ${escapeHtml(displayName)}, ` : ""}here’s your personalised weekly update with new listings that match your saved searches, featured homes, price changes and market insights.
+                    </p>
+                    <a href="${escapeAttr(args.matchesUrl)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:900;padding:15px 22px;border-radius:9px;">
+                      View all matches →
+                    </a>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:0 24px 24px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:18px;">
+                      <tr>
+                        ${metricCell(newMatchesCount, "NEW MATCHES", "Across your searches")}
+                        ${metricCell(featuredCount, "FEATURED HOMES", "Hand-picked for you")}
+                        ${metricCell(priceDropsCount, "PRICE DROPS", "Great new opportunities")}
+                        ${metricCell(trendingAreasCount, "TRENDING AREAS", "Heating up this week")}
+                        ${metricCell(recentlyViewedCount, "RECENTLY VIEWED", "New since you last visited")}
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                ${
+                  propertiesHtml
+                    ? `
+                      <tr>
+                        <td style="padding:12px 24px 8px;">
+                          <table role="presentation" width="100%">
+                            <tr>
+                              <td>
+                                <h2 style="font-size:24px;margin:0;color:#071326;">New matches for your searches</h2>
+                              </td>
+                              <td align="right">
+                                <a href="${escapeAttr(args.matchesUrl)}" style="color:#4f46e5;font-weight:900;text-decoration:none;">View all (${newMatchesCount}) →</a>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+
+                      <tr>
+                        <td style="padding:0 16px 24px;">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                            <tr>${propertiesHtml}</tr>
+                          </table>
+                        </td>
+                      </tr>
+                    `
+                    : `
+                      <tr>
+                        <td style="padding:20px 28px 30px;">
+                          <div style="border:1px solid #e5e7eb;background:#f8fafc;border-radius:16px;padding:22px;text-align:center;">
+                            <h2 style="margin:0 0 8px;font-size:22px;color:#071326;">No new matches this week</h2>
+                            <p style="margin:0;color:#64748b;line-height:1.5;">We’ll keep watching your saved searches and let you know when the right homes appear.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    `
+                }
+
+                <tr>
+                  <td style="padding:0 24px 24px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        ${insightCard("PRICE DROPS", `${priceDropsCount} properties with price reductions`, "Save on your next move", "View price drops →", args.matchesUrl)}
+                        ${insightCard("TRENDING THIS WEEK", `${trendingAreasCount || 3} areas are heating up`, "See where buyer demand is moving", "Explore areas →", args.matchesUrl)}
+                        ${insightCard("FEATURED HOMES", `${featuredCount} homes hand-picked for you`, "Don’t miss these", "See featured homes →", args.matchesUrl)}
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:0 24px 28px;">
+                    <table role="presentation" width="100%" style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:16px;">
+                      <tr>
+                        <td style="padding:20px;">
+                          <div style="font-size:18px;font-weight:900;color:#071326;">Never miss a match</div>
+                          <div style="font-size:14px;color:#334155;line-height:1.5;margin-top:4px;">Weekly updates for homes that match your top searches. You’re in control.</div>
+                        </td>
+                        <td align="right" style="padding:20px;">
+                          <a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="display:inline-block;border:1px solid #4f46e5;color:#4f46e5;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:9px;">Manage alerts →</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="background:#071326;padding:24px 28px;color:#cbd5e1;">
+                    <table role="presentation" width="100%">
+                      <tr>
+                        <td>
+                          <div style="font-size:22px;font-weight:900;color:#fff;">havn.ie</div>
+                          <div style="font-size:12px;margin-top:4px;">Ireland’s curated property marketplace.</div>
+                        </td>
+                        <td align="right" style="font-size:13px;line-height:1.5;">
+                          We’re here to help.<br />
+                          hello@havn.ie
+                        </td>
+                      </tr>
+                    </table>
+                    <div style="border-top:1px solid rgba(255,255,255,0.14);margin-top:18px;padding-top:14px;font-size:11px;color:#94a3b8;">
+                      HAVN Property Group Ltd. Registered in Ireland. 
+                      <span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Unsubscribe</a></span>
+                    </div>
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+        </table>
+      </div>
+    `;
+
+    return await resend.emails.send({
+      from: FROM,
+      to: args.to,
+      subject,
+      html,
+    });
+  } catch (err) {
+    console.error("sendHavnWeeklyDigestEmail failed:", err);
+    return null;
+  }
+}
+
+function metricCell(value: number, label: string, sub: string) {
+  return `
+    <td align="center" style="padding:22px 10px;border-right:1px solid #e5e7eb;">
+      <div style="font-size:30px;font-weight:900;color:#071326;line-height:1;">${escapeHtml(String(value))}</div>
+      <div style="font-size:12px;font-weight:900;color:#071326;margin-top:8px;">${escapeHtml(label)}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:5px;">${escapeHtml(sub)}</div>
+    </td>
+  `;
+}
+
+function insightCard(label: string, title: string, sub: string, cta: string, url: string) {
+  return `
+    <td style="width:33.333%;padding:8px;vertical-align:top;">
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:18px;min-height:138px;">
+        <div style="font-size:11px;font-weight:900;color:#4f46e5;letter-spacing:.05em;margin-bottom:12px;">${escapeHtml(label)}</div>
+        <div style="font-size:20px;line-height:1.15;font-weight:900;color:#071326;margin-bottom:8px;">${escapeHtml(title)}</div>
+        <div style="font-size:13px;color:#334155;margin-bottom:14px;">${escapeHtml(sub)}</div>
+        <a href="${escapeAttr(url)}" style="color:#4f46e5;text-decoration:none;font-weight:900;font-size:13px;">${escapeHtml(cta)}</a>
+      </div>
+    </td>
+  `;
+}
+
 function escapeHtml(input: string) {
   return String(input || "")
     .replace(/&/g, "&amp;")
