@@ -203,6 +203,7 @@ async function notifyMatchingSavedSearches(property: any) {
     const savedSearches = await prisma.savedSearch.findMany({
       where: {
         userId: { not: property.userId },
+        alertsEnabled: true,
       },
       include: {
         user: {
@@ -219,7 +220,6 @@ async function notifyMatchingSavedSearches(property: any) {
     for (const saved of savedSearches) {
       const filters: any = saved.filters || {};
 
-      if (filters.alertsEnabled !== true) continue;
       if (!saved.user?.email) continue;
       if (!savedSearchMatchesProperty(filters, property)) continue;
 
