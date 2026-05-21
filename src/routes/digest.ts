@@ -24,6 +24,15 @@ function safeStr(v: any, fallback = "") {
   return s || fallback;
 }
 
+function isActiveFeatured(property: any) {
+  if (!property) return false;
+  if (property.isFeatured !== true) return false;
+  if (!property.featuredUntil) return true;
+
+  const t = new Date(property.featuredUntil).getTime();
+  return Number.isFinite(t) && t > Date.now();
+}
+
 function isActivePriceDrop(property: any) {
   const price = Number(property?.price || 0);
   const previousPrice = Number(property?.previousPrice || 0);
@@ -34,7 +43,6 @@ function isActivePriceDrop(property: any) {
   if (!droppedAtRaw) return false;
 
   const droppedAt = new Date(droppedAtRaw).getTime();
-
   if (!Number.isFinite(droppedAt)) return false;
 
   return Date.now() - droppedAt <= PRICE_DROP_ACTIVE_MS;
@@ -138,7 +146,52 @@ function propertyLocation(p: any) {
 }
 
 function propertyImage(p: any) {
-  return Array.isArray(p.photos) && p.photos.length ? p.photos[0] : null;
+  const photos = p.photos || p.images || p.imageUrls || [];
+
+  if (Array.isArray(photos) && photos.length) {
+    const first = photos[0];
+
+    if (typeof first === "string") return first;
+
+    if (first && typeof first === "object") {
+      return first.url || first.secure_url || first.src || null;
+    }
+  }
+
+  return p.cover || p.coverImage || p.image || null;
+}
+
+function propertyTime(p: any) {
+  const t = new Date(p.publishedAt || p.createdAt || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function sortDigestProperties(items: any[]) {
+  return items.slice().sort((a, b) => {
+    const af = isActiveFeatured(a) ? 1 : 0;
+    const bf = isActiveFeatured(b) ? 1 : 0;
+
+    if (af !== bf) return bf - af;
+
+    const ad = isActivePriceDrop(a) ? 1 : 0;
+    const bd = isActivePriceDrop(b) ? 1 : 0;
+
+    if (ad !== bd) return bd - ad;
+
+    return propertyTime(b) - propertyTime(a);
+  });
+}
+
+function addToMap(map: Map<number, any>, property: any) {
+  if (!property || typeof property.id !== "number") return;
+  map.set(property.id, property);
+}
+
+function badgeForProperty(p: any, matchedIds: Set<number>) {
+  if (isActiveFeatured(p)) return "FEATURED";
+  if (isActivePriceDrop(p)) return "PRICE DROP";
+  if (matchedIds.has(p.id)) return "MATCH";
+  return "NEW";
 }
 
 router.post("/run-weekly", async (req, res) => {
@@ -174,13 +227,13 @@ router.post("/run-weekly", async (req, res) => {
       take: 500,
     });
 
-    const featuredProperties = publishedProperties.filter((p) => {
-      if (!p.isFeatured) return false;
-      if (!p.featuredUntil) return true;
-      return new Date(p.featuredUntil).getTime() > Date.now();
-    });
-
+    const featuredProperties = publishedProperties.filter(isActiveFeatured);
     const activePriceDropProperties = publishedProperties.filter(isActivePriceDrop);
+
+    const newestProperties = publishedProperties.filter((p) => {
+      const t = propertyTime(p);
+      return t > weeklyCutoff.getTime();
+    });
 
     const searchesByUser = new Map<number, typeof savedSearches>();
 
@@ -199,9 +252,9 @@ router.post("/run-weekly", async (req, res) => {
     let usersChecked = searchesByUser.size;
     let emailsSent = 0;
     let searchesUpdated = 0;
-    let skippedNoMatches = 0;
+    let skippedNoDigestContent = 0;
 
-    for (const [userId, searches] of searchesByUser.entries()) {
+    for (const [_userId, searches] of searchesByUser.entries()) {
       const user = searches[0]?.user;
       if (!user?.email) continue;
 
@@ -229,39 +282,30 @@ router.post("/run-weekly", async (req, res) => {
           }
 
           if (matchesSearch(filters, property)) {
-            matched.set(property.id, property);
+            addToMap(matched, property);
           }
         }
 
         for (const property of activePriceDropProperties) {
           if (matchesSearch(filters, property)) {
-            matchedPriceDrops.set(property.id, property);
-            matched.set(property.id, property);
+            addToMap(matchedPriceDrops, property);
+            addToMap(matched, property);
           }
         }
       }
 
-      const matchedProperties = Array.from(matched.values())
-        .sort((a, b) => {
-          const ad = isActivePriceDrop(a) ? 1 : 0;
-          const bd = isActivePriceDrop(b) ? 1 : 0;
+      const matchedIds = new Set<number>(Array.from(matched.keys()));
+      const digestPool = new Map<number, any>();
 
-          if (ad !== bd) return bd - ad;
+      sortDigestProperties(Array.from(matched.values())).forEach((p) => addToMap(digestPool, p));
+      sortDigestProperties(featuredProperties).slice(0, 4).forEach((p) => addToMap(digestPool, p));
+      sortDigestProperties(activePriceDropProperties).slice(0, 4).forEach((p) => addToMap(digestPool, p));
+      sortDigestProperties(newestProperties).slice(0, 4).forEach((p) => addToMap(digestPool, p));
 
-          const af = a.isFeatured ? 1 : 0;
-          const bf = b.isFeatured ? 1 : 0;
+      const digestProperties = sortDigestProperties(Array.from(digestPool.values())).slice(0, 8);
 
-          if (af !== bf) return bf - af;
-
-          const at = new Date(a.publishedAt || a.createdAt || 0).getTime();
-          const bt = new Date(b.publishedAt || b.createdAt || 0).getTime();
-
-          return bt - at;
-        })
-        .slice(0, 8);
-
-      if (!matchedProperties.length) {
-        skippedNoMatches += 1;
+      if (!digestProperties.length) {
+        skippedNoDigestContent += 1;
 
         await prisma.savedSearch.updateMany({
           where: {
@@ -285,12 +329,12 @@ router.post("/run-weekly", async (req, res) => {
         name: user.name || null,
         newMatchesCount: matched.size,
         featuredCount: featuredProperties.length,
-        priceDropsCount: matchedPriceDrops.size,
+        priceDropsCount: activePriceDropProperties.length,
         trendingAreasCount: 3,
-        recentlyViewedCount: 0,
+        recentlyViewedCount: newestProperties.length,
         matchesUrl,
         manageAlertsUrl: `${APP_URL}/my-listings.html`,
-        properties: matchedProperties.slice(0, 4).map((p) => ({
+        properties: digestProperties.slice(0, 4).map((p) => ({
           title: p.title,
           price: p.price,
           location: propertyLocation(p),
@@ -298,7 +342,7 @@ router.post("/run-weekly", async (req, res) => {
           baths: p.bathrooms,
           url: propertyUrl(p),
           imageUrl: propertyImage(p),
-          badge: isActivePriceDrop(p) ? "PRICE DROP" : "NEW",
+          badge: badgeForProperty(p, matchedIds),
         })),
       });
 
@@ -327,8 +371,10 @@ router.post("/run-weekly", async (req, res) => {
       usersChecked,
       emailsSent,
       searchesUpdated,
-      skippedNoMatches,
+      skippedNoDigestContent,
+      featuredProperties: featuredProperties.length,
       activePriceDrops: activePriceDropProperties.length,
+      newListings: newestProperties.length,
     });
   } catch (err: any) {
     console.error("weekly digest failed:", err);
