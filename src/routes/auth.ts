@@ -175,6 +175,14 @@ router.post("/saved-searches", requireAuth, async (req: any, res) => {
         userId,
         name: name || "My search",
         filters,
+
+        // alertsEnabled controls immediate saved-search alerts when a matching
+        // property is approved/published.
+        alertsEnabled: true,
+
+        // alertFrequency controls digest inclusion. Keep weekly as the default
+        // so the same saved search can also appear in the Sunday weekly digest.
+        alertFrequency: "weekly",
       },
     });
 
