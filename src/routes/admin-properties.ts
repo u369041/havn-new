@@ -669,4 +669,52 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
   }
 });
 
+/**
+ * DELETE /api/admin/properties/:id
+ */
+router.delete("/:id", requireAuth, async (req: any, res: any) => {
+  try {
+    const user = req.user;
+    if (!requireAdmin(user, res)) return;
+
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid id",
+      });
+    }
+
+    const existing = await prisma.property.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        ok: false,
+        message: "Property not found",
+      });
+    }
+
+    await prisma.property.delete({
+      where: { id },
+    });
+
+    return res.json({
+      ok: true,
+      deletedId: id,
+    });
+
+  } catch (err: any) {
+    console.error("DELETE /api/admin/properties/:id error", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err?.message || String(err),
+    });
+  }
+});
+
 export default router;
