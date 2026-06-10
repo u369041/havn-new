@@ -1273,6 +1273,7 @@ router.post("/", requireAuth, async (req: any, res) => {
         ensuite: asOptionalString(payload.ensuite),
         currentOccupants: asOptionalInt(payload.currentOccupants),
         couplesAllowed: asOptionalString(payload.couplesAllowed),
+        ownerOccupied: asOptionalString(payload.ownerOccupied),
         listingStatus: "DRAFT",
         isFeatured: false,
         featuredUntil: null,
@@ -1459,6 +1460,10 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
           payload.couplesAllowed !== undefined
             ? asOptionalString(payload.couplesAllowed)
             : (existing as any).couplesAllowed,
+        ownerOccupied:
+          payload.ownerOccupied !== undefined
+            ? asOptionalString(payload.ownerOccupied)
+            : (existing as any).ownerOccupied,
         mode: nextMode,
       },
     });

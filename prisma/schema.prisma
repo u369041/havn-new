@@ -129,6 +129,7 @@ model Property {
   ensuite          String?
   currentOccupants Int?
   couplesAllowed   String?
+  ownerOccupied    String?
 
   userId         Int
 
