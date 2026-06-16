@@ -12,9 +12,11 @@
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
+    "adm-zip": "^0.5.17",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
+    "csv-parse": "^7.0.0",
     "express": "^4.18.2",
     "express-rate-limit": "^7.0.0",
     "helmet": "^7.0.0",
@@ -24,6 +26,7 @@
     "tsx": "^4.7.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/bcrypt": "^5.0.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
