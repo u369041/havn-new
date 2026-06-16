@@ -1151,7 +1151,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const cacheFresh =
       cached &&
-      (cached as any).version === "property-intelligence-v3" &&
+      (cached as any).version === "property-intelligence-v4" &&
       cachedAt &&
       !Number.isNaN(cachedAt.getTime()) &&
       Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1301,7 +1301,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearbyTransport(20),
       Promise.race([
         getTransportIntelligence(lat, lng, 30),
-        new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 3500)),
+        new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 15000)),
       ]),
       nearby("supermarket shops grocery", 20, "supermarket"),
       nearby("pharmacy doctor hospital medical centre", 20),
@@ -1353,7 +1353,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
 
     const intelligence = {
-      version: "property-intelligence-v3",
+      version: "property-intelligence-v4",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
