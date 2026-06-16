@@ -7,6 +7,7 @@ import {
   sendUserListingEmail,
   sendPropertyLeadEmail,
 } from "../lib/mail";
+import { getTransportIntelligence } from "../services/transport-intelligence";
 
 const router = Router();
 
@@ -1150,7 +1151,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const cacheFresh =
       cached &&
-      (cached as any).version === "property-intelligence-v2" &&
+      (cached as any).version === "property-intelligence-v3" &&
       cachedAt &&
       !Number.isNaN(cachedAt.getTime()) &&
       Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1288,6 +1289,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     const [
       schools,
       transport,
+      transportV3,
       shopping,
       healthcare,
       parks,
@@ -1297,6 +1299,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     ] = await Promise.all([
       nearby("school", 20, "school"),
       nearbyTransport(20),
+      getTransportIntelligence(lat, lng, 30),
       nearby("supermarket shops grocery", 20, "supermarket"),
       nearby("pharmacy doctor hospital medical centre", 20),
       nearby("park beach green space", 20, "park"),
@@ -1347,7 +1350,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
 
     const intelligence = {
-      version: "property-intelligence-v2",
+      version: "property-intelligence-v3",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -1374,6 +1377,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby: {
         schools,
         transport,
+        transportV3,
         shopping,
         healthcare,
         parks,
@@ -1411,39 +1415,6 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
 
 
-
-router.post("/:id/view", async (req: any, res) => {
-  try {
-    const id = parseInt(String(req.params.id), 10);
-
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
-    }
-
-    const property = await prisma.property.findUnique({
-      where: { id },
-      select: { id: true, listingStatus: true },
-    });
-
-    if (!property || property.listingStatus !== "PUBLISHED") {
-      return res.status(404).json({ ok: false, message: "Property not found" });
-    }
-
-    await prisma.property.update({
-      where: { id },
-      data: {
-        views: {
-          increment: 1,
-        },
-      },
-    });
-
-    return res.json({ ok: true });
-  } catch (err: any) {
-    console.error("POST /api/properties/:id/view error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
 
 router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
   try {
