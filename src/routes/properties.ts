@@ -1299,7 +1299,10 @@ router.get("/:id/intelligence", async (req: any, res) => {
     ] = await Promise.all([
       nearby("school", 20, "school"),
       nearbyTransport(20),
-      getTransportIntelligence(lat, lng, 30),
+      Promise.race([
+        getTransportIntelligence(lat, lng, 30),
+        new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 3500)),
+      ]),
       nearby("supermarket shops grocery", 20, "supermarket"),
       nearby("pharmacy doctor hospital medical centre", 20),
       nearby("park beach green space", 20, "park"),
