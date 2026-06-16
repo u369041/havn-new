@@ -1150,6 +1150,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const cacheFresh =
       cached &&
+      (cached as any).version === "property-intelligence-v2" &&
       cachedAt &&
       !Number.isNaN(cachedAt.getTime()) &&
       Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1197,15 +1198,19 @@ router.get("/:id/intelligence", async (req: any, res) => {
       return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
     }
 
-    async function nearby(keyword: string, limit = 5) {
+    async function nearby(keyword: string, limit = 20, type?: string) {
+      const params: any = {
+        location: `${lat},${lng}`,
+        radius: "5000",
+        key: apiKey,
+      };
+
+      if (keyword) params.keyword = keyword;
+      if (type) params.type = type;
+
       const url =
         "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" +
-        new URLSearchParams({
-          location: `${lat},${lng}`,
-          radius: "5000",
-          keyword,
-          key: apiKey,
-        }).toString();
+        new URLSearchParams(params).toString();
 
       const response = await fetch(url);
       const data: any = await response.json();
@@ -1213,6 +1218,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       console.log("GOOGLE_PLACES_STATUS:", {
         propertyId: property.id,
         keyword,
+        type: type || null,
         status: data?.status || null,
         error: data?.error_message || null,
         results: Array.isArray(data?.results) ? data.results.length : 0,
@@ -1245,6 +1251,40 @@ router.get("/:id/intelligence", async (req: any, res) => {
         .slice(0, limit);
     }
 
+    function dedupePlaces(items: any[]) {
+      const seen = new Set<string>();
+
+      return items.filter((item: any) => {
+        const key =
+          safeText(item.googlePlaceId).trim() ||
+          `${safeText(item.name).trim().toLowerCase()}|${safeText(item.address).trim().toLowerCase()}`;
+
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    async function nearbyTransport(limit = 20) {
+      const [trainStations, busStations, transitStations] = await Promise.all([
+        nearby("train station", 10, "train_station"),
+        nearby("bus station bus stop", 15, "bus_station"),
+        nearby("public transport", 15, "transit_station"),
+      ]);
+
+      return dedupePlaces([
+        ...trainStations,
+        ...busStations,
+        ...transitStations,
+      ])
+        .sort((a: any, b: any) => {
+          const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 9999;
+          const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 9999;
+          return ad - bd;
+        })
+        .slice(0, limit);
+    }
+
     const [
       schools,
       transport,
@@ -1255,14 +1295,14 @@ router.get("/:id/intelligence", async (req: any, res) => {
       gyms,
       childcare,
     ] = await Promise.all([
-      nearby("school", 5),
-      nearby("bus stop train station public transport", 5),
-      nearby("supermarket shops grocery", 5),
-      nearby("pharmacy doctor hospital medical centre", 5),
-      nearby("park beach green space", 5),
-      nearby("restaurant cafe", 5),
-      nearby("gym leisure centre", 5),
-      nearby("childcare creche preschool", 5),
+      nearby("school", 20, "school"),
+      nearbyTransport(20),
+      nearby("supermarket shops grocery", 20, "supermarket"),
+      nearby("pharmacy doctor hospital medical centre", 20),
+      nearby("park beach green space", 20, "park"),
+      nearby("restaurant cafe", 20, "restaurant"),
+      nearby("gym leisure centre", 20, "gym"),
+      nearby("childcare creche preschool", 20, "school"),
     ]);
 
     const mode = String(property.mode || "").toUpperCase();
@@ -1307,7 +1347,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
 
     const intelligence = {
-      version: "property-intelligence-v1",
+      version: "property-intelligence-v2",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
