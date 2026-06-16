@@ -1129,6 +1129,249 @@ router.post("/:id/view", async (req: any, res) => {
  * This MUST appear before /:slug, otherwise Express treats "slug" as the slug value.
  */
 
+router.get("/:id/intelligence", async (req: any, res) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const property = await prisma.property.findUnique({ where: { id } });
+
+    if (!property || property.listingStatus !== "PUBLISHED") {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    const cached = (property as any).intelligence;
+    const cachedAt = (property as any).intelligenceUpdatedAt
+      ? new Date((property as any).intelligenceUpdatedAt)
+      : null;
+
+    const cacheFresh =
+      cached &&
+      cachedAt &&
+      !Number.isNaN(cachedAt.getTime()) &&
+      Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
+
+    if (cacheFresh) {
+      return res.json({
+        ok: true,
+        cached: true,
+        intelligence: cached,
+        intelligenceUpdatedAt: cachedAt,
+      });
+    }
+
+    const lat = Number((property as any).lat);
+    const lng = Number((property as any).lng);
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(409).json({
+        ok: false,
+        message: "Property does not have lat/lng yet.",
+      });
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({
+        ok: false,
+        message: "GOOGLE_MAPS_API_KEY missing.",
+      });
+    }
+
+    function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number) {
+      const R = 6371;
+      const toRad = (v: number) => (v * Math.PI) / 180;
+      const dLat = toRad(bLat - aLat);
+      const dLng = toRad(bLng - aLng);
+
+      const x =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(aLat)) *
+          Math.cos(toRad(bLat)) *
+          Math.sin(dLng / 2) *
+          Math.sin(dLng / 2);
+
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+    }
+
+    async function nearby(keyword: string, limit = 5) {
+      const url =
+        "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" +
+        new URLSearchParams({
+          location: `${lat},${lng}`,
+          radius: "5000",
+          keyword,
+          key: apiKey,
+        }).toString();
+
+      const response = await fetch(url);
+      const data: any = await response.json();
+
+      console.log("GOOGLE_PLACES_STATUS:", {
+        propertyId: property.id,
+        keyword,
+        status: data?.status || null,
+        error: data?.error_message || null,
+        results: Array.isArray(data?.results) ? data.results.length : 0,
+      });
+
+      const rows = Array.isArray(data?.results) ? data.results : [];
+
+      return rows
+        .map((r: any) => {
+          const placeLat = Number(r?.geometry?.location?.lat);
+          const placeLng = Number(r?.geometry?.location?.lng);
+
+          return {
+            name: safeText(r?.name).trim(),
+            address: safeText(r?.vicinity).trim(),
+            rating: Number.isFinite(Number(r?.rating)) ? Number(r.rating) : null,
+            distanceKm:
+              Number.isFinite(placeLat) && Number.isFinite(placeLng)
+                ? Number(distanceKm(lat, lng, placeLat, placeLng).toFixed(2))
+                : null,
+            googlePlaceId: safeText(r?.place_id).trim() || null,
+          };
+        })
+        .filter((x: any) => x.name)
+        .sort((a: any, b: any) => {
+          const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 9999;
+          const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 9999;
+          return ad - bd;
+        })
+        .slice(0, limit);
+    }
+
+    const [
+      schools,
+      transport,
+      shopping,
+      healthcare,
+      parks,
+      restaurants,
+      gyms,
+      childcare,
+    ] = await Promise.all([
+      nearby("school", 5),
+      nearby("bus stop train station public transport", 5),
+      nearby("supermarket shops grocery", 5),
+      nearby("pharmacy doctor hospital medical centre", 5),
+      nearby("park beach green space", 5),
+      nearby("restaurant cafe", 5),
+      nearby("gym leisure centre", 5),
+      nearby("childcare creche preschool", 5),
+    ]);
+
+    const mode = String(property.mode || "").toUpperCase();
+    const county = property.county || property.city || "this area";
+    const type = property.propertyType || "property";
+    const ber = property.ber || property.berRating || null;
+    const beds = property.bedrooms || null;
+    const baths = property.bathrooms || null;
+    const price = Number(property.price || 0);
+    const size = Number((property as any).size || 0);
+
+    const pricePerSqm =
+      mode === "BUY" && price > 0 && size > 0
+        ? Math.round(price / size)
+        : null;
+
+    const rentPerBedroom =
+      (mode === "RENT" || mode === "SHARE") && price > 0 && beds && beds > 0
+        ? Math.round(price / beds)
+        : null;
+
+    const commentary =
+      mode === "BUY"
+        ? `This ${type} in ${county} should be assessed around long-term liveability, nearby schools, transport access, amenities, BER performance and resale strength.`
+        : mode === "RENT"
+          ? `This rental in ${county} should be assessed around commute, monthly affordability, transport links, local services and day-to-day convenience.`
+          : `This room-share in ${county} should be assessed around transport, nearby shops, house-share convenience, room suitability and local amenities.`;
+
+    const insightParts: string[] = [];
+
+    if (ber) insightParts.push(`BER ${ber} gives users an immediate energy-efficiency signal.`);
+    if (beds) insightParts.push(`${beds} bedroom${beds === 1 ? "" : "s"} supports quick suitability screening.`);
+    if (baths) insightParts.push(`${baths} bathroom${baths === 1 ? "" : "s"} adds useful comfort context.`);
+    if (schools.length) insightParts.push(`${schools.length} nearby school result${schools.length === 1 ? "" : "s"} found within the search radius.`);
+    if (transport.length) insightParts.push(`${transport.length} transport-related result${transport.length === 1 ? "" : "s"} found nearby.`);
+    if (shopping.length) insightParts.push(`${shopping.length} shopping or grocery result${shopping.length === 1 ? "" : "s"} found nearby.`);
+    if (healthcare.length) insightParts.push(`${healthcare.length} healthcare-related result${healthcare.length === 1 ? "" : "s"} found nearby.`);
+
+    const insight =
+      insightParts.length
+        ? insightParts.join(" ")
+        : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
+
+    const intelligence = {
+      version: "property-intelligence-v1",
+      generatedAt: new Date().toISOString(),
+      source: "google_places_cached",
+      location: {
+        lat,
+        lng,
+        eircode: property.eircode || null,
+        city: property.city || null,
+        county: property.county || null,
+      },
+      market: {
+        mode,
+        price: property.price,
+        pricePerSqm,
+        rentPerBedroom,
+        ber,
+        bedrooms: beds,
+        bathrooms: baths,
+        propertyType: type,
+        views: property.views || 0,
+        isFeatured: !!property.isFeatured,
+        previousPrice: (property as any).previousPrice || null,
+        priceDroppedAt: (property as any).priceDroppedAt || null,
+      },
+      nearby: {
+        schools,
+        transport,
+        shopping,
+        healthcare,
+        parks,
+        restaurants,
+        gyms,
+        childcare,
+      },
+      commentary,
+      insight,
+    };
+
+    const updated = await prisma.property.update({
+      where: { id: property.id },
+      data: {
+        intelligence: intelligence as any,
+        intelligenceUpdatedAt: new Date(),
+      },
+      select: {
+        intelligence: true,
+        intelligenceUpdatedAt: true,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      cached: false,
+      intelligence: updated.intelligence,
+      intelligenceUpdatedAt: updated.intelligenceUpdatedAt,
+    });
+  } catch (err: any) {
+    console.error("GET /api/properties/:id/intelligence error", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+
+
+
 router.post("/:id/view", async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
