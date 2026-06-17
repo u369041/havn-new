@@ -1149,12 +1149,16 @@ router.get("/:id/intelligence", async (req: any, res) => {
       ? new Date((property as any).intelligenceUpdatedAt)
       : null;
 
-    const cacheFresh =
-      cached &&
-      (cached as any).version === "property-intelligence-v4" &&
-      cachedAt &&
-      !Number.isNaN(cachedAt.getTime()) &&
-      Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
+       const forceRefresh =
+       String(req.query.refresh || "").toLowerCase() === "true";
+
+   const cacheFresh =
+   !forceRefresh &&
+  cached &&
+  (cached as any).version === "property-intelligence-v4" &&
+  cachedAt &&
+  !Number.isNaN(cachedAt.getTime()) &&
+  Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
 
     if (cacheFresh) {
       return res.json({
