@@ -1155,7 +1155,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v4" &&
+  (cached as any).version === "property-intelligence-v5" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1357,7 +1357,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
 
     const intelligence = {
-      version: "property-intelligence-v4",
+      version: "property-intelligence-v5",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {

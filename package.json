@@ -8,7 +8,8 @@
     "build": "prisma generate && prisma migrate deploy && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "transport:build": "tsx scripts/build-transport-cache.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
