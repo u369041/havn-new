@@ -1,9 +1,7 @@
 ﻿import AdmZip from "adm-zip";
 import { parse } from "csv-parse/sync";
 
-const TFI_GTFS_URL =
-  process.env.TFI_GTFS_URL ||
-  "https://www.transportforireland.ie/transitData/Data/GTFS_All.zip";
+const TFI_GTFS_URL = process.env.TFI_GTFS_URL || "";
 
 const IRISH_RAIL_GTFS_URL =
   process.env.IRISH_RAIL_GTFS_URL ||
@@ -95,87 +93,39 @@ function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): num
 
 function readCsvFromZip<T = any>(zip: AdmZip, filename: string): T[] {
   const entry = zip.getEntry(filename);
-
-  if (!entry) {
-    console.warn("GTFS_FILE_MISSING:", filename);
-    return [];
-  }
+  if (!entry) return [];
 
   const raw = entry.getData().toString("utf8");
 
-  try {
-    return parse(raw, {
-      columns: true,
-      skip_empty_lines: true,
-      bom: true,
-      relax_quotes: true,
-      relax_column_count: true,
-      trim: true,
-    }) as T[];
-  } catch (err: any) {
-    console.warn("GTFS_CSV_PARSE_FAILED:", {
-      filename,
-      message: err?.message || String(err),
-    });
-    return [];
-  }
+  return parse(raw, {
+    columns: true,
+    skip_empty_lines: true,
+    bom: true,
+    relax_quotes: true,
+    relax_column_count: true,
+    trim: true,
+  }) as T[];
 }
 
 async function downloadGtfs(url: string, source: string): Promise<GtfsBundle> {
-  const startedAt = Date.now();
-
-  console.log("GTFS_DOWNLOAD_START:", {
-    source,
-    url,
-  });
+  if (!url) {
+    throw new Error(`${source} GTFS URL not configured`);
+  }
 
   const response = await fetch(url);
-
-  console.log("GTFS_DOWNLOAD_RESPONSE:", {
-    source,
-    status: response.status,
-    ok: response.ok,
-    contentType: response.headers.get("content-type"),
-    contentLength: response.headers.get("content-length"),
-    elapsedMs: Date.now() - startedAt,
-  });
 
   if (!response.ok) {
     throw new Error(`Failed to download ${source} GTFS: ${response.status}`);
   }
 
   const arr = await response.arrayBuffer();
-
-  console.log("GTFS_DOWNLOAD_BYTES:", {
-    source,
-    bytes: arr.byteLength,
-    elapsedMs: Date.now() - startedAt,
-  });
-
   const zip = new AdmZip(Buffer.from(arr));
-  const entries = zip.getEntries().map((e) => e.entryName);
-
-  console.log("GTFS_ZIP_ENTRIES:", {
-    source,
-    count: entries.length,
-    first25: entries.slice(0, 25),
-  });
 
   const agenciesRows = readCsvFromZip<GtfsAgency>(zip, "agency.txt");
   const routesRows = readCsvFromZip<GtfsRoute>(zip, "routes.txt");
   const tripsRows = readCsvFromZip<GtfsTrip>(zip, "trips.txt");
   const stopsRows = readCsvFromZip<GtfsStop>(zip, "stops.txt");
   const stopTimesRows = readCsvFromZip<GtfsStopTime>(zip, "stop_times.txt");
-
-  console.log("GTFS_ROW_COUNTS:", {
-    source,
-    agencies: agenciesRows.length,
-    routes: routesRows.length,
-    trips: tripsRows.length,
-    stops: stopsRows.length,
-    stopTimes: stopTimesRows.length,
-    elapsedMs: Date.now() - startedAt,
-  });
 
   const agencies = new Map<string, GtfsAgency>();
   agenciesRows.forEach((a) => {
@@ -205,16 +155,6 @@ async function downloadGtfs(url: string, source: string): Promise<GtfsBundle> {
     stopTimesByStopId.set(stopId, list);
   });
 
-  console.log("GTFS_BUNDLE_READY:", {
-    source,
-    agencies: agencies.size,
-    routes: routes.size,
-    trips: tripsById.size,
-    stopTimeStops: stopTimesByStopId.size,
-    stops: stopsRows.length,
-    elapsedMs: Date.now() - startedAt,
-  });
-
   return {
     loadedAt: Date.now(),
     source,
@@ -227,23 +167,17 @@ async function downloadGtfs(url: string, source: string): Promise<GtfsBundle> {
 }
 
 async function getTfiBundle(): Promise<GtfsBundle> {
-  if (tfiCache && Date.now() - tfiCache.loadedAt < CACHE_MS) {
-    console.log("GTFS_CACHE_HIT:", { source: "TFI" });
-    return tfiCache;
+  if (!TFI_GTFS_URL) {
+    throw new Error("TFI_GTFS_URL not configured");
   }
 
-  console.log("GTFS_CACHE_MISS:", { source: "TFI" });
+  if (tfiCache && Date.now() - tfiCache.loadedAt < CACHE_MS) return tfiCache;
   tfiCache = await downloadGtfs(TFI_GTFS_URL, "TFI");
   return tfiCache;
 }
 
 async function getRailBundle(): Promise<GtfsBundle> {
-  if (railCache && Date.now() - railCache.loadedAt < CACHE_MS) {
-    console.log("GTFS_CACHE_HIT:", { source: "Irish Rail" });
-    return railCache;
-  }
-
-  console.log("GTFS_CACHE_MISS:", { source: "Irish Rail" });
+  if (railCache && Date.now() - railCache.loadedAt < CACHE_MS) return railCache;
   railCache = await downloadGtfs(IRISH_RAIL_GTFS_URL, "Irish Rail");
   return railCache;
 }
@@ -296,14 +230,6 @@ function rowsForNearbyStops(
   lng: number,
   radiusKm: number
 ): TransportIntelRow[] {
-  console.log("GTFS_NEARBY_START:", {
-    source: bundle.source,
-    lat,
-    lng,
-    radiusKm,
-    totalStops: bundle.stops.length,
-  });
-
   const nearbyStops = bundle.stops
     .map((stop) => {
       const stopLat = toNumber(stop.stop_lat);
@@ -321,17 +247,6 @@ function rowsForNearbyStops(
     .filter((x): x is { stop: GtfsStop; distanceKm: number } => !!x && x.distanceKm <= radiusKm)
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, 18);
-
-  console.log("GTFS_NEARBY_STOPS:", {
-    source: bundle.source,
-    count: nearbyStops.length,
-    first10: nearbyStops.slice(0, 10).map((x) => ({
-      stop_id: x.stop.stop_id,
-      stop_name: x.stop.stop_name,
-      distanceKm: x.distanceKm,
-      hasStopTimes: (bundle.stopTimesByStopId.get(safeText(x.stop.stop_id).trim()) || []).length,
-    })),
-  });
 
   const rows: TransportIntelRow[] = [];
 
@@ -367,12 +282,6 @@ function rowsForNearbyStops(
     if (rows.length >= 80) break;
   }
 
-  console.log("GTFS_NEARBY_ROWS:", {
-    source: bundle.source,
-    rows: rows.length,
-    first10: rows.slice(0, 10),
-  });
-
   return rows;
 }
 
@@ -401,27 +310,11 @@ export async function getTransportIntelligence(
   lng: number,
   limit = 30
 ): Promise<TransportIntelRow[]> {
-  const startedAt = Date.now();
-
-  console.log("TRANSPORT_INTELLIGENCE_START:", {
-    lat,
-    lng,
-    limit,
-  });
-
   try {
     const [tfi, rail] = await Promise.allSettled([
       getTfiBundle(),
       getRailBundle(),
     ]);
-
-    console.log("TRANSPORT_BUNDLE_RESULTS:", {
-      tfiStatus: tfi.status,
-      railStatus: rail.status,
-      tfiError: tfi.status === "rejected" ? String(tfi.reason?.message || tfi.reason) : null,
-      railError: rail.status === "rejected" ? String(rail.reason?.message || rail.reason) : null,
-      elapsedMs: Date.now() - startedAt,
-    });
 
     const rows: TransportIntelRow[] = [];
 
@@ -433,22 +326,13 @@ export async function getTransportIntelligence(
       rows.push(...rowsForNearbyStops(rail.value, lat, lng, 12));
     }
 
-    const deduped = dedupeTransportRows(rows)
+    return dedupeTransportRows(rows)
       .sort((a, b) => {
         const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 9999;
         const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 9999;
         return ad - bd;
       })
       .slice(0, limit);
-
-    console.log("TRANSPORT_INTELLIGENCE_DONE:", {
-      rawRows: rows.length,
-      dedupedRows: deduped.length,
-      elapsedMs: Date.now() - startedAt,
-      first10: deduped.slice(0, 10),
-    });
-
-    return deduped;
   } catch (err: any) {
     console.warn("Transport intelligence failed:", err?.message || err);
     return [];
