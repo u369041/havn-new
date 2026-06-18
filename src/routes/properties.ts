@@ -454,9 +454,29 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const childcare = asArray(nearby?.childcare);
 
   const allTransport = transportV3.length ? transportV3 : transport;
-  const railItems = transportV3.filter((item) => safeText(item?.type).toLowerCase() === "rail");
-  const busItems = transportV3.filter((item) => safeText(item?.type).toLowerCase() === "bus");
+
+  const transportType = (item: any) => safeText(item?.type).trim().toLowerCase();
+  const transportRoute = (item: any) => safeText(item?.route).trim().toLowerCase();
+  const transportProvider = (item: any) => safeText(item?.provider).trim().toLowerCase();
+  const transportDestination = (item: any) => safeText(item?.destination).trim().toLowerCase();
+
+  const luasItems = transportV3.filter((item) => {
+    return transportType(item) === "tram" && transportProvider(item).includes("luas");
+  });
+
+  const dartItems = transportV3.filter((item) => {
+    return transportType(item) === "rail" && transportRoute(item) === "dart";
+  });
+
+  const railItems = transportV3.filter((item) => {
+    return transportType(item) === "rail" && transportRoute(item) !== "dart";
+  });
+
+  const busItems = transportV3.filter((item) => transportType(item) === "bus");
+
   const nearestTransport = nearestDistanceKm(allTransport);
+  const nearestLuas = nearestDistanceKm(luasItems);
+  const nearestDart = nearestDistanceKm(dartItems);
   const nearestRail = nearestDistanceKm(railItems);
 
   const uniqueRoutes = uniqueValues(busItems, (item) => `${item?.provider || ""}|${item?.route || ""}`);
@@ -472,23 +492,40 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     "athlone",
     "ennis",
     "airport",
+    "heuston",
+    "connolly",
+    "pearse",
   ];
 
   const matchedMajorDestinations = majorDestinationTerms.filter((term) =>
     textIncludesAny(destinationText, [term])
   );
 
-  const hasAirport = textIncludesAny(destinationText, ["airport"]);
+  const hasAirport =
+    textIncludesAny(destinationText, ["airport"]) ||
+    transportV3.some((item) => {
+      const combined = [
+        item?.provider,
+        item?.route,
+        item?.destination,
+        item?.stop,
+      ].map(safeText).join(" ").toLowerCase();
 
-  const railScore = railItems.length
-    ? nearestRail !== null && nearestRail <= 1
-      ? 30
-      : nearestRail !== null && nearestRail <= 2.5
-        ? 27
-        : nearestRail !== null && nearestRail <= 5
-          ? 22
-          : 15
-    : 0;
+      return (
+        combined.includes("airport") ||
+        combined.includes("aircoach") ||
+        combined.includes("dublin express")
+      );
+    });
+
+  function scoreByNearestDistance(distance: number | null, max: number, excellentKm: number, strongKm: number, goodKm: number, okKm: number) {
+    if (distance === null) return 0;
+    if (distance <= excellentKm) return max;
+    if (distance <= strongKm) return Math.round(max * 0.9);
+    if (distance <= goodKm) return Math.round(max * 0.72);
+    if (distance <= okKm) return Math.round(max * 0.5);
+    return Math.round(max * 0.28);
+  }
 
   const busNetworkScore = scoreByCount(uniqueRoutes.size || busItems.length, 25, [
     [14, 25],
@@ -512,61 +549,141 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
               ? 2
               : 0;
 
-  const majorDestinationScore = scoreByCount(matchedMajorDestinations.length, 20, [
-    [6, 20],
-    [5, 18],
-    [4, 16],
-    [3, 13],
-    [2, 9],
-    [1, 5],
+  const majorDestinationScore = scoreByCount(matchedMajorDestinations.length, 5, [
+    [5, 5],
+    [4, 4],
+    [3, 3],
+    [2, 2],
+    [1, 1],
   ]);
 
+  type RawConnectivityBucket = {
+    label: string;
+    score: number;
+    max: number;
+    reason: string;
+  };
+
+  const rawConnectivityBuckets: RawConnectivityBucket[] = [];
+
+  function addConnectivityBucket(label: string, score: number, max: number, reason: string) {
+    if (max <= 0) return;
+    rawConnectivityBuckets.push({
+      label,
+      score: clampAreaScore(score, max),
+      max,
+      reason,
+    });
+  }
+
+  if (luasItems.length) {
+    const routes = Array.from(uniqueValues(luasItems, (item) => item?.route))
+      .map((x) => x.toUpperCase())
+      .join(", ");
+
+    addConnectivityBucket(
+      "LUAS access",
+      scoreByNearestDistance(nearestLuas, 18, 0.8, 1.5, 3, 5),
+      18,
+      `LUAS ${routes ? routes + " line " : ""}services found${nearestLuas !== null ? ` around ${nearestLuas.toFixed(1)}km away` : " nearby"}.`
+    );
+  }
+
+  if (dartItems.length) {
+    addConnectivityBucket(
+      "DART access",
+      scoreByNearestDistance(nearestDart, 18, 1, 2.5, 5, 8),
+      18,
+      `DART services found${nearestDart !== null ? ` around ${nearestDart.toFixed(1)}km away` : " nearby"}.`
+    );
+  }
+
+  if (railItems.length) {
+    addConnectivityBucket(
+      "Irish Rail / intercity access",
+      scoreByNearestDistance(nearestRail, 14, 1.5, 3, 6, 10),
+      14,
+      `Non-DART Irish Rail services found${nearestRail !== null ? ` around ${nearestRail.toFixed(1)}km away` : " nearby"}.`
+    );
+  }
+
+  if (busItems.length) {
+    addConnectivityBucket(
+      "Bus network",
+      busNetworkScore,
+      25,
+      uniqueRoutes.size
+        ? `${uniqueRoutes.size} unique bus route/operator combinations found nearby.`
+        : `${busItems.length} bus services found nearby.`
+    );
+  }
+
+  if (hasAirport) {
+    addConnectivityBucket(
+      "Airport connectivity",
+      10,
+      10,
+      "A direct airport destination or airport coach signal appears in nearby transport services."
+    );
+  }
+
+  if (nearestTransport !== null) {
+    addConnectivityBucket(
+      "Distance to transport",
+      distanceScore,
+      10,
+      `Nearest transport option is about ${nearestTransport < 1 ? Math.round(nearestTransport * 1000) + "m" : nearestTransport.toFixed(1) + "km"} away.`
+    );
+  }
+
+  if (matchedMajorDestinations.length) {
+    addConnectivityBucket(
+      "Major destinations",
+      majorDestinationScore,
+      5,
+      `Connections detected for ${matchedMajorDestinations.join(", ")}.`
+    );
+  }
+
+  if (!rawConnectivityBuckets.length) {
+    addConnectivityBucket(
+      "Transport access",
+      0,
+      100,
+      "No transport service was found in the current transport cache radius."
+    );
+  }
+
+  const rawConnectivityMax = rawConnectivityBuckets.reduce((total, item) => total + item.max, 0) || 100;
+
+  let normalizedRunningMax = 0;
+  let normalizedRunningScore = 0;
+
+  const normalizedConnectivityBreakdown = rawConnectivityBuckets.map((item, index) => {
+    const isLast = index === rawConnectivityBuckets.length - 1;
+    const normalizedMax = isLast
+      ? Math.max(0, 100 - normalizedRunningMax)
+      : Math.max(1, Math.round((item.max / rawConnectivityMax) * 100));
+
+    const normalizedScore = clampAreaScore(
+      item.max > 0 ? Math.round((item.score / item.max) * normalizedMax) : 0,
+      normalizedMax
+    );
+
+    normalizedRunningMax += normalizedMax;
+    normalizedRunningScore += normalizedScore;
+
+    return {
+      label: item.label,
+      score: normalizedScore,
+      max: normalizedMax,
+      reason: item.reason,
+    };
+  });
+
   const connectivity = makeAreaScore(
-    "Measures rail access, bus network depth, airport links, nearby stop distance and major destination access.",
-    [
-      {
-        label: "Rail access",
-        score: railScore,
-        max: 30,
-        reason: railItems.length
-          ? `Rail services found${nearestRail !== null ? ` around ${nearestRail.toFixed(1)}km away` : " nearby"}.`
-          : "No rail service was found in the current transport cache radius.",
-      },
-      {
-        label: "Bus network",
-        score: busNetworkScore,
-        max: 25,
-        reason: uniqueRoutes.size
-          ? `${uniqueRoutes.size} unique bus route/operator combinations found nearby.`
-          : busItems.length
-            ? `${busItems.length} bus services found nearby.`
-            : "No bus routes were found in the current transport cache radius.",
-      },
-      {
-        label: "Airport connectivity",
-        score: hasAirport ? 15 : 0,
-        max: 15,
-        reason: hasAirport
-          ? "A direct airport destination appears in nearby transport services."
-          : "No direct airport destination was found in nearby transport services.",
-      },
-      {
-        label: "Distance to transport",
-        score: distanceScore,
-        max: 10,
-        reason: nearestTransport !== null
-          ? `Nearest transport option is about ${nearestTransport < 1 ? Math.round(nearestTransport * 1000) + "m" : nearestTransport.toFixed(1) + "km"} away.`
-          : "No nearby transport distance was available.",
-      },
-      {
-        label: "Major destinations",
-        score: majorDestinationScore,
-        max: 20,
-        reason: matchedMajorDestinations.length
-          ? `Connections detected for ${matchedMajorDestinations.join(", ")}.`
-          : "No major destination connections were detected in nearby services.",
-      },
-    ]
+    "Measures connectivity relative to the transport modes realistically available nearby. LUAS and DART are scored only when present in the local transport cache, so non-Dublin markets are not penalised for not having them.",
+    normalizedConnectivityBreakdown
   );
 
   const schoolCount = countWithinKm(schools, 5) || schools.length;
@@ -1512,7 +1629,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v7" &&
+  (cached as any).version === "property-intelligence-v9" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1726,7 +1843,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v7",
+      version: "property-intelligence-v9",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
