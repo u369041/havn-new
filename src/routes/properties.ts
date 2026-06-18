@@ -1947,7 +1947,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v16" &&
+  (cached as any).version === "property-intelligence-v17" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -2090,6 +2090,123 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     function cleanFoodPlaces(items: any[]) {
       return excludePlaceTerms(items, foodContaminationTerms);
+    }
+
+    function normalisePoiKey(value: any) {
+      return safeText(value)
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/\b(ltd|limited|ireland|dublin|co|county)\b/g, " ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    }
+
+    function normaliseFitnessName(name: any) {
+      const text = safeText(name).trim();
+      const key = normalisePoiKey(text);
+
+      if (!key) return "";
+
+      if (key.includes("west wood")) return "West Wood Club";
+      if (key.includes("ucd") && (key.includes("sport") || key.includes("fitness") || key.includes("swimming"))) return "UCD Sports Campus";
+      if (key.includes("dlr leisure")) return "DLR Leisure";
+      if (key.includes("fitzpatrick")) return "The Club at Fitzpatrick's";
+      if (key.includes("tullyvale")) return "Tullyvale Leisure Centre";
+      if (key.includes("gym plus")) return "Gym Plus";
+      if (key.includes("flyefit")) return "Flyefit";
+      if (key.includes("anytime fitness")) return "Anytime Fitness";
+      if (key.includes("ben dunne")) return "Ben Dunne Gym";
+      if (key.includes("iconic health")) return "Iconic Health Clubs";
+      if (key.includes("trinity") && key.includes("sport")) return "Trinity Sports Centre";
+
+      return text.replace(/\s+/g, " ").trim();
+    }
+
+    function classifyFitnessType(item: any) {
+      const key = normalisePoiKey([item?.name, item?.address].map(safeText).join(" "));
+
+      if (key.includes("swimming") || key.includes("pool")) return "Swimming pool";
+      if (key.includes("leisure")) return "Leisure centre";
+      if (key.includes("sports") || key.includes("sport") || key.includes("club")) return "Sports club";
+      if (key.includes("yoga") || key.includes("pilates")) return "Yoga / pilates";
+      if (key.includes("gym") || key.includes("fitness") || key.includes("fit")) return "Gym / fitness";
+      return "Fitness / sport";
+    }
+
+    function classifyFoodType(item: any) {
+      const key = normalisePoiKey([item?.name, item?.address].map(safeText).join(" "));
+
+      if (key.includes("pub") || key.includes("bar") || key.includes("gastropub")) return "Pub / bar";
+      if (key.includes("cafe") || key.includes("coffee") || key.includes("espresso") || key.includes("bakery") || key.includes("patisserie") || key.includes("brunch")) return "Cafe / coffee";
+      if (key.includes("restaurant") || key.includes("bistro") || key.includes("dining") || key.includes("kitchen")) return "Restaurant";
+      return "Food / coffee";
+    }
+
+    function classifyCultureType(item: any) {
+      const key = normalisePoiKey([item?.name, item?.address].map(safeText).join(" "));
+
+      if (key.includes("cinema") || key.includes("odeon") || key.includes("imc")) return "Cinema";
+      if (key.includes("theatre") || key.includes("performance") || key.includes("concert")) return "Theatre / performance";
+      if (key.includes("museum") || key.includes("maritime")) return "Museum";
+      if (key.includes("gallery") || key.includes("arts") || key.includes("studio") || key.includes("exhibition")) return "Arts / gallery";
+      if (key.includes("library") || key.includes("lexicon")) return "Library / cultural centre";
+      if (key.includes("heritage") || key.includes("castle") || key.includes("visitor")) return "Heritage / visitor attraction";
+      return "Culture / entertainment";
+    }
+
+    function classifyParkType(item: any) {
+      const key = normalisePoiKey([item?.name, item?.address].map(safeText).join(" "));
+
+      if (key.includes("beach") || key.includes("seapoint")) return "Coastal / beach";
+      if (key.includes("playground")) return "Playground";
+      if (key.includes("garden")) return "Garden";
+      if (key.includes("park") || key.includes("green")) return "Park / green space";
+      return "Park / green space";
+    }
+
+    function enrichPoiItems(items: any[], classifier: (item: any) => string, group: string) {
+      return asArray(items).map((item) => {
+        const type = classifier(item);
+
+        return {
+          ...item,
+          type,
+          category: type,
+          group,
+        };
+      });
+    }
+
+    function dedupeByDisplayName(items: any[], displayNamePicker: (item: any) => string) {
+      const best = new Map<string, any>();
+
+      for (const item of asArray(items)) {
+        const displayName = displayNamePicker(item) || safeText(item?.name).trim();
+        const key = normalisePoiKey(displayName);
+        if (!key) continue;
+
+        const next = {
+          ...item,
+          name: displayName,
+        };
+
+        const existing = best.get(key);
+        const existingDistance = Number(existing?.distanceKm);
+        const nextDistance = Number(next?.distanceKm);
+
+        if (
+          !existing ||
+          (Number.isFinite(nextDistance) && (!Number.isFinite(existingDistance) || nextDistance < existingDistance))
+        ) {
+          best.set(key, next);
+        }
+      }
+
+      return Array.from(best.values()).sort((a, b) => {
+        const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 9999;
+        const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 9999;
+        return ad - bd;
+      });
     }
 
     async function nearbyTransport(limit = 20) {
@@ -2255,34 +2372,76 @@ router.get("/:id/intelligence", async (req: any, res) => {
       ...urgentCarePlaces,
     ], 30);
 
-    const parkPlaces = nearestPlaces(dedupePlaces(parks), 12);
-    const fitnessPlaces = nearestPlaces(dedupePlaces(gyms), 12);
+    const parkPlaces = nearestPlaces(
+      dedupeByDisplayName(
+        enrichPoiItems(dedupePlaces(parks), classifyParkType, "parks"),
+        (item) => safeText(item?.name).trim()
+      ),
+      12
+    );
 
-    const cafePlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawCafes)), 10);
-    const restaurantPlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawRestaurants)), 10);
-    const pubPlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawPubs)), 8);
+    const fitnessPlaces = nearestPlaces(
+      dedupeByDisplayName(
+        enrichPoiItems(dedupePlaces(gyms), classifyFitnessType, "fitness"),
+        (item) => normaliseFitnessName(item?.name) || safeText(item?.name).trim()
+      ),
+      12
+    );
+
+    const cafePlaces = nearestPlaces(
+      dedupeByDisplayName(
+        enrichPoiItems(dedupePlaces(cleanFoodPlaces(rawCafes)), classifyFoodType, "cafes"),
+        (item) => safeText(item?.name).trim()
+      ),
+      10
+    );
+    const restaurantPlaces = nearestPlaces(
+      dedupeByDisplayName(
+        enrichPoiItems(dedupePlaces(cleanFoodPlaces(rawRestaurants)), classifyFoodType, "restaurants"),
+        (item) => safeText(item?.name).trim()
+      ),
+      10
+    );
+    const pubPlaces = nearestPlaces(
+      dedupeByDisplayName(
+        enrichPoiItems(dedupePlaces(cleanFoodPlaces(rawPubs)), classifyFoodType, "pubs"),
+        (item) => safeText(item?.name).trim()
+      ),
+      8
+    );
     const foodCoffeePlaces = nearestPlaces(
-      dedupePlaces([
-        ...cafePlaces,
-        ...restaurantPlaces,
-        ...pubPlaces,
-      ]),
+      dedupeByDisplayName(
+        [
+          ...cafePlaces,
+          ...restaurantPlaces,
+          ...pubPlaces,
+        ],
+        (item) => safeText(item?.name).trim()
+      ),
       20
     );
 
     const culturePlaces = nearestPlaces(
-      dedupePlaces([
-        ...rawCultureCore,
-        ...rawCultureLibrary,
-        ...rawCultureCinema,
-        ...rawCultureHeritage,
-      ]),
+      dedupeByDisplayName(
+        enrichPoiItems(
+          dedupePlaces([
+            ...rawCultureCore,
+            ...rawCultureLibrary,
+            ...rawCultureCinema,
+            ...rawCultureHeritage,
+          ]),
+          classifyCultureType,
+          "culture"
+        ),
+        (item) => safeText(item?.name).trim()
+      ),
       16
     );
 
     const lifestyleGroups = {
       parks: parkPlaces,
       fitness: fitnessPlaces,
+      food: foodCoffeePlaces,
       foodCoffee: foodCoffeePlaces,
       foodCoffeeGroups: {
         cafes: cafePlaces,
@@ -2360,7 +2519,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v16",
+      version: "property-intelligence-v17",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
