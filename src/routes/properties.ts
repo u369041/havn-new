@@ -664,6 +664,12 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const specialistPlaces = asArray(healthcareGroups?.specialists);
   const urgentCarePlaces = asArray(healthcareGroups?.urgentCare);
 
+  const lifestyleGroups = nearby?.lifestyleGroups || {};
+  const parkPlaces = asArray(lifestyleGroups?.parks).length ? asArray(lifestyleGroups.parks) : parks;
+  const fitnessPlaces = asArray(lifestyleGroups?.fitness).length ? asArray(lifestyleGroups.fitness) : gyms;
+  const foodCoffeePlaces = asArray(lifestyleGroups?.foodCoffee).length ? asArray(lifestyleGroups.foodCoffee) : restaurants;
+  const culturePlaces = asArray(lifestyleGroups?.culture);
+
   const allTransport = transportV3.length ? transportV3 : transport;
 
   const transportType = (item: any) => safeText(item?.type).trim().toLowerCase();
@@ -1055,45 +1061,57 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     ]
   );
 
-  const restaurantCount = countWithinKm(restaurants, 6) || restaurants.length;
-  const cafeCount = restaurants.filter((item) => textIncludesAny(item?.name, ["cafe", "café", "coffee", "bistro"])).length;
-  const leisureCount = countWithinKm(gyms, 6) || gyms.length;
-  const lifestyleDiversity = [restaurantCount > 0, cafeCount > 0, leisureCount > 0, parksCount > 0].filter(Boolean).length;
+  const parksLifestyleCount = uniquePlaceCount(parkPlaces, 5);
+  const fitnessLifestyleCount = uniquePlaceCount(fitnessPlaces, 5);
+  const foodCoffeeCount = uniquePlaceCount(foodCoffeePlaces, 5);
+  const cultureCount = uniquePlaceCount(culturePlaces, 8);
+  const lifestyleDiversity = [
+    parksLifestyleCount > 0,
+    fitnessLifestyleCount > 0,
+    foodCoffeeCount > 0,
+    cultureCount > 0,
+  ].filter(Boolean).length;
 
   const lifestyle = makeAreaScore(
-    "Measures restaurants, cafés, leisure/fitness options, parks and broader local amenity diversity.",
+    "Measures lifestyle infrastructure across parks and green space, fitness/sport, food/coffee and culture/entertainment.",
     [
       {
-        label: "Restaurants",
-        score: scoreByCount(restaurantCount, 20, [[15, 20], [10, 18], [6, 15], [3, 9], [1, 5]]),
-        max: 20,
-        reason: `${restaurantCount} restaurant result${restaurantCount === 1 ? "" : "s"} found nearby.`,
-      },
-      {
-        label: "Cafés",
-        score: scoreByCount(cafeCount, 15, [[6, 15], [4, 12], [2, 9], [1, 5]]),
-        max: 15,
-        reason: cafeCount
-          ? `${cafeCount} café/coffee/bistro signal${cafeCount === 1 ? "" : "s"} detected by name.`
-          : "No clearly labelled café result was detected in the current source data.",
-      },
-      {
-        label: "Leisure",
-        score: scoreByCount(leisureCount, 20, [[12, 20], [8, 18], [4, 14], [1, 8]]),
-        max: 20,
-        reason: `${leisureCount} gym or leisure result${leisureCount === 1 ? "" : "s"} found nearby.`,
-      },
-      {
-        label: "Parks",
-        score: scoreByCount(parksCount, 20, [[4, 20], [2, 15], [1, 10]]),
-        max: 20,
-        reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
-      },
-      {
-        label: "Attractions / amenity diversity",
-        score: lifestyleDiversity >= 4 ? 22 : lifestyleDiversity === 3 ? 17 : lifestyleDiversity === 2 ? 10 : lifestyleDiversity === 1 ? 5 : 0,
+        label: "Parks & green space",
+        score: scoreByCount(parksLifestyleCount, 25, [[5, 25], [3, 22], [2, 17], [1, 10]]),
         max: 25,
-        reason: `${lifestyleDiversity} lifestyle amenity categor${lifestyleDiversity === 1 ? "y" : "ies"} represented across restaurants, cafés, leisure and parks.`,
+        reason: parksLifestyleCount
+          ? `${parksLifestyleCount} park or green-space signal${parksLifestyleCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(parkPlaces)}.`
+          : "No park or green-space signal was found nearby in the current source data.",
+      },
+      {
+        label: "Fitness & sport",
+        score: scoreByCount(fitnessLifestyleCount, 25, [[8, 25], [5, 22], [3, 17], [1, 10]]),
+        max: 25,
+        reason: fitnessLifestyleCount
+          ? `${fitnessLifestyleCount} gym, leisure or sports signal${fitnessLifestyleCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(fitnessPlaces)}.`
+          : "No gym, leisure or sports signal was found nearby in the current source data.",
+      },
+      {
+        label: "Food & coffee",
+        score: scoreByCount(foodCoffeeCount, 25, [[15, 25], [10, 22], [6, 18], [3, 11], [1, 6]]),
+        max: 25,
+        reason: foodCoffeeCount
+          ? `${foodCoffeeCount} food, café, coffee or restaurant signal${foodCoffeeCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(foodCoffeePlaces)}.`
+          : "No food or coffee signal was found nearby in the current source data.",
+      },
+      {
+        label: "Culture & entertainment",
+        score: scoreByCount(cultureCount, 15, [[5, 15], [3, 12], [2, 9], [1, 5]]),
+        max: 15,
+        reason: cultureCount
+          ? `${cultureCount} culture, arts or entertainment signal${cultureCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(culturePlaces)}.`
+          : "No clear culture or entertainment signal was found nearby in the current source data.",
+      },
+      {
+        label: "Amenity diversity",
+        score: lifestyleDiversity >= 4 ? 10 : lifestyleDiversity === 3 ? 8 : lifestyleDiversity === 2 ? 5 : lifestyleDiversity === 1 ? 2 : 0,
+        max: 10,
+        reason: `${lifestyleDiversity} lifestyle amenity categor${lifestyleDiversity === 1 ? "y is" : "ies are"} represented across parks, fitness, food/coffee and culture.`,
       },
     ]
   );
@@ -1916,7 +1934,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v14" &&
+  (cached as any).version === "property-intelligence-v15" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -2075,6 +2093,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       parks,
       restaurants,
       gyms,
+      rawCulture,
       rawChildcare,
     ] = await Promise.all([
       nearby("school", 20, "school"),
@@ -2100,9 +2119,10 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("dentist orthodontist dental clinic", 20),
       nearby("physiotherapy physiotherapist sports injury clinic chiropractor therapy clinic", 20),
       nearby("urgent care walk in clinic out of hours doctor swiftcare", 20),
-      nearby("park beach green space", 20, "park"),
-      nearby("restaurant cafe", 20, "restaurant"),
-      nearby("gym leisure centre", 20, "gym"),
+      nearby("park beach green space playground garden", 20, "park"),
+      nearby("restaurant cafe coffee brunch bakery pub bar", 20, "restaurant"),
+      nearby("gym leisure centre fitness sports club swimming pool yoga pilates", 20, "gym"),
+      nearby("cinema theatre museum gallery arts entertainment music venue cultural centre", 20),
       nearby("childcare creche preschool", 20, "school"),
     ]);
 
@@ -2182,6 +2202,25 @@ router.get("/:id/intelligence", async (req: any, res) => {
       ...urgentCarePlaces,
     ], 30);
 
+    const parkPlaces = nearestPlaces(dedupePlaces(parks), 12);
+    const fitnessPlaces = nearestPlaces(dedupePlaces(gyms), 12);
+    const foodCoffeePlaces = nearestPlaces(dedupePlaces(restaurants), 20);
+    const culturePlaces = nearestPlaces(dedupePlaces(rawCulture), 12);
+
+    const lifestyleGroups = {
+      parks: parkPlaces,
+      fitness: fitnessPlaces,
+      foodCoffee: foodCoffeePlaces,
+      culture: culturePlaces,
+    };
+
+    const lifestyle = nearestPlaces([
+      ...parkPlaces,
+      ...fitnessPlaces,
+      ...foodCoffeePlaces,
+      ...culturePlaces,
+    ], 30);
+
     const shopping = groceryPlaces;
 
     const mode = String(property.mode || "").toUpperCase();
@@ -2219,6 +2258,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     if (transport.length) insightParts.push(`${transport.length} transport-related result${transport.length === 1 ? "" : "s"} found nearby.`);
     if (shopping.length) insightParts.push(`${shopping.length} grocery/convenience result${shopping.length === 1 ? "" : "s"} found nearby, with duplicate-chain inflation reduced in the convenience score.`);
     if (healthcare.length) insightParts.push(`${healthcare.length} healthcare-related result${healthcare.length === 1 ? "" : "s"} found nearby.`);
+    if (lifestyle.length) insightParts.push(`${lifestyle.length} lifestyle result${lifestyle.length === 1 ? "" : "s"} found across parks, fitness, food/coffee and culture.`);
 
     const insight =
       insightParts.length
@@ -2233,6 +2273,8 @@ router.get("/:id/intelligence", async (req: any, res) => {
       convenienceGroups,
       healthcare,
       healthcareGroups,
+      lifestyle,
+      lifestyleGroups,
       parks,
       restaurants,
       gyms,
@@ -2240,7 +2282,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v14",
+      version: "property-intelligence-v15",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -2273,6 +2315,8 @@ router.get("/:id/intelligence", async (req: any, res) => {
         convenienceGroups,
         healthcare,
         healthcareGroups,
+        lifestyle,
+        lifestyleGroups,
         parks,
         restaurants,
         gyms,
