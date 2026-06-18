@@ -1766,7 +1766,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v11" &&
+  (cached as any).version === "property-intelligence-v12" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1903,6 +1903,9 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const [
       rawSchools,
+      rawSecondarySchools,
+      rawCommunitySchools,
+      rawPostPrimarySchools,
       transport,
       transportV3,
       shopping,
@@ -1913,6 +1916,9 @@ router.get("/:id/intelligence", async (req: any, res) => {
       rawChildcare,
     ] = await Promise.all([
       nearby("school", 20, "school"),
+      nearby("secondary school", 20, "school"),
+      nearby("community school community college", 20, "school"),
+      nearby("post primary school coláiste college", 20, "school"),
       nearbyTransport(20),
       Promise.race([
         getTransportIntelligence(lat, lng, 30),
@@ -1926,7 +1932,14 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("childcare creche preschool", 20, "school"),
     ]);
 
-    const allClassifiedSchools = dedupeSchoolPlaces(classifySchoolPlaces(rawSchools));
+    const allSchoolResults = dedupeSchoolPlaces([
+      ...rawSchools,
+      ...rawSecondarySchools,
+      ...rawCommunitySchools,
+      ...rawPostPrimarySchools,
+    ]);
+
+    const allClassifiedSchools = dedupeSchoolPlaces(classifySchoolPlaces(allSchoolResults));
     const rawClassifiedChildcare = dedupeSchoolPlaces(
       classifySchoolPlaces(rawChildcare, "CHILDCARE")
     );
@@ -2005,7 +2018,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v11",
+      version: "property-intelligence-v12",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
