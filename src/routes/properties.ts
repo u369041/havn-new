@@ -536,6 +536,31 @@ function dedupeSchoolPlaces(items: any[]) {
   });
 }
 
+function sortPlacesByDistance(items: any[]) {
+  return asArray(items).slice().sort((a, b) => {
+    const ad = itemDistanceKm(a);
+    const bd = itemDistanceKm(b);
+    return (ad === null ? 9999 : ad) - (bd === null ? 9999 : bd);
+  });
+}
+
+function placesWithinKm(items: any[], km: number) {
+  return asArray(items).filter((item) => {
+    const d = itemDistanceKm(item);
+    return d !== null && d <= km;
+  });
+}
+
+function nearestPlaces(items: any[], limit: number) {
+  return sortPlacesByDistance(dedupeSchoolPlaces(items)).slice(0, limit);
+}
+
+function nearestSchoolDistanceText(items: any[]) {
+  const d = nearestDistanceKm(items);
+  if (d === null) return "no distance available";
+  return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
+}
+
 function scoreByCount(count: number, max: number, bands: Array<[number, number]>) {
   for (const [threshold, score] of bands) {
     if (count >= threshold) return clampAreaScore(score, max);
@@ -792,9 +817,13 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const schoolChildcare = schools.filter((item) => classifySchoolType(item) === "CHILDCARE");
   const combinedChildcare = dedupeSchoolPlaces([...childcare, ...schoolChildcare]);
 
-  const primarySchoolCount = countWithinKm(primarySchools, 5) || primarySchools.length;
-  const secondaryCount = countWithinKm(secondarySchools, 8) || secondarySchools.length;
-  const childcareCount = countWithinKm(combinedChildcare, 5) || combinedChildcare.length;
+  const primarySchoolsInScope = placesWithinKm(primarySchools, 3);
+  const secondarySchoolsInScope = placesWithinKm(secondarySchools, 5);
+  const childcareInScope = placesWithinKm(combinedChildcare, 3);
+
+  const primarySchoolCount = primarySchoolsInScope.length;
+  const secondaryCount = secondarySchoolsInScope.length;
+  const childcareCount = childcareInScope.length;
   const healthcareCount = countWithinKm(healthcare, 5) || healthcare.length;
   const parksCount = countWithinKm(parks, 5) || parks.length;
 
@@ -803,25 +832,29 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     [
       {
         label: "Primary schools",
-        score: scoreByCount(primarySchoolCount, 25, [[12, 25], [8, 22], [5, 18], [3, 13], [1, 7]]),
+        score: scoreByCount(primarySchoolCount, 25, [[10, 25], [7, 22], [4, 18], [2, 13], [1, 7]]),
         max: 25,
-        reason: `${primarySchoolCount} likely primary school${primarySchoolCount === 1 ? "" : "s"} found nearby.`,
+        reason: primarySchoolCount
+          ? `${primarySchoolCount} likely primary school${primarySchoolCount === 1 ? "" : "s"} found within 3km. Nearest is around ${nearestSchoolDistanceText(primarySchoolsInScope)}.`
+          : "No likely primary school was found within 3km in the current source data.",
       },
       {
         label: "Secondary schools",
-        score: scoreByCount(secondaryCount, 25, [[4, 25], [3, 23], [2, 20], [1, 16]]),
+        score: scoreByCount(secondaryCount, 25, [[5, 25], [3, 22], [2, 18], [1, 13]]),
         max: 25,
         reason: secondaryCount
-          ? `${secondaryCount} likely secondary/post-primary school${secondaryCount === 1 ? "" : "s"} found nearby.`
-          : primarySchoolCount >= 6
-            ? "Several primary schools found, but no clearly labelled secondary school was detected in the current source data."
-            : "No clearly labelled secondary school was detected nearby.",
+          ? `${secondaryCount} likely secondary/post-primary school${secondaryCount === 1 ? "" : "s"} found within 5km. Nearest is around ${nearestSchoolDistanceText(secondarySchoolsInScope)}.`
+          : primarySchoolCount >= 4
+            ? "Primary schools were found nearby, but no clearly labelled secondary school was detected within 5km."
+            : "No clearly labelled secondary school was detected within 5km.",
       },
       {
         label: "Childcare / preschool",
         score: scoreByCount(childcareCount, 20, [[8, 20], [5, 18], [3, 14], [1, 8]]),
         max: 20,
-        reason: `${childcareCount} childcare, preschool or early-years result${childcareCount === 1 ? "" : "s"} found nearby.`,
+        reason: childcareCount
+          ? `${childcareCount} childcare, preschool or early-years result${childcareCount === 1 ? "" : "s"} found within 3km. Nearest is around ${nearestSchoolDistanceText(childcareInScope)}.`
+          : "No childcare, preschool or early-years result was found within 3km in the current source data.",
       },
       {
         label: "Healthcare",
@@ -1733,7 +1766,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v10" &&
+  (cached as any).version === "property-intelligence-v11" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1893,10 +1926,30 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("childcare creche preschool", 20, "school"),
     ]);
 
-    const schools = classifySchoolPlaces(rawSchools);
-    const childcare = dedupeSchoolPlaces(
+    const allClassifiedSchools = dedupeSchoolPlaces(classifySchoolPlaces(rawSchools));
+    const rawClassifiedChildcare = dedupeSchoolPlaces(
       classifySchoolPlaces(rawChildcare, "CHILDCARE")
     );
+
+    const primarySchools = nearestPlaces(
+      allClassifiedSchools.filter((item) => classifySchoolType(item) === "PRIMARY"),
+      10
+    );
+    const secondarySchools = nearestPlaces(
+      allClassifiedSchools.filter((item) => classifySchoolType(item) === "SECONDARY"),
+      10
+    );
+    const schoolChildcare = nearestPlaces(
+      allClassifiedSchools.filter((item) => classifySchoolType(item) === "CHILDCARE"),
+      10
+    );
+    const childcare = nearestPlaces([...rawClassifiedChildcare, ...schoolChildcare], 10);
+    const schools = nearestPlaces([...primarySchools, ...secondarySchools], 20);
+    const schoolGroups = {
+      primary: primarySchools,
+      secondary: secondarySchools,
+      childcare,
+    };
 
     const mode = String(property.mode || "").toUpperCase();
     const county = property.county || property.city || "this area";
@@ -1929,7 +1982,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     if (ber) insightParts.push(`BER ${ber} gives users an immediate energy-efficiency signal.`);
     if (beds) insightParts.push(`${beds} bedroom${beds === 1 ? "" : "s"} supports quick suitability screening.`);
     if (baths) insightParts.push(`${baths} bathroom${baths === 1 ? "" : "s"} adds useful comfort context.`);
-    if (schools.length) insightParts.push(`${schools.length} nearby school result${schools.length === 1 ? "" : "s"} found within the search radius.`);
+    if (schools.length) insightParts.push(`${primarySchools.length} primary and ${secondarySchools.length} secondary school result${schools.length === 1 ? "" : "s"} found in the local school scan.`);
     if (transport.length) insightParts.push(`${transport.length} transport-related result${transport.length === 1 ? "" : "s"} found nearby.`);
     if (shopping.length) insightParts.push(`${shopping.length} shopping or grocery result${shopping.length === 1 ? "" : "s"} found nearby.`);
     if (healthcare.length) insightParts.push(`${healthcare.length} healthcare-related result${healthcare.length === 1 ? "" : "s"} found nearby.`);
@@ -1952,7 +2005,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v10",
+      version: "property-intelligence-v11",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -1978,6 +2031,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       },
       nearby: {
         schools,
+        schoolGroups,
         transport,
         transportV3,
         shopping,
