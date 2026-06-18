@@ -114,6 +114,90 @@ function dedupeTransportRows(rows: TransportIntelRow[]): TransportIntelRow[] {
   });
 }
 
+function classifyTransport(row: TransportIntelRow): string {
+  const type = safeText(row.type).toLowerCase();
+  const route = safeText(row.route).toLowerCase();
+  const provider = safeText(row.provider).toLowerCase();
+
+  if (type === "tram" && provider.includes("luas")) return "LUAS";
+  if (type === "rail" && route === "dart") return "DART";
+  if (type === "rail") return "RAIL";
+
+  if (provider.includes("dublin bus") || provider.includes("bus átha cliath") || provider.includes("bus atha cliath")) {
+    return "DUBLIN_BUS";
+  }
+
+  if (provider.includes("bus éireann") || provider.includes("bus eireann")) return "BUS_EIREANN";
+  if (provider.includes("local link")) return "LOCAL_LINK";
+  if (provider.includes("citylink")) return "CITYLINK";
+
+  if (type === "bus") return "OTHER_BUS";
+  if (type === "ferry") return "FERRY";
+
+  return "OTHER";
+}
+
+function pickBalancedTransportRows(rows: TransportIntelRow[], limit: number): TransportIntelRow[] {
+  const cleanLimit = Math.max(1, Math.min(80, Number(limit) || 30));
+  const selected: TransportIntelRow[] = [];
+  const seen = new Set<string>();
+
+  function rowKey(row: TransportIntelRow): string {
+    return [
+      row.type,
+      row.stop,
+      row.route,
+      row.destination,
+      row.provider,
+      row.distanceKm,
+    ]
+      .join("|")
+      .toLowerCase();
+  }
+
+  function add(row: TransportIntelRow): void {
+    if (selected.length >= cleanLimit) return;
+    const key = rowKey(row);
+    if (seen.has(key)) return;
+    seen.add(key);
+    selected.push(row);
+  }
+
+  function addBucket(kind: string, maxRows: number): void {
+    rows
+      .filter((row) => classifyTransport(row) === kind)
+      .slice(0, maxRows)
+      .forEach(add);
+  }
+
+  /*
+    Important:
+    Do not simply take the first 30 closest rows.
+    In dense Dublin areas, Dublin Bus can fill all 30 slots and hide LUAS/DART.
+    These buckets preserve first-class transport modes when they are actually nearby.
+  */
+  addBucket("LUAS", 8);
+  addBucket("DART", 8);
+  addBucket("RAIL", 6);
+  addBucket("DUBLIN_BUS", 12);
+  addBucket("BUS_EIREANN", 8);
+  addBucket("LOCAL_LINK", 8);
+  addBucket("CITYLINK", 4);
+  addBucket("OTHER_BUS", 6);
+  addBucket("FERRY", 3);
+  addBucket("OTHER", 4);
+
+  rows.forEach(add);
+
+  return selected
+    .slice(0, cleanLimit)
+    .sort((a, b) => {
+      const ad = Number.isFinite(Number(a.distanceKm)) ? Number(a.distanceKm) : 9999;
+      const bd = Number.isFinite(Number(b.distanceKm)) ? Number(b.distanceKm) : 9999;
+      return ad - bd;
+    });
+}
+
 export async function getTransportIntelligence(
   lat: number,
   lng: number,
@@ -152,7 +236,9 @@ export async function getTransportIntelligence(
         return ad - bd;
       });
 
-    return dedupeTransportRows(rows).slice(0, limit);
+    const deduped = dedupeTransportRows(rows);
+
+    return pickBalancedTransportRows(deduped, limit);
   } catch (err: any) {
     console.warn("Transport intelligence failed:", err?.message || err);
     return [];
