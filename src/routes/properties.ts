@@ -625,6 +625,28 @@ function serviceSignalCount(items: any[], km: number) {
   return uniquePlaceBrands(placesWithinKm(items, km)).size || countWithinKm(items, km) || asArray(items).length;
 }
 
+function uniquePlaceCount(items: any[], km: number) {
+  const scoped = placesWithinKm(items, km);
+  const rows = scoped.length ? scoped : asArray(items);
+  const seen = new Set<string>();
+
+  for (const item of rows) {
+    const key =
+      safeText(item?.googlePlaceId).trim() ||
+      `${safeText(item?.name).trim().toLowerCase()}|${safeText(item?.address).trim().toLowerCase()}`;
+
+    if (key) seen.add(key);
+  }
+
+  return seen.size;
+}
+
+function nearestDistanceText(items: any[]) {
+  const d = nearestDistanceKm(items);
+  if (d === null) return "no distance available";
+  return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
+}
+
 function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const schools = asArray(nearby?.schools);
   const transport = asArray(nearby?.transport);
@@ -635,6 +657,12 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const restaurants = asArray(nearby?.restaurants);
   const gyms = asArray(nearby?.gyms);
   const childcare = asArray(nearby?.childcare);
+  const healthcareGroups = nearby?.healthcareGroups || {};
+  const hospitalPlaces = asArray(healthcareGroups?.hospitals);
+  const gpClinicPlaces = asArray(healthcareGroups?.gps);
+  const dentalPlaces = asArray(healthcareGroups?.dental);
+  const specialistPlaces = asArray(healthcareGroups?.specialists);
+  const urgentCarePlaces = asArray(healthcareGroups?.urgentCare);
 
   const allTransport = transportV3.length ? transportV3 : transport;
 
@@ -881,24 +909,23 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const primarySchoolCount = primarySchoolsInScope.length;
   const secondaryCount = secondarySchoolsInScope.length;
   const childcareCount = childcareInScope.length;
-  const healthcareCount = countWithinKm(healthcare, 5) || healthcare.length;
   const parksCount = countWithinKm(parks, 5) || parks.length;
 
   const family = makeAreaScore(
-    "Measures nearby primary schools, secondary schools, childcare availability, healthcare and parks.",
+    "Measures nearby primary schools, secondary schools and childcare availability.",
     [
       {
         label: "Primary schools",
-        score: scoreByCount(primarySchoolCount, 25, [[10, 25], [7, 22], [4, 18], [2, 13], [1, 7]]),
-        max: 25,
+        score: scoreByCount(primarySchoolCount, 35, [[10, 35], [7, 31], [4, 25], [2, 18], [1, 10]]),
+        max: 35,
         reason: primarySchoolCount
           ? `${primarySchoolCount} likely primary school${primarySchoolCount === 1 ? "" : "s"} found within 3km. Nearest is around ${nearestSchoolDistanceText(primarySchoolsInScope)}.`
           : "No likely primary school was found within 3km in the current source data.",
       },
       {
         label: "Secondary schools",
-        score: scoreByCount(secondaryCount, 25, [[5, 25], [3, 22], [2, 18], [1, 13]]),
-        max: 25,
+        score: scoreByCount(secondaryCount, 35, [[5, 35], [3, 30], [2, 24], [1, 16]]),
+        max: 35,
         reason: secondaryCount
           ? `${secondaryCount} likely secondary/post-primary school${secondaryCount === 1 ? "" : "s"} found within 5km. Nearest is around ${nearestSchoolDistanceText(secondarySchoolsInScope)}.`
           : primarySchoolCount >= 4
@@ -907,23 +934,11 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
       },
       {
         label: "Childcare / preschool",
-        score: scoreByCount(childcareCount, 20, [[8, 20], [5, 18], [3, 14], [1, 8]]),
-        max: 20,
+        score: scoreByCount(childcareCount, 30, [[8, 30], [5, 26], [3, 20], [1, 12]]),
+        max: 30,
         reason: childcareCount
           ? `${childcareCount} childcare, preschool or early-years result${childcareCount === 1 ? "" : "s"} found within 3km. Nearest is around ${nearestSchoolDistanceText(childcareInScope)}.`
           : "No childcare, preschool or early-years result was found within 3km in the current source data.",
-      },
-      {
-        label: "Healthcare",
-        score: scoreByCount(healthcareCount, 15, [[8, 15], [5, 14], [3, 11], [1, 7]]),
-        max: 15,
-        reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
-      },
-      {
-        label: "Parks / recreation",
-        score: scoreByCount(parksCount, 15, [[4, 15], [2, 12], [1, 8]]),
-        max: 15,
-        reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
       },
     ]
   );
@@ -988,6 +1003,58 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     ]
   );
 
+  const hospitalCount = uniquePlaceCount(hospitalPlaces, 8);
+  const gpClinicCount = uniquePlaceCount(gpClinicPlaces, 5);
+  const dentalCount = uniquePlaceCount(dentalPlaces, 5);
+  const specialistCount = uniquePlaceCount(specialistPlaces, 5);
+  const urgentCareCount = uniquePlaceCount(urgentCarePlaces, 8);
+
+  const healthcareScore = makeAreaScore(
+    "Measures access to actual healthcare infrastructure: hospitals, GPs/clinics, dental care, specialists/therapy and urgent/out-of-hours care. Pharmacies are handled under Convenience, not Healthcare.",
+    [
+      {
+        label: "Hospitals",
+        score: scoreByCount(hospitalCount, 30, [[3, 30], [2, 25], [1, 18]]),
+        max: 30,
+        reason: hospitalCount
+          ? `${hospitalCount} hospital signal${hospitalCount === 1 ? "" : "s"} found within 8km. Nearest is around ${nearestDistanceText(hospitalPlaces)}.`
+          : "No hospital signal was found within the current search radius.",
+      },
+      {
+        label: "GPs & medical clinics",
+        score: scoreByCount(gpClinicCount, 25, [[8, 25], [5, 22], [3, 17], [1, 10]]),
+        max: 25,
+        reason: gpClinicCount
+          ? `${gpClinicCount} GP, family practice or medical-clinic signal${gpClinicCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(gpClinicPlaces)}.`
+          : "No GP or medical-clinic signal was found nearby in the current source data.",
+      },
+      {
+        label: "Dental care",
+        score: scoreByCount(dentalCount, 15, [[5, 15], [3, 12], [1, 7]]),
+        max: 15,
+        reason: dentalCount
+          ? `${dentalCount} dental or orthodontic signal${dentalCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(dentalPlaces)}.`
+          : "No dental-care signal was found nearby in the current source data.",
+      },
+      {
+        label: "Specialists & therapy",
+        score: scoreByCount(specialistCount, 20, [[8, 20], [5, 17], [3, 13], [1, 7]]),
+        max: 20,
+        reason: specialistCount
+          ? `${specialistCount} physiotherapy, therapy or specialist-clinic signal${specialistCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(specialistPlaces)}.`
+          : "No specialist or therapy-clinic signal was found nearby in the current source data.",
+      },
+      {
+        label: "Urgent / out-of-hours care",
+        score: scoreByCount(urgentCareCount, 10, [[2, 10], [1, 7]]),
+        max: 10,
+        reason: urgentCareCount
+          ? `${urgentCareCount} urgent-care, walk-in or out-of-hours signal${urgentCareCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(urgentCarePlaces)}.`
+          : "No clear urgent-care or out-of-hours signal was found nearby in the current source data.",
+      },
+    ]
+  );
+
   const restaurantCount = countWithinKm(restaurants, 6) || restaurants.length;
   const cafeCount = restaurants.filter((item) => textIncludesAny(item?.name, ["cafe", "café", "coffee", "bistro"])).length;
   const leisureCount = countWithinKm(gyms, 6) || gyms.length;
@@ -1035,6 +1102,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     connectivity,
     family,
     convenience,
+    healthcare: healthcareScore,
     lifestyle,
   };
 }
@@ -1848,7 +1916,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v13-1" &&
+  (cached as any).version === "property-intelligence-v14" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1999,7 +2067,11 @@ router.get("/:id/intelligence", async (req: any, res) => {
       rawLibraries,
       rawParcelServices,
       rawRetail,
-      healthcare,
+      rawHospitals,
+      rawGpClinics,
+      rawDental,
+      rawSpecialists,
+      rawUrgentCare,
       parks,
       restaurants,
       gyms,
@@ -2023,7 +2095,11 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("library public library", 10, "library"),
       nearby("parcel locker courier post office", 10),
       nearby("shopping centre retail park market department store", 20),
-      nearby("pharmacy doctor hospital medical centre", 20),
+      nearby("hospital emergency department university hospital private hospital", 20, "hospital"),
+      nearby("doctor GP medical centre family practice primary care clinic", 20),
+      nearby("dentist orthodontist dental clinic", 20),
+      nearby("physiotherapy physiotherapist sports injury clinic chiropractor therapy clinic", 20),
+      nearby("urgent care walk in clinic out of hours doctor swiftcare", 20),
       nearby("park beach green space", 20, "park"),
       nearby("restaurant cafe", 20, "restaurant"),
       nearby("gym leisure centre", 20, "gym"),
@@ -2084,6 +2160,28 @@ router.get("/:id/intelligence", async (req: any, res) => {
       retail: retailPlaces,
     };
 
+    const hospitalPlaces = nearestPlaces(dedupePlaces(rawHospitals), 12);
+    const gpClinicPlaces = nearestPlaces(dedupePlaces(rawGpClinics), 12);
+    const dentalPlaces = nearestPlaces(dedupePlaces(rawDental), 12);
+    const specialistPlaces = nearestPlaces(dedupePlaces(rawSpecialists), 12);
+    const urgentCarePlaces = nearestPlaces(dedupePlaces(rawUrgentCare), 12);
+
+    const healthcareGroups = {
+      hospitals: hospitalPlaces,
+      gps: gpClinicPlaces,
+      dental: dentalPlaces,
+      specialists: specialistPlaces,
+      urgentCare: urgentCarePlaces,
+    };
+
+    const healthcare = nearestPlaces([
+      ...hospitalPlaces,
+      ...gpClinicPlaces,
+      ...dentalPlaces,
+      ...specialistPlaces,
+      ...urgentCarePlaces,
+    ], 30);
+
     const shopping = groceryPlaces;
 
     const mode = String(property.mode || "").toUpperCase();
@@ -2134,6 +2232,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       shopping,
       convenienceGroups,
       healthcare,
+      healthcareGroups,
       parks,
       restaurants,
       gyms,
@@ -2141,7 +2240,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v13-1",
+      version: "property-intelligence-v14",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -2173,6 +2272,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         shopping,
         convenienceGroups,
         healthcare,
+        healthcareGroups,
         parks,
         restaurants,
         gyms,
