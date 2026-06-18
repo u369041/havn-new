@@ -481,38 +481,44 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const hasAirport = textIncludesAny(destinationText, ["airport"]);
 
   const railScore = railItems.length
-    ? nearestRail !== null && nearestRail <= 2
+    ? nearestRail !== null && nearestRail <= 1
       ? 30
-      : nearestRail !== null && nearestRail <= 5
-        ? 24
-        : 18
+      : nearestRail !== null && nearestRail <= 2.5
+        ? 27
+        : nearestRail !== null && nearestRail <= 5
+          ? 22
+          : 15
     : 0;
 
   const busNetworkScore = scoreByCount(uniqueRoutes.size || busItems.length, 25, [
-    [10, 25],
-    [6, 22],
-    [3, 16],
-    [1, 10],
+    [14, 25],
+    [10, 22],
+    [7, 20],
+    [4, 15],
+    [1, 8],
   ]);
 
   const distanceScore = nearestTransport === null
     ? 0
-    : nearestTransport <= 0.8
+    : nearestTransport <= 0.5
       ? 10
-      : nearestTransport <= 1.5
-        ? 8
-        : nearestTransport <= 3
-          ? 6
-          : nearestTransport <= 5
-            ? 3
-            : 0;
+      : nearestTransport <= 1
+        ? 9
+        : nearestTransport <= 1.5
+          ? 7
+          : nearestTransport <= 3
+            ? 5
+            : nearestTransport <= 5
+              ? 2
+              : 0;
 
   const majorDestinationScore = scoreByCount(matchedMajorDestinations.length, 20, [
-    [5, 20],
-    [4, 18],
-    [3, 15],
-    [2, 10],
-    [1, 6],
+    [6, 20],
+    [5, 18],
+    [4, 16],
+    [3, 13],
+    [2, 9],
+    [1, 5],
   ]);
 
   const connectivity = makeAreaScore(
@@ -576,13 +582,13 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     [
       {
         label: "Primary schools",
-        score: scoreByCount(schoolCount, 25, [[8, 25], [5, 21], [3, 16], [1, 9]]),
+        score: scoreByCount(schoolCount, 25, [[15, 25], [10, 22], [6, 18], [3, 13], [1, 7]]),
         max: 25,
         reason: `${schoolCount} school result${schoolCount === 1 ? "" : "s"} found within the search radius.`,
       },
       {
         label: "Secondary schools",
-        score: secondaryCount >= 2 ? 25 : secondaryCount === 1 ? 18 : schoolCount >= 6 ? 12 : 0,
+        score: secondaryCount >= 3 ? 25 : secondaryCount === 2 ? 23 : secondaryCount === 1 ? 16 : schoolCount >= 8 ? 10 : 0,
         max: 25,
         reason: secondaryCount
           ? `${secondaryCount} likely secondary/post-primary result${secondaryCount === 1 ? "" : "s"} detected by name.`
@@ -592,19 +598,19 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
       },
       {
         label: "Childcare",
-        score: scoreByCount(childcareCount, 20, [[5, 20], [3, 16], [1, 10]]),
+        score: scoreByCount(childcareCount, 20, [[8, 20], [5, 18], [3, 14], [1, 8]]),
         max: 20,
         reason: `${childcareCount} childcare or preschool result${childcareCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Healthcare",
-        score: scoreByCount(healthcareCount, 15, [[5, 15], [3, 12], [1, 8]]),
+        score: scoreByCount(healthcareCount, 15, [[8, 15], [5, 14], [3, 11], [1, 7]]),
         max: 15,
         reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Parks / recreation",
-        score: scoreByCount(parksCount, 15, [[3, 15], [1, 10]]),
+        score: scoreByCount(parksCount, 15, [[4, 15], [2, 12], [1, 8]]),
         max: 15,
         reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
       },
@@ -621,25 +627,25 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     [
       {
         label: "Shopping",
-        score: scoreByCount(shoppingCount, 30, [[6, 30], [4, 24], [2, 16], [1, 10]]),
+        score: scoreByCount(shoppingCount, 30, [[12, 30], [8, 26], [5, 21], [2, 14], [1, 8]]),
         max: 30,
         reason: `${shoppingCount} shopping or grocery result${shoppingCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Healthcare",
-        score: scoreByCount(healthcareCount, 20, [[5, 20], [3, 16], [1, 10]]),
+        score: scoreByCount(healthcareCount, 20, [[8, 20], [5, 17], [3, 14], [1, 8]]),
         max: 20,
         reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Transport",
-        score: scoreByCount(transportCount, 20, [[20, 20], [10, 16], [5, 12], [1, 7]]),
+        score: scoreByCount(transportCount, 20, [[40, 20], [25, 18], [15, 15], [8, 11], [1, 6]]),
         max: 20,
         reason: `${transportCount} transport option${transportCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Daily services",
-        score: scoreByCount(dailyServiceCount, 30, [[8, 30], [5, 24], [3, 16], [1, 8]]),
+        score: scoreByCount(dailyServiceCount, 30, [[18, 30], [12, 25], [8, 20], [4, 13], [1, 7]]),
         max: 30,
         reason: `${dailyServiceCount} practical daily-service signal${dailyServiceCount === 1 ? "" : "s"} found across shopping and pharmacy data.`,
       },
@@ -656,13 +662,13 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     [
       {
         label: "Restaurants",
-        score: scoreByCount(restaurantCount, 20, [[8, 20], [5, 16], [2, 10], [1, 6]]),
+        score: scoreByCount(restaurantCount, 20, [[15, 20], [10, 18], [6, 15], [3, 9], [1, 5]]),
         max: 20,
         reason: `${restaurantCount} restaurant result${restaurantCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Cafés",
-        score: scoreByCount(cafeCount, 15, [[4, 15], [2, 10], [1, 6]]),
+        score: scoreByCount(cafeCount, 15, [[6, 15], [4, 12], [2, 9], [1, 5]]),
         max: 15,
         reason: cafeCount
           ? `${cafeCount} café/coffee/bistro signal${cafeCount === 1 ? "" : "s"} detected by name.`
@@ -670,19 +676,19 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
       },
       {
         label: "Leisure",
-        score: scoreByCount(leisureCount, 20, [[6, 20], [3, 15], [1, 9]]),
+        score: scoreByCount(leisureCount, 20, [[12, 20], [8, 18], [4, 14], [1, 8]]),
         max: 20,
         reason: `${leisureCount} gym or leisure result${leisureCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Parks",
-        score: scoreByCount(parksCount, 20, [[3, 20], [1, 14]]),
+        score: scoreByCount(parksCount, 20, [[4, 20], [2, 15], [1, 10]]),
         max: 20,
         reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Attractions / amenity diversity",
-        score: lifestyleDiversity >= 4 ? 25 : lifestyleDiversity === 3 ? 18 : lifestyleDiversity === 2 ? 12 : lifestyleDiversity === 1 ? 6 : 0,
+        score: lifestyleDiversity >= 4 ? 22 : lifestyleDiversity === 3 ? 17 : lifestyleDiversity === 2 ? 10 : lifestyleDiversity === 1 ? 5 : 0,
         max: 25,
         reason: `${lifestyleDiversity} lifestyle amenity categor${lifestyleDiversity === 1 ? "y" : "ies"} represented across restaurants, cafés, leisure and parks.`,
       },
@@ -1506,7 +1512,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v6" &&
+  (cached as any).version === "property-intelligence-v7" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1720,7 +1726,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v6",
+      version: "property-intelligence-v7",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
