@@ -435,6 +435,107 @@ function textIncludesAny(value: any, terms: string[]) {
   return terms.some((term) => s.includes(term.toLowerCase()));
 }
 
+
+type ClassifiedSchoolType = "PRIMARY" | "SECONDARY" | "CHILDCARE" | "OTHER";
+
+function classifySchoolType(item: any): ClassifiedSchoolType {
+  const text = [item?.name, item?.address, item?.vicinity]
+    .map(safeText)
+    .join(" ")
+    .toLowerCase();
+
+  if (!text.trim()) return "OTHER";
+
+  if (
+    textIncludesAny(text, [
+      "secondary",
+      "post primary",
+      "post-primary",
+      "community school",
+      "community college",
+      "vocational school",
+      "college",
+      "coláiste",
+      "grammar school",
+      "high school",
+      "comprehensive school",
+    ])
+  ) {
+    return "SECONDARY";
+  }
+
+  if (
+    textIncludesAny(text, [
+      "national school",
+      "primary school",
+      "junior school",
+      "educate together",
+      "gaelscoil",
+      "scoil",
+      "ns",
+      "n.s.",
+    ])
+  ) {
+    return "PRIMARY";
+  }
+
+  if (
+    textIncludesAny(text, [
+      "montessori",
+      "preschool",
+      "pre-school",
+      "pre school",
+      "creche",
+      "crèche",
+      "childcare",
+      "kindergarten",
+      "playschool",
+      "play school",
+      "early years",
+      "nursery",
+    ])
+  ) {
+    return "CHILDCARE";
+  }
+
+  return "PRIMARY";
+}
+
+function schoolTypeLabel(type: ClassifiedSchoolType) {
+  if (type === "PRIMARY") return "Primary";
+  if (type === "SECONDARY") return "Secondary";
+  if (type === "CHILDCARE") return "Childcare / preschool";
+  return "School";
+}
+
+function classifySchoolPlaces(items: any[], defaultType?: ClassifiedSchoolType) {
+  return asArray(items).map((item) => {
+    const schoolType = defaultType || classifySchoolType(item);
+    const label = schoolTypeLabel(schoolType);
+
+    return {
+      ...item,
+      schoolType,
+      schoolLevel: label,
+      type: safeText(item?.type).trim() || label,
+    };
+  });
+}
+
+function dedupeSchoolPlaces(items: any[]) {
+  const seen = new Set<string>();
+
+  return asArray(items).filter((item) => {
+    const key =
+      safeText(item?.googlePlaceId).trim() ||
+      `${safeText(item?.name).trim().toLowerCase()}|${safeText(item?.address).trim().toLowerCase()}`;
+
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function scoreByCount(count: number, max: number, bands: Array<[number, number]>) {
   for (const [threshold, score] of bands) {
     if (count >= threshold) return clampAreaScore(score, max);
@@ -686,38 +787,41 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     normalizedConnectivityBreakdown
   );
 
-  const schoolCount = countWithinKm(schools, 5) || schools.length;
-  const secondaryCount = schools.filter((item) =>
-    textIncludesAny(item?.name, ["college", "secondary", "community school", "post primary", "coláiste"])
-  ).length;
-  const childcareCount = countWithinKm(childcare, 5) || childcare.length;
+  const primarySchools = schools.filter((item) => classifySchoolType(item) === "PRIMARY");
+  const secondarySchools = schools.filter((item) => classifySchoolType(item) === "SECONDARY");
+  const schoolChildcare = schools.filter((item) => classifySchoolType(item) === "CHILDCARE");
+  const combinedChildcare = dedupeSchoolPlaces([...childcare, ...schoolChildcare]);
+
+  const primarySchoolCount = countWithinKm(primarySchools, 5) || primarySchools.length;
+  const secondaryCount = countWithinKm(secondarySchools, 8) || secondarySchools.length;
+  const childcareCount = countWithinKm(combinedChildcare, 5) || combinedChildcare.length;
   const healthcareCount = countWithinKm(healthcare, 5) || healthcare.length;
   const parksCount = countWithinKm(parks, 5) || parks.length;
 
   const family = makeAreaScore(
-    "Measures nearby schools, secondary education signals, childcare availability, healthcare and parks.",
+    "Measures nearby primary schools, secondary schools, childcare availability, healthcare and parks.",
     [
       {
         label: "Primary schools",
-        score: scoreByCount(schoolCount, 25, [[15, 25], [10, 22], [6, 18], [3, 13], [1, 7]]),
+        score: scoreByCount(primarySchoolCount, 25, [[12, 25], [8, 22], [5, 18], [3, 13], [1, 7]]),
         max: 25,
-        reason: `${schoolCount} school result${schoolCount === 1 ? "" : "s"} found within the search radius.`,
+        reason: `${primarySchoolCount} likely primary school${primarySchoolCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Secondary schools",
-        score: secondaryCount >= 3 ? 25 : secondaryCount === 2 ? 23 : secondaryCount === 1 ? 16 : schoolCount >= 8 ? 10 : 0,
+        score: scoreByCount(secondaryCount, 25, [[4, 25], [3, 23], [2, 20], [1, 16]]),
         max: 25,
         reason: secondaryCount
-          ? `${secondaryCount} likely secondary/post-primary result${secondaryCount === 1 ? "" : "s"} detected by name.`
-          : schoolCount >= 6
-            ? "Several schools found, but secondary schools were not clearly labelled in the source data."
+          ? `${secondaryCount} likely secondary/post-primary school${secondaryCount === 1 ? "" : "s"} found nearby.`
+          : primarySchoolCount >= 6
+            ? "Several primary schools found, but no clearly labelled secondary school was detected in the current source data."
             : "No clearly labelled secondary school was detected nearby.",
       },
       {
-        label: "Childcare",
+        label: "Childcare / preschool",
         score: scoreByCount(childcareCount, 20, [[8, 20], [5, 18], [3, 14], [1, 8]]),
         max: 20,
-        reason: `${childcareCount} childcare or preschool result${childcareCount === 1 ? "" : "s"} found nearby.`,
+        reason: `${childcareCount} childcare, preschool or early-years result${childcareCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Healthcare",
@@ -1629,7 +1733,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v9" &&
+  (cached as any).version === "property-intelligence-v10" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1765,7 +1869,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     }
 
     const [
-      schools,
+      rawSchools,
       transport,
       transportV3,
       shopping,
@@ -1773,7 +1877,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       parks,
       restaurants,
       gyms,
-      childcare,
+      rawChildcare,
     ] = await Promise.all([
       nearby("school", 20, "school"),
       nearbyTransport(20),
@@ -1788,6 +1892,11 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("gym leisure centre", 20, "gym"),
       nearby("childcare creche preschool", 20, "school"),
     ]);
+
+    const schools = classifySchoolPlaces(rawSchools);
+    const childcare = dedupeSchoolPlaces(
+      classifySchoolPlaces(rawChildcare, "CHILDCARE")
+    );
 
     const mode = String(property.mode || "").toUpperCase();
     const county = property.county || property.city || "this area";
@@ -1843,7 +1952,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v9",
+      version: "property-intelligence-v10",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
