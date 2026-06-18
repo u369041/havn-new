@@ -368,18 +368,31 @@ function clampAreaScore(value: number, max: number) {
 }
 
 function scoreLabel(score: number) {
-  if (score >= 85) return "Excellent";
+  if (score >= 92) return "Exceptional";
+  if (score >= 84) return "Excellent";
   if (score >= 70) return "Strong";
   if (score >= 55) return "Good";
   if (score >= 40) return "Moderate";
   return "Limited";
 }
 
+function calibrateAreaScore(rawScore: number) {
+  const score = clampAreaScore(rawScore, 100);
+
+  if (score >= 98) return 94;
+  if (score >= 95) return 92;
+  if (score >= 90) return Math.round(86 + (score - 90) * 1.0);
+  if (score >= 85) return Math.round(82 + (score - 85) * 0.8);
+
+  return score;
+}
+
 function makeAreaScore(summary: string, breakdown: AreaScoreBreakdownItem[]): AreaScoreResult {
-  const score = clampAreaScore(
+  const rawScore = clampAreaScore(
     breakdown.reduce((total, item) => total + clampAreaScore(item.score, item.max), 0),
     100
   );
+  const score = calibrateAreaScore(rawScore);
 
   return {
     score,
@@ -899,7 +912,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   });
 
   const connectivity = makeAreaScore(
-    "Measures connectivity relative to the transport modes realistically available nearby. LUAS and DART are scored only when present in the local transport cache, so non-Dublin markets are not penalised for not having them.",
+    "Shows how easy it is to get around from this property, using nearby public transport, route depth and direct destination signals.",
     normalizedConnectivityBreakdown
   );
 
@@ -918,7 +931,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const parksCount = countWithinKm(parks, 5) || parks.length;
 
   const family = makeAreaScore(
-    "Measures nearby primary schools, secondary schools and childcare availability.",
+    "Summarises nearby primary schools, secondary schools and childcare so families can quickly judge day-to-day suitability.",
     [
       {
         label: "Primary schools",
@@ -966,7 +979,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const transportCount = allTransport.length;
 
   const convenience = makeAreaScore(
-    "Measures practical day-to-day convenience using grocery diversity, pharmacy access, transport, and nearby daily services. Duplicate chains are de-emphasised so repeated Tesco/Spar results do not inflate the score.",
+    "Shows how convenient everyday life is, with grocery options, pharmacies, useful services, retail and transport practicality considered together.",
     [
       {
         label: "Grocery diversity",
@@ -1016,7 +1029,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const urgentCareCount = uniquePlaceCount(urgentCarePlaces, 8);
 
   const healthcareScore = makeAreaScore(
-    "Measures access to actual healthcare infrastructure: hospitals, GPs/clinics, dental care, specialists/therapy and urgent/out-of-hours care. Pharmacies are handled under Convenience, not Healthcare.",
+    "Summarises access to real healthcare infrastructure including hospitals, GPs, dental care, specialists and urgent or out-of-hours services.",
     [
       {
         label: "Hospitals",
@@ -1073,7 +1086,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   ].filter(Boolean).length;
 
   const lifestyle = makeAreaScore(
-    "Measures lifestyle infrastructure across parks and green space, fitness/sport, food/coffee and culture/entertainment.",
+    "Shows the local lifestyle offer across parks, fitness, cafés, restaurants, pubs and culture so users can picture daily life in the area.",
     [
       {
         label: "Parks & green space",
@@ -1934,7 +1947,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v15" &&
+  (cached as any).version === "property-intelligence-v16" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -2024,6 +2037,8 @@ router.get("/:id/intelligence", async (req: any, res) => {
                 ? Number(distanceKm(lat, lng, placeLat, placeLng).toFixed(2))
                 : null,
             googlePlaceId: safeText(r?.place_id).trim() || null,
+            lat: Number.isFinite(placeLat) ? placeLat : null,
+            lng: Number.isFinite(placeLng) ? placeLng : null,
           };
         })
         .filter((x: any) => x.name)
@@ -2047,6 +2062,34 @@ router.get("/:id/intelligence", async (req: any, res) => {
         seen.add(key);
         return true;
       });
+    }
+
+    function textForPlace(item: any) {
+      return [item?.name, item?.address, item?.vicinity, item?.type]
+        .map(safeText)
+        .join(" ")
+        .toLowerCase();
+    }
+
+    function placeHasAny(item: any, terms: string[]) {
+      const text = textForPlace(item);
+      return terms.some((term) => text.includes(term.toLowerCase()));
+    }
+
+    function excludePlaceTerms(items: any[], terms: string[]) {
+      return asArray(items).filter((item) => !placeHasAny(item, terms));
+    }
+
+    const foodContaminationTerms = [
+      "park", "playground", "green", "garden", "beach",
+      "school", "college", "academy", "church",
+      "clinic", "medical", "pharmacy", "chemist", "dentist",
+      "gym", "fitness", "leisure", "museum", "gallery",
+      "theatre", "library", "hall", "studio"
+    ];
+
+    function cleanFoodPlaces(items: any[]) {
+      return excludePlaceTerms(items, foodContaminationTerms);
     }
 
     async function nearbyTransport(limit = 20) {
@@ -2091,9 +2134,14 @@ router.get("/:id/intelligence", async (req: any, res) => {
       rawSpecialists,
       rawUrgentCare,
       parks,
-      restaurants,
+      rawCafes,
+      rawRestaurants,
+      rawPubs,
       gyms,
-      rawCulture,
+      rawCultureCore,
+      rawCultureLibrary,
+      rawCultureCinema,
+      rawCultureHeritage,
       rawChildcare,
     ] = await Promise.all([
       nearby("school", 20, "school"),
@@ -2120,9 +2168,14 @@ router.get("/:id/intelligence", async (req: any, res) => {
       nearby("physiotherapy physiotherapist sports injury clinic chiropractor therapy clinic", 20),
       nearby("urgent care walk in clinic out of hours doctor swiftcare", 20),
       nearby("park beach green space playground garden", 20, "park"),
-      nearby("restaurant cafe coffee brunch bakery pub bar", 20, "restaurant"),
+      nearby("cafe coffee bakery brunch patisserie", 20, "cafe"),
+      nearby("restaurant bistro dining", 20, "restaurant"),
+      nearby("pub bar gastropub", 12, "bar"),
       nearby("gym leisure centre fitness sports club swimming pool yoga pilates", 20, "gym"),
-      nearby("cinema theatre museum gallery arts entertainment music venue cultural centre", 20),
+      nearby("theatre museum gallery arts centre music venue cultural centre concert hall performance exhibition", 20),
+      nearby("library public library lexicon civic arts community centre", 20, "library"),
+      nearby("cinema film theatre entertainment venue", 20, "movie_theater"),
+      nearby("heritage maritime visitor centre historic attraction museum", 20),
       nearby("childcare creche preschool", 20, "school"),
     ]);
 
@@ -2204,13 +2257,38 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const parkPlaces = nearestPlaces(dedupePlaces(parks), 12);
     const fitnessPlaces = nearestPlaces(dedupePlaces(gyms), 12);
-    const foodCoffeePlaces = nearestPlaces(dedupePlaces(restaurants), 20);
-    const culturePlaces = nearestPlaces(dedupePlaces(rawCulture), 12);
+
+    const cafePlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawCafes)), 10);
+    const restaurantPlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawRestaurants)), 10);
+    const pubPlaces = nearestPlaces(dedupePlaces(cleanFoodPlaces(rawPubs)), 8);
+    const foodCoffeePlaces = nearestPlaces(
+      dedupePlaces([
+        ...cafePlaces,
+        ...restaurantPlaces,
+        ...pubPlaces,
+      ]),
+      20
+    );
+
+    const culturePlaces = nearestPlaces(
+      dedupePlaces([
+        ...rawCultureCore,
+        ...rawCultureLibrary,
+        ...rawCultureCinema,
+        ...rawCultureHeritage,
+      ]),
+      16
+    );
 
     const lifestyleGroups = {
       parks: parkPlaces,
       fitness: fitnessPlaces,
       foodCoffee: foodCoffeePlaces,
+      foodCoffeeGroups: {
+        cafes: cafePlaces,
+        restaurants: restaurantPlaces,
+        pubs: pubPlaces,
+      },
       culture: culturePlaces,
     };
 
@@ -2276,13 +2354,13 @@ router.get("/:id/intelligence", async (req: any, res) => {
       lifestyle,
       lifestyleGroups,
       parks,
-      restaurants,
+      restaurants: foodCoffeePlaces,
       gyms,
       childcare,
     });
 
     const intelligence = {
-      version: "property-intelligence-v15",
+      version: "property-intelligence-v16",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -2318,7 +2396,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         lifestyle,
         lifestyleGroups,
         parks,
-        restaurants,
+        restaurants: foodCoffeePlaces,
         gyms,
         childcare,
       },
