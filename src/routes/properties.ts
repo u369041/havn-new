@@ -346,6 +346,357 @@ function sortActiveFeaturedFirst(items: any[]) {
   });
 }
 
+
+type AreaScoreBreakdownItem = {
+  label: string;
+  score: number;
+  max: number;
+  reason: string;
+};
+
+type AreaScoreResult = {
+  score: number;
+  label: string;
+  summary: string;
+  breakdown: AreaScoreBreakdownItem[];
+};
+
+function clampAreaScore(value: number, max: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, Math.round(n)));
+}
+
+function scoreLabel(score: number) {
+  if (score >= 85) return "Excellent";
+  if (score >= 70) return "Strong";
+  if (score >= 55) return "Good";
+  if (score >= 40) return "Moderate";
+  return "Limited";
+}
+
+function makeAreaScore(summary: string, breakdown: AreaScoreBreakdownItem[]): AreaScoreResult {
+  const score = clampAreaScore(
+    breakdown.reduce((total, item) => total + clampAreaScore(item.score, item.max), 0),
+    100
+  );
+
+  return {
+    score,
+    label: scoreLabel(score),
+    summary,
+    breakdown: breakdown.map((item) => ({
+      label: item.label,
+      score: clampAreaScore(item.score, item.max),
+      max: item.max,
+      reason: item.reason,
+    })),
+  };
+}
+
+function asArray(raw: any): any[] {
+  return Array.isArray(raw) ? raw : [];
+}
+
+function itemDistanceKm(item: any): number | null {
+  const n = Number(item?.distanceKm);
+  return Number.isFinite(n) ? n : null;
+}
+
+function nearestDistanceKm(items: any[]): number | null {
+  const distances = asArray(items)
+    .map(itemDistanceKm)
+    .filter((n): n is number => Number.isFinite(Number(n)));
+
+  if (!distances.length) return null;
+  return Math.min(...distances);
+}
+
+function countWithinKm(items: any[], km: number) {
+  return asArray(items).filter((item) => {
+    const d = itemDistanceKm(item);
+    return d !== null && d <= km;
+  }).length;
+}
+
+function uniqueValues(items: any[], picker: (item: any) => any) {
+  const values = new Set<string>();
+
+  for (const item of asArray(items)) {
+    const value = safeText(picker(item)).trim().toLowerCase();
+    if (value && value !== "—") values.add(value);
+  }
+
+  return values;
+}
+
+function textIncludesAny(value: any, terms: string[]) {
+  const s = safeText(value).toLowerCase();
+  return terms.some((term) => s.includes(term.toLowerCase()));
+}
+
+function scoreByCount(count: number, max: number, bands: Array<[number, number]>) {
+  for (const [threshold, score] of bands) {
+    if (count >= threshold) return clampAreaScore(score, max);
+  }
+  return 0;
+}
+
+function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
+  const schools = asArray(nearby?.schools);
+  const transport = asArray(nearby?.transport);
+  const transportV3 = asArray(nearby?.transportV3);
+  const shopping = asArray(nearby?.shopping);
+  const healthcare = asArray(nearby?.healthcare);
+  const parks = asArray(nearby?.parks);
+  const restaurants = asArray(nearby?.restaurants);
+  const gyms = asArray(nearby?.gyms);
+  const childcare = asArray(nearby?.childcare);
+
+  const allTransport = transportV3.length ? transportV3 : transport;
+  const railItems = transportV3.filter((item) => safeText(item?.type).toLowerCase() === "rail");
+  const busItems = transportV3.filter((item) => safeText(item?.type).toLowerCase() === "bus");
+  const nearestTransport = nearestDistanceKm(allTransport);
+  const nearestRail = nearestDistanceKm(railItems);
+
+  const uniqueRoutes = uniqueValues(busItems, (item) => `${item?.provider || ""}|${item?.route || ""}`);
+  const uniqueDestinations = uniqueValues(transportV3, (item) => item?.destination);
+  const destinationText = Array.from(uniqueDestinations).join(" ");
+
+  const majorDestinationTerms = [
+    "dublin",
+    "galway",
+    "cork",
+    "limerick",
+    "waterford",
+    "athlone",
+    "ennis",
+    "airport",
+  ];
+
+  const matchedMajorDestinations = majorDestinationTerms.filter((term) =>
+    textIncludesAny(destinationText, [term])
+  );
+
+  const hasAirport = textIncludesAny(destinationText, ["airport"]);
+
+  const railScore = railItems.length
+    ? nearestRail !== null && nearestRail <= 2
+      ? 30
+      : nearestRail !== null && nearestRail <= 5
+        ? 24
+        : 18
+    : 0;
+
+  const busNetworkScore = scoreByCount(uniqueRoutes.size || busItems.length, 25, [
+    [10, 25],
+    [6, 22],
+    [3, 16],
+    [1, 10],
+  ]);
+
+  const distanceScore = nearestTransport === null
+    ? 0
+    : nearestTransport <= 0.8
+      ? 10
+      : nearestTransport <= 1.5
+        ? 8
+        : nearestTransport <= 3
+          ? 6
+          : nearestTransport <= 5
+            ? 3
+            : 0;
+
+  const majorDestinationScore = scoreByCount(matchedMajorDestinations.length, 20, [
+    [5, 20],
+    [4, 18],
+    [3, 15],
+    [2, 10],
+    [1, 6],
+  ]);
+
+  const connectivity = makeAreaScore(
+    "Measures rail access, bus network depth, airport links, nearby stop distance and major destination access.",
+    [
+      {
+        label: "Rail access",
+        score: railScore,
+        max: 30,
+        reason: railItems.length
+          ? `Rail services found${nearestRail !== null ? ` around ${nearestRail.toFixed(1)}km away` : " nearby"}.`
+          : "No rail service was found in the current transport cache radius.",
+      },
+      {
+        label: "Bus network",
+        score: busNetworkScore,
+        max: 25,
+        reason: uniqueRoutes.size
+          ? `${uniqueRoutes.size} unique bus route/operator combinations found nearby.`
+          : busItems.length
+            ? `${busItems.length} bus services found nearby.`
+            : "No bus routes were found in the current transport cache radius.",
+      },
+      {
+        label: "Airport connectivity",
+        score: hasAirport ? 15 : 0,
+        max: 15,
+        reason: hasAirport
+          ? "A direct airport destination appears in nearby transport services."
+          : "No direct airport destination was found in nearby transport services.",
+      },
+      {
+        label: "Distance to transport",
+        score: distanceScore,
+        max: 10,
+        reason: nearestTransport !== null
+          ? `Nearest transport option is about ${nearestTransport < 1 ? Math.round(nearestTransport * 1000) + "m" : nearestTransport.toFixed(1) + "km"} away.`
+          : "No nearby transport distance was available.",
+      },
+      {
+        label: "Major destinations",
+        score: majorDestinationScore,
+        max: 20,
+        reason: matchedMajorDestinations.length
+          ? `Connections detected for ${matchedMajorDestinations.join(", ")}.`
+          : "No major destination connections were detected in nearby services.",
+      },
+    ]
+  );
+
+  const schoolCount = countWithinKm(schools, 5) || schools.length;
+  const secondaryCount = schools.filter((item) =>
+    textIncludesAny(item?.name, ["college", "secondary", "community school", "post primary", "coláiste"])
+  ).length;
+  const childcareCount = countWithinKm(childcare, 5) || childcare.length;
+  const healthcareCount = countWithinKm(healthcare, 5) || healthcare.length;
+  const parksCount = countWithinKm(parks, 5) || parks.length;
+
+  const family = makeAreaScore(
+    "Measures nearby schools, secondary education signals, childcare availability, healthcare and parks.",
+    [
+      {
+        label: "Primary schools",
+        score: scoreByCount(schoolCount, 25, [[8, 25], [5, 21], [3, 16], [1, 9]]),
+        max: 25,
+        reason: `${schoolCount} school result${schoolCount === 1 ? "" : "s"} found within the search radius.`,
+      },
+      {
+        label: "Secondary schools",
+        score: secondaryCount >= 2 ? 25 : secondaryCount === 1 ? 18 : schoolCount >= 6 ? 12 : 0,
+        max: 25,
+        reason: secondaryCount
+          ? `${secondaryCount} likely secondary/post-primary result${secondaryCount === 1 ? "" : "s"} detected by name.`
+          : schoolCount >= 6
+            ? "Several schools found, but secondary schools were not clearly labelled in the source data."
+            : "No clearly labelled secondary school was detected nearby.",
+      },
+      {
+        label: "Childcare",
+        score: scoreByCount(childcareCount, 20, [[5, 20], [3, 16], [1, 10]]),
+        max: 20,
+        reason: `${childcareCount} childcare or preschool result${childcareCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Healthcare",
+        score: scoreByCount(healthcareCount, 15, [[5, 15], [3, 12], [1, 8]]),
+        max: 15,
+        reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Parks / recreation",
+        score: scoreByCount(parksCount, 15, [[3, 15], [1, 10]]),
+        max: 15,
+        reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
+      },
+    ]
+  );
+
+  const shoppingCount = countWithinKm(shopping, 5) || shopping.length;
+  const pharmacyCount = healthcare.filter((item) => textIncludesAny(item?.name, ["pharmacy"])).length;
+  const dailyServiceCount = shoppingCount + pharmacyCount;
+  const transportCount = allTransport.length;
+
+  const convenience = makeAreaScore(
+    "Measures grocery/shopping options, healthcare, transport access and practical daily services.",
+    [
+      {
+        label: "Shopping",
+        score: scoreByCount(shoppingCount, 30, [[6, 30], [4, 24], [2, 16], [1, 10]]),
+        max: 30,
+        reason: `${shoppingCount} shopping or grocery result${shoppingCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Healthcare",
+        score: scoreByCount(healthcareCount, 20, [[5, 20], [3, 16], [1, 10]]),
+        max: 20,
+        reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Transport",
+        score: scoreByCount(transportCount, 20, [[20, 20], [10, 16], [5, 12], [1, 7]]),
+        max: 20,
+        reason: `${transportCount} transport option${transportCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Daily services",
+        score: scoreByCount(dailyServiceCount, 30, [[8, 30], [5, 24], [3, 16], [1, 8]]),
+        max: 30,
+        reason: `${dailyServiceCount} practical daily-service signal${dailyServiceCount === 1 ? "" : "s"} found across shopping and pharmacy data.`,
+      },
+    ]
+  );
+
+  const restaurantCount = countWithinKm(restaurants, 6) || restaurants.length;
+  const cafeCount = restaurants.filter((item) => textIncludesAny(item?.name, ["cafe", "café", "coffee", "bistro"])).length;
+  const leisureCount = countWithinKm(gyms, 6) || gyms.length;
+  const lifestyleDiversity = [restaurantCount > 0, cafeCount > 0, leisureCount > 0, parksCount > 0].filter(Boolean).length;
+
+  const lifestyle = makeAreaScore(
+    "Measures restaurants, cafés, leisure/fitness options, parks and broader local amenity diversity.",
+    [
+      {
+        label: "Restaurants",
+        score: scoreByCount(restaurantCount, 20, [[8, 20], [5, 16], [2, 10], [1, 6]]),
+        max: 20,
+        reason: `${restaurantCount} restaurant result${restaurantCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Cafés",
+        score: scoreByCount(cafeCount, 15, [[4, 15], [2, 10], [1, 6]]),
+        max: 15,
+        reason: cafeCount
+          ? `${cafeCount} café/coffee/bistro signal${cafeCount === 1 ? "" : "s"} detected by name.`
+          : "No clearly labelled café result was detected in the current source data.",
+      },
+      {
+        label: "Leisure",
+        score: scoreByCount(leisureCount, 20, [[6, 20], [3, 15], [1, 9]]),
+        max: 20,
+        reason: `${leisureCount} gym or leisure result${leisureCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Parks",
+        score: scoreByCount(parksCount, 20, [[3, 20], [1, 14]]),
+        max: 20,
+        reason: `${parksCount} park or green-space result${parksCount === 1 ? "" : "s"} found nearby.`,
+      },
+      {
+        label: "Attractions / amenity diversity",
+        score: lifestyleDiversity >= 4 ? 25 : lifestyleDiversity === 3 ? 18 : lifestyleDiversity === 2 ? 12 : lifestyleDiversity === 1 ? 6 : 0,
+        max: 25,
+        reason: `${lifestyleDiversity} lifestyle amenity categor${lifestyleDiversity === 1 ? "y" : "ies"} represented across restaurants, cafés, leisure and parks.`,
+      },
+    ]
+  );
+
+  return {
+    connectivity,
+    family,
+    convenience,
+    lifestyle,
+  };
+}
+
 router.get("/mine", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
@@ -1155,7 +1506,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v5" &&
+  (cached as any).version === "property-intelligence-v6" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1356,8 +1707,20 @@ router.get("/:id/intelligence", async (req: any, res) => {
         ? insightParts.join(" ")
         : "HAVN found enough property and location data to support an initial viewing decision, but users should verify local amenities before committing.";
 
+    const areaScores = calculateAreaScores({
+      schools,
+      transport,
+      transportV3,
+      shopping,
+      healthcare,
+      parks,
+      restaurants,
+      gyms,
+      childcare,
+    });
+
     const intelligence = {
-      version: "property-intelligence-v5",
+      version: "property-intelligence-v6",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -1392,6 +1755,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         gyms,
         childcare,
       },
+      areaScores,
       commentary,
       insight,
     };
