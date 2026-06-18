@@ -568,6 +568,59 @@ function scoreByCount(count: number, max: number, bands: Array<[number, number]>
   return 0;
 }
 
+
+function normaliseConvenienceBrand(name: any) {
+  const text = safeText(name).trim().toLowerCase();
+
+  if (!text) return "";
+
+  if (text.includes("tesco")) return "tesco";
+  if (text.includes("supervalu") || text.includes("super valu")) return "supervalu";
+  if (text.includes("eurospar") || text.includes("spar")) return "spar";
+  if (text.includes("lidl")) return "lidl";
+  if (text.includes("aldi")) return "aldi";
+  if (text.includes("dunnes")) return "dunnes";
+  if (text.includes("marks") || text.includes("m&s")) return "marks and spencer";
+  if (text.includes("fresh")) return "fresh";
+  if (text.includes("centra")) return "centra";
+  if (text.includes("mace")) return "mace";
+  if (text.includes("gala")) return "gala";
+  if (text.includes("daybreak")) return "daybreak";
+  if (text.includes("asia market")) return "asia market";
+  if (text.includes("boots")) return "boots";
+  if (text.includes("lloyds")) return "lloyds pharmacy";
+  if (text.includes("hickey")) return "hickeys pharmacy";
+  if (text.includes("mccabes")) return "mccabes pharmacy";
+  if (text.includes("careplus")) return "careplus pharmacy";
+  if (text.includes("life pharmacy")) return "life pharmacy";
+  if (text.includes("post office") || text.includes("an post")) return "post office";
+  if (text.includes("bank of ireland")) return "bank of ireland";
+  if (text.includes("aib")) return "aib";
+  if (text.includes("permanent tsb") || text.includes("ptsb")) return "permanent tsb";
+  if (text.includes("credit union")) return "credit union";
+
+  return text.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function uniquePlaceBrands(items: any[]) {
+  const brands = new Set<string>();
+
+  for (const item of asArray(items)) {
+    const brand = normaliseConvenienceBrand(item?.name);
+    if (brand) brands.add(brand);
+  }
+
+  return brands;
+}
+
+function countUniquePlacesWithinKm(items: any[], km: number) {
+  return uniquePlaceBrands(placesWithinKm(items, km)).size;
+}
+
+function serviceSignalCount(items: any[], km: number) {
+  return uniquePlaceBrands(placesWithinKm(items, km)).size || countWithinKm(items, km) || asArray(items).length;
+}
+
 function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   const schools = asArray(nearby?.schools);
   const transport = asArray(nearby?.transport);
@@ -871,37 +924,62 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
     ]
   );
 
-  const shoppingCount = countWithinKm(shopping, 5) || shopping.length;
-  const pharmacyCount = healthcare.filter((item) => textIncludesAny(item?.name, ["pharmacy"])).length;
-  const dailyServiceCount = shoppingCount + pharmacyCount;
+  const convenienceGroups = nearby?.convenienceGroups || {};
+  const groceryPlaces = asArray(convenienceGroups?.grocery).length ? asArray(convenienceGroups.grocery) : shopping;
+  const pharmacyPlaces = asArray(convenienceGroups?.pharmacy).length
+    ? asArray(convenienceGroups.pharmacy)
+    : healthcare.filter((item) => textIncludesAny(item?.name, ["pharmacy", "chemist", "boots", "lloyds", "hickey", "mccabes"]));
+  const dailyServicePlaces = asArray(convenienceGroups?.dailyServices);
+  const retailPlaces = asArray(convenienceGroups?.retail);
+
+  const groceryDiversityCount = countUniquePlacesWithinKm(groceryPlaces, 5);
+  const groceryResultCount = countWithinKm(groceryPlaces, 5) || groceryPlaces.length;
+  const pharmacyCount = serviceSignalCount(pharmacyPlaces, 5);
+  const retailCount = serviceSignalCount(retailPlaces, 5);
+  const dailyServiceCount = serviceSignalCount(dailyServicePlaces, 5);
+  const practicalServicesCount = pharmacyCount + dailyServiceCount + retailCount;
   const transportCount = allTransport.length;
 
   const convenience = makeAreaScore(
-    "Measures grocery/shopping options, healthcare, transport access and practical daily services.",
+    "Measures practical day-to-day convenience using grocery diversity, pharmacy access, transport, and nearby daily services. Duplicate chains are de-emphasised so repeated Tesco/Spar results do not inflate the score.",
     [
       {
-        label: "Shopping",
-        score: scoreByCount(shoppingCount, 30, [[12, 30], [8, 26], [5, 21], [2, 14], [1, 8]]),
-        max: 30,
-        reason: `${shoppingCount} shopping or grocery result${shoppingCount === 1 ? "" : "s"} found nearby.`,
+        label: "Grocery diversity",
+        score: scoreByCount(groceryDiversityCount, 25, [[7, 25], [5, 22], [3, 17], [2, 12], [1, 7]]),
+        max: 25,
+        reason: groceryDiversityCount
+          ? `${groceryDiversityCount} distinct grocery/convenience brand${groceryDiversityCount === 1 ? "" : "s"} detected from ${groceryResultCount} nearby grocery result${groceryResultCount === 1 ? "" : "s"}. Duplicate chains are counted once.`
+          : "No grocery or convenience store signal was found nearby in the current source data.",
       },
       {
-        label: "Healthcare",
-        score: scoreByCount(healthcareCount, 20, [[8, 20], [5, 17], [3, 14], [1, 8]]),
+        label: "Pharmacy access",
+        score: scoreByCount(pharmacyCount, 20, [[5, 20], [3, 17], [2, 13], [1, 8]]),
         max: 20,
-        reason: `${healthcareCount} healthcare result${healthcareCount === 1 ? "" : "s"} found nearby.`,
+        reason: pharmacyCount
+          ? `${pharmacyCount} distinct pharmacy/chemist signal${pharmacyCount === 1 ? "" : "s"} found nearby.`
+          : "No clear pharmacy or chemist signal was found nearby in the current source data.",
       },
       {
-        label: "Transport",
+        label: "Transport practicality",
         score: scoreByCount(transportCount, 20, [[40, 20], [25, 18], [15, 15], [8, 11], [1, 6]]),
         max: 20,
         reason: `${transportCount} transport option${transportCount === 1 ? "" : "s"} found nearby.`,
       },
       {
         label: "Daily services",
-        score: scoreByCount(dailyServiceCount, 30, [[18, 30], [12, 25], [8, 20], [4, 13], [1, 7]]),
-        max: 30,
-        reason: `${dailyServiceCount} practical daily-service signal${dailyServiceCount === 1 ? "" : "s"} found across shopping and pharmacy data.`,
+        score: scoreByCount(practicalServicesCount, 20, [[10, 20], [7, 17], [4, 13], [2, 8], [1, 5]]),
+        max: 20,
+        reason: practicalServicesCount
+          ? `${practicalServicesCount} practical service signal${practicalServicesCount === 1 ? "" : "s"} found across pharmacy, banking/postal, retail and daily-service searches.`
+          : "No practical daily-service signal was found nearby in the current source data.",
+      },
+      {
+        label: "Retail / shopping depth",
+        score: scoreByCount(retailCount, 15, [[5, 15], [3, 12], [2, 9], [1, 5]]),
+        max: 15,
+        reason: retailCount
+          ? `${retailCount} distinct retail or shopping-centre signal${retailCount === 1 ? "" : "s"} found nearby.`
+          : "No clear retail or shopping-centre signal was found nearby in the current source data.",
       },
     ]
   );
@@ -1766,7 +1844,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v12" &&
+  (cached as any).version === "property-intelligence-v13" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1908,7 +1986,10 @@ router.get("/:id/intelligence", async (req: any, res) => {
       rawPostPrimarySchools,
       transport,
       transportV3,
-      shopping,
+      rawGrocery,
+      rawPharmacies,
+      rawDailyServices,
+      rawRetail,
       healthcare,
       parks,
       restaurants,
@@ -1924,7 +2005,10 @@ router.get("/:id/intelligence", async (req: any, res) => {
         getTransportIntelligence(lat, lng, 30),
         new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 15000)),
       ]),
-      nearby("supermarket shops grocery", 20, "supermarket"),
+      nearby("supermarket grocery convenience store", 20),
+      nearby("pharmacy chemist boots lloyds", 20, "pharmacy"),
+      nearby("post office bank atm credit union dry cleaner", 20),
+      nearby("shopping centre retail park market department store", 20),
       nearby("pharmacy doctor hospital medical centre", 20),
       nearby("park beach green space", 20, "park"),
       nearby("restaurant cafe", 20, "restaurant"),
@@ -1964,6 +2048,20 @@ router.get("/:id/intelligence", async (req: any, res) => {
       childcare,
     };
 
+    const groceryPlaces = nearestPlaces(dedupePlaces(rawGrocery), 20);
+    const pharmacyPlaces = nearestPlaces(dedupePlaces(rawPharmacies), 12);
+    const dailyServicePlaces = nearestPlaces(dedupePlaces(rawDailyServices), 12);
+    const retailPlaces = nearestPlaces(dedupePlaces(rawRetail), 12);
+
+    const convenienceGroups = {
+      grocery: groceryPlaces,
+      pharmacy: pharmacyPlaces,
+      dailyServices: dailyServicePlaces,
+      retail: retailPlaces,
+    };
+
+    const shopping = groceryPlaces;
+
     const mode = String(property.mode || "").toUpperCase();
     const county = property.county || property.city || "this area";
     const type = property.propertyType || "property";
@@ -1997,7 +2095,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     if (baths) insightParts.push(`${baths} bathroom${baths === 1 ? "" : "s"} adds useful comfort context.`);
     if (schools.length) insightParts.push(`${primarySchools.length} primary and ${secondarySchools.length} secondary school result${schools.length === 1 ? "" : "s"} found in the local school scan.`);
     if (transport.length) insightParts.push(`${transport.length} transport-related result${transport.length === 1 ? "" : "s"} found nearby.`);
-    if (shopping.length) insightParts.push(`${shopping.length} shopping or grocery result${shopping.length === 1 ? "" : "s"} found nearby.`);
+    if (shopping.length) insightParts.push(`${shopping.length} grocery/convenience result${shopping.length === 1 ? "" : "s"} found nearby, with duplicate-chain inflation reduced in the convenience score.`);
     if (healthcare.length) insightParts.push(`${healthcare.length} healthcare-related result${healthcare.length === 1 ? "" : "s"} found nearby.`);
 
     const insight =
@@ -2010,6 +2108,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
       transport,
       transportV3,
       shopping,
+      convenienceGroups,
       healthcare,
       parks,
       restaurants,
@@ -2018,7 +2117,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v12",
+      version: "property-intelligence-v13",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
@@ -2048,6 +2147,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
         transport,
         transportV3,
         shopping,
+        convenienceGroups,
         healthcare,
         parks,
         restaurants,
