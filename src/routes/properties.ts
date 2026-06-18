@@ -598,6 +598,10 @@ function normaliseConvenienceBrand(name: any) {
   if (text.includes("aib")) return "aib";
   if (text.includes("permanent tsb") || text.includes("ptsb")) return "permanent tsb";
   if (text.includes("credit union")) return "credit union";
+  if (text.includes("library")) return "library";
+  if (text.includes("dry cleaner") || text.includes("laundrette") || text.includes("laundry")) return "laundry and dry cleaning";
+  if (text.includes("dhl") || text.includes("parcel") || text.includes("locker") || text.includes("courier")) return "parcel services";
+  if (text.includes("atm") || text.includes("cash machine")) return "atm";
 
   return text.replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -1844,7 +1848,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
    const cacheFresh =
    !forceRefresh &&
   cached &&
-  (cached as any).version === "property-intelligence-v13" &&
+  (cached as any).version === "property-intelligence-v13-1" &&
   cachedAt &&
   !Number.isNaN(cachedAt.getTime()) &&
   Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
@@ -1988,7 +1992,12 @@ router.get("/:id/intelligence", async (req: any, res) => {
       transportV3,
       rawGrocery,
       rawPharmacies,
-      rawDailyServices,
+      rawPostOffices,
+      rawBanks,
+      rawAtms,
+      rawDryCleaners,
+      rawLibraries,
+      rawParcelServices,
       rawRetail,
       healthcare,
       parks,
@@ -2007,7 +2016,12 @@ router.get("/:id/intelligence", async (req: any, res) => {
       ]),
       nearby("supermarket grocery convenience store", 20),
       nearby("pharmacy chemist boots lloyds", 20, "pharmacy"),
-      nearby("post office bank atm credit union dry cleaner", 20),
+      nearby("post office an post", 10),
+      nearby("bank credit union", 10, "bank"),
+      nearby("atm cash machine", 10, "atm"),
+      nearby("dry cleaner laundrette laundry", 10),
+      nearby("library public library", 10, "library"),
+      nearby("parcel locker courier post office", 10),
       nearby("shopping centre retail park market department store", 20),
       nearby("pharmacy doctor hospital medical centre", 20),
       nearby("park beach green space", 20, "park"),
@@ -2050,7 +2064,17 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const groceryPlaces = nearestPlaces(dedupePlaces(rawGrocery), 20);
     const pharmacyPlaces = nearestPlaces(dedupePlaces(rawPharmacies), 12);
-    const dailyServicePlaces = nearestPlaces(dedupePlaces(rawDailyServices), 12);
+    const dailyServicePlaces = nearestPlaces(
+      dedupePlaces([
+        ...rawPostOffices,
+        ...rawBanks,
+        ...rawAtms,
+        ...rawDryCleaners,
+        ...rawLibraries,
+        ...rawParcelServices,
+      ]),
+      20
+    );
     const retailPlaces = nearestPlaces(dedupePlaces(rawRetail), 12);
 
     const convenienceGroups = {
@@ -2117,7 +2141,7 @@ router.get("/:id/intelligence", async (req: any, res) => {
     });
 
     const intelligence = {
-      version: "property-intelligence-v13",
+      version: "property-intelligence-v13-1",
       generatedAt: new Date().toISOString(),
       source: "google_places_cached",
       location: {
