@@ -1,0 +1,16 @@
+name: HAVN Weekly Digest
+
+on:
+  schedule:
+    - cron: "0 9 * * 0"
+  workflow_dispatch:
+
+jobs:
+  run-weekly-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger HAVN weekly digest
+        run: |
+          curl -X POST "https://api.havn.ie/api/digest/run-weekly" \
+            -H "x-digest-secret: ${{ secrets.DIGEST_CRON_SECRET }}"
