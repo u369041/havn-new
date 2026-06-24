@@ -12,5 +12,5 @@ jobs:
     steps:
       - name: Trigger HAVN weekly digest
         run: |
-          curl -X POST "https://api.havn.ie/api/digest/run-weekly" \
+          curl -s -X POST "https://api.havn.ie/api/digest/run-weekly" \
             -H "x-digest-secret: ${{ secrets.DIGEST_CRON_SECRET }}"
