@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 83.52 44.19">
+  <!-- Generator: Adobe Illustrator 30.6.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 109)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #0a1d3d;
+      }
+
+      .st1 {
+        fill: none;
+        stroke: #fff;
+        stroke-miterlimit: 10;
+      }
+
+      .st2 {
+        fill: #0d3d88;
+      }
+
+      .st3 {
+        fill: url(#linear-gradient);
+      }
+
+      .st4 {
+        fill: #0b1e3e;
+      }
+    </style>
+    <linearGradient id="linear-gradient" x1="41.25" y1=".49" x2="40.7" y2="39.18" gradientTransform="translate(0 0)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b2145"/>
+      <stop offset=".28" stop-color="#0c2046"/>
+      <stop offset="1" stop-color="#1d7bf9"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <polygon class="st0" points="39.72 42.28 34.11 42.28 34.15 36.69 39.77 36.69 39.72 42.28"/>
+    <polygon class="st4" points="47.37 42.28 41.75 42.28 41.78 36.69 47.39 36.69 47.37 42.28"/>
+  </g>
+  <g>
+    <path class="st3" d="M40.99.43l.23.08c5.55,5.69,11.1,11.38,16.63,17.06l.09.25c.04-3.65.04-7.31.02-10.98l.04-.11h7.65s.05.03.15.1c.03,6.29.04,12.58.02,18.88l12.32,12.85c.03.06.06.12.03.18,0,.02,0,.06-.01.08-.02.03-.07.04-.15.04h-10.72s-.47-.49-.47-.49l-1.23-1.27-1.09-1.14-1.2-1.25-1.2-1.25-1.31-1.36-1.21-1.26-5.22-5.45-1.32-1.36-1.42-1.47-1.23-1.29-9.69-10.06-3.83,3.96-7.94,8.29-8.76,9.15-1.13,1.18-1.2,1.25-1.2,1.25-.98,1.03-1.12,1.17c-.12.13-.19.27-.36.38l-10.94-.03v-.2c.08-.05.16-.1.24-.14C15.61,25.76,27.86,13.21,40.27.53l.2-.1h.52Z"/>
+    <path class="st2" d="M57.94,17.82l.02-10.98.05,10.91c0,.07-.04.07-.07.07Z"/>
+  </g>
+  <rect class="st1" x=".5" y=".5" width="82.52" height="43.19"/>
+  <g>
+    <polygon class="st0" points="39.73 35.31 34.12 35.31 34.16 29.72 39.78 29.72 39.73 35.31"/>
+    <polygon class="st4" points="47.37 35.31 41.76 35.31 41.79 29.72 47.4 29.72 47.37 35.31"/>
+  </g>
+</svg>

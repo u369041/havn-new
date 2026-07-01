@@ -108,6 +108,9 @@ model Property {
   description    String?
   photos         String[]
 
+  photoMeta      Json?
+  photoMetaUpdatedAt DateTime?
+
   rentFrequency    String?
   deposit          Int?
   availableFrom    DateTime?

@@ -347,6 +347,154 @@ function sortActiveFeaturedFirst(items: any[]) {
 }
 
 
+type PhotoCategory =
+  | "Exterior"
+  | "Kitchen"
+  | "Living Room"
+  | "Bedroom"
+  | "Bathroom"
+  | "Garden"
+  | "Floorplan"
+  | "Interior"
+  | "Other";
+
+function clampPhotoCategory(raw: any): PhotoCategory {
+  const s = safeText(raw).trim().toLowerCase();
+
+  if (s.includes("exterior") || s.includes("front") || s.includes("facade")) return "Exterior";
+  if (s.includes("kitchen")) return "Kitchen";
+  if (s.includes("living") || s.includes("reception") || s.includes("sitting")) return "Living Room";
+  if (s.includes("bed")) return "Bedroom";
+  if (s.includes("bath")) return "Bathroom";
+  if (s.includes("garden") || s.includes("outdoor") || s.includes("patio")) return "Garden";
+  if (s.includes("floor")) return "Floorplan";
+  if (s.includes("interior")) return "Interior";
+
+  return "Other";
+}
+
+function buildPhotoAnalysisPrompt() {
+  return [
+    "You are analysing real estate listing photos for HAVN, Ireland's Property Intelligence Platform.",
+    "Classify the image into exactly one category:",
+    "Exterior, Kitchen, Living Room, Bedroom, Bathroom, Garden, Floorplan, Interior, Other.",
+    "Also estimate image quality from 0 to 100.",
+    "Return only valid JSON with this shape:",
+    '{"category":"Exterior","confidence":0.95,"qualityScore":88,"suggestedCover":false,"reason":"Short reason"}',
+  ].join("\n");
+}
+
+async function analyseSinglePropertyPhoto(url: string, index: number) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY missing");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_PHOTO_MODEL || "gpt-4.1-mini",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: buildPhotoAnalysisPrompt(),
+            },
+            {
+              type: "input_image",
+              image_url: url,
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: "json_object",
+        },
+      },
+    }),
+  });
+
+  const data: any = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || "OpenAI photo analysis failed");
+  }
+
+  const rawText =
+    data?.output_text ||
+    data?.output?.[0]?.content?.[0]?.text ||
+    "";
+
+  let parsed: any = {};
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    parsed = {};
+  }
+
+  const category = clampPhotoCategory(parsed.category);
+  const confidence = Number(parsed.confidence);
+  const qualityScore = Number(parsed.qualityScore);
+
+  return {
+    url,
+    index,
+    category,
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
+    qualityScore: Number.isFinite(qualityScore) ? Math.max(0, Math.min(100, Math.round(qualityScore))) : 0,
+    suggestedCover: false,
+    reason: safeText(parsed.reason).trim() || null,
+  };
+}
+
+function chooseSuggestedCover(photoRows: any[]) {
+  if (!photoRows.length) return photoRows;
+
+  const categoryBoost: Record<string, number> = {
+    Exterior: 18,
+    Kitchen: 12,
+    "Living Room": 10,
+    Garden: 8,
+    Bedroom: 4,
+    Bathroom: 2,
+    Interior: 1,
+    Floorplan: -20,
+    Other: -5,
+  };
+
+  let bestIndex = 0;
+  let bestScore = -9999;
+
+  photoRows.forEach((row, idx) => {
+    const quality = Number(row.qualityScore || 0);
+    const confidence = Number(row.confidence || 0) * 10;
+    const boost = categoryBoost[row.category] ?? 0;
+    const earlyPhotoBoost = Math.max(0, 6 - idx);
+
+    const score = quality + confidence + boost + earlyPhotoBoost;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = idx;
+    }
+  });
+
+  return photoRows.map((row, idx) => ({
+    ...row,
+    suggestedCover: idx === bestIndex,
+  }));
+}
+
+
+
 type AreaScoreBreakdownItem = {
   label: string;
   score: number;
@@ -1826,6 +1974,127 @@ router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) =>
   }
 });
 
+router.post("/_admin/:id/analyse-photos", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ ok: false, message: "Forbidden" });
+    }
+
+    const id = parseInt(String(req.params.id), 10);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    }
+
+    const property = await prisma.property.findUnique({ where: { id } });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    const photos = Array.isArray(property.photos)
+      ? property.photos.map((x) => safeText(x).trim()).filter(Boolean)
+      : [];
+
+    if (!photos.length) {
+      return res.status(400).json({
+        ok: false,
+        message: "This property has no photos to analyse.",
+      });
+    }
+
+    const maxPhotos = Math.min(photos.length, 20);
+    const selectedPhotos = photos.slice(0, maxPhotos);
+
+    const analysed: any[] = [];
+
+    for (let i = 0; i < selectedPhotos.length; i++) {
+      const url = selectedPhotos[i];
+
+      try {
+        const row = await analyseSinglePropertyPhoto(url, i);
+        analysed.push(row);
+      } catch (photoErr: any) {
+        console.warn("Photo analysis failed for image", {
+          propertyId: property.id,
+          index: i,
+          url,
+          message: photoErr?.message || String(photoErr),
+        });
+
+        analysed.push({
+          url,
+          index: i,
+          category: "Other",
+          confidence: 0,
+          qualityScore: 0,
+          suggestedCover: false,
+          reason: photoErr?.message || "Analysis failed",
+          error: true,
+        });
+      }
+    }
+
+    const photosWithCover = chooseSuggestedCover(analysed);
+
+    const photoMeta = {
+      version: "photo-meta-v1",
+      generatedAt: new Date().toISOString(),
+      source: "openai_vision",
+      model: process.env.OPENAI_PHOTO_MODEL || "gpt-4.1-mini",
+      totalPhotos: photos.length,
+      analysedPhotos: photosWithCover.length,
+      photos: photosWithCover,
+      categories: photosWithCover.reduce((acc: any, row: any) => {
+        const key = row.category || "Other";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {}),
+    };
+
+    const updated = await prisma.property.update({
+      where: { id: property.id },
+      data: {
+        photoMeta: photoMeta as any,
+        photoMetaUpdatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        photos: true,
+        photoMeta: true,
+        photoMetaUpdatedAt: true,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      item: updated,
+    });
+  } catch (err: any) {
+    console.error("POST /api/properties/_admin/:id/analyse-photos error", {
+      message: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: err?.stack,
+    });
+
+    return res.status(500).json({
+      ok: false,
+      message: "Photo analysis failed",
+      error: err?.message || String(err),
+    });
+  }
+});
+
+
+
+
+
+
 router.get("/", requireAuth.optional, async (req: any, res) => {
   try {
     const where: any = { listingStatus: "PUBLISHED" };
@@ -2684,6 +2953,8 @@ router.post("/", requireAuth, async (req: any, res) => {
         description: asOptionalString(payload.description),
         features: asStringArray(payload.features),
         photos: asStringArray(payload.photos),
+        photoMeta: payload.photoMeta !== undefined ? (payload.photoMeta as any) : undefined,
+        photoMetaUpdatedAt: payload.photoMeta !== undefined ? new Date() : null,
         rentFrequency: asOptionalString(payload.rentFrequency),
         deposit: asOptionalInt(payload.deposit),
         availableFrom: asOptionalDate(payload.availableFrom),
@@ -2817,6 +3088,14 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
           Array.isArray(payload.photos) || typeof payload.photos === "string"
             ? asStringArray(payload.photos)
             : existing.photos,
+        photoMeta:
+          payload.photoMeta !== undefined
+            ? (payload.photoMeta as any)
+            : (existing as any).photoMeta,
+        photoMetaUpdatedAt:
+          payload.photoMeta !== undefined
+            ? new Date()
+            : (existing as any).photoMetaUpdatedAt,
         rentFrequency:
           payload.rentFrequency !== undefined
             ? asOptionalString(payload.rentFrequency)
