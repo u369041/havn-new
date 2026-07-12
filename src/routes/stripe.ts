@@ -94,7 +94,7 @@ function addDays(date: Date, days: number): Date {
 }
 
 function getPaymentIntentId(
-  paymentIntent: Stripe.Checkout.Session["payment_intent"]
+  paymentIntent: any
 ): string | null {
   if (!paymentIntent) return null;
 
@@ -113,7 +113,7 @@ function getPaymentIntentId(
   return null;
 }
 
-function checkoutWasCompleted(session: Stripe.Checkout.Session): boolean {
+function checkoutWasCompleted(session: any): boolean {
   const paymentStatus = String(session.payment_status || "").toLowerCase();
   const checkoutStatus = String(session.status || "").toLowerCase();
 
@@ -320,7 +320,7 @@ router.post(
           ? "FEATURE_UPGRADE"
           : "LISTING_PACKAGE";
 
-      const checkoutParameters: Stripe.Checkout.SessionCreateParams = {
+      const checkoutParameters: any = {
         mode: "payment",
 
         line_items: [
@@ -444,7 +444,7 @@ router.post("/webhook", async (req: any, res) => {
     );
   }
 
-  let event: Stripe.Event;
+  let event: any;
 
   try {
     event = stripe.webhooks.constructEvent(
@@ -475,8 +475,8 @@ router.post("/webhook", async (req: any, res) => {
   }
 
   try {
-    const session =
-      event.data.object as Stripe.Checkout.Session;
+	const session =
+  	 event.data.object as any;
 
     if (!checkoutWasCompleted(session)) {
       console.warn(
