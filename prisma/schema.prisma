@@ -8,23 +8,24 @@ datasource db {
 }
 
 model User {
-  id                  Int                 @id @default(autoincrement())
+  id                  Int       @id @default(autoincrement())
   name                String?
-  email               String              @unique
+  email               String    @unique
   password            String
-  role                UserRole            @default(user)
-  createdAt           DateTime            @default(now())
-  emailVerified       Boolean             @default(false)
-  emailVerifyToken    String?             @unique
+  role                UserRole  @default(user)
+  createdAt           DateTime  @default(now())
+  emailVerified       Boolean   @default(false)
+  emailVerifyToken    String?   @unique
   emailVerifyTokenExp DateTime?
   lastLoginAt         DateTime?
-  loginCount          Int                 @default(0)
+  loginCount          Int       @default(0)
 
   lastSearch          Json?
   lastSearchAt        DateTime?
+  foundingOfferUsedAt DateTime?
 
-  approvals           Property[]          @relation("PropertyApprovedBy")
-  rejections          Property[]          @relation("PropertyRejectedBy")
+  approvals           Property[] @relation("PropertyApprovedBy")
+  rejections          Property[] @relation("PropertyRejectedBy")
   properties          Property[]
   savedSearches       SavedSearch[]
   savedProperties     SavedProperty[]
@@ -33,17 +34,17 @@ model User {
 }
 
 model SavedSearch {
-  id              Int       @id @default(autoincrement())
-  userId          Int
-  name            String?
-  filters         Json
-  alertsEnabled   Boolean   @default(true)
-  alertFrequency  String    @default("weekly")
-  lastDigestAt    DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  name           String?
+  filters        Json
+  alertsEnabled  Boolean  @default(true)
+  alertFrequency String   @default("weekly")
+  lastDigestAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
@@ -56,8 +57,8 @@ model SavedProperty {
   propertyId Int
   createdAt  DateTime @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([userId, propertyId])
   @@index([userId])
@@ -82,17 +83,17 @@ model PasswordResetToken {
 }
 
 model Property {
-  id             Int           @id @default(autoincrement())
-  slug           String        @unique
+  id   Int    @id @default(autoincrement())
+  slug String @unique
 
-  title          String
-  address1       String
-  address2       String?
-  city           String
-  county         String
-  eircode        String?
+  title    String
+  address1 String
+  address2 String?
+  city     String
+  county   String
+  eircode  String?
 
-  mode           MarketMode    @default(BUY)
+  mode MarketMode @default(BUY)
 
   price          Int
   previousPrice  Int?
@@ -108,25 +109,25 @@ model Property {
   description    String?
   photos         String[]
 
-  photoMeta      Json?
+  photoMeta          Json?
   photoMetaUpdatedAt DateTime?
 
-  rentFrequency    String?
-  deposit          Int?
-  availableFrom    DateTime?
-  furnished        Boolean?
-  parking          String?
-  outdoorSpace     String?
+  rentFrequency String?
+  deposit       Int?
+  availableFrom DateTime?
+  furnished     Boolean?
+  parking       String?
+  outdoorSpace  String?
 
-  saleCondition    String?
-  yearBuilt        Int?
-  heatingType      String?
-  viewingDetails   String?
+  saleCondition  String?
+  yearBuilt      Int?
+  heatingType    String?
+  viewingDetails String?
 
-  leaseLength      String?
-  minimumTerm      String?
-  billsIncluded    String?
-  petsAllowed      String?
+  leaseLength   String?
+  minimumTerm   String?
+  billsIncluded String?
+  petsAllowed   String?
 
   roomType         String?
   ensuite          String?
@@ -134,16 +135,16 @@ model Property {
   couplesAllowed   String?
   ownerOccupied    String?
 
-  userId         Int
+  userId Int
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  lat            Float?
-  lng            Float?
-  propertyType   String
-  saleType       String?
-  marketStatus   String?
+  lat          Float?
+  lng          Float?
+  propertyType String
+  saleType     String?
+  marketStatus String?
 
   listingStatus  ListingStatus @default(DRAFT)
   publishedAt    DateTime?
@@ -155,26 +156,38 @@ model Property {
   submittedAt    DateTime?
   rejectedReason String?
 
-  isFeatured     Boolean       @default(false)
-  featuredUntil  DateTime?
+  isFeatured    Boolean   @default(false)
+  featuredUntil DateTime?
 
-  views          Int           @default(0)
+  listingPackage ListingPackage?
+  paymentStatus  PaymentStatus @default(UNPAID)
+
+  stripeCheckoutSessionId String? @unique
+  stripePaymentIntentId   String?
+  amountPaidCents          Int?
+  paidAt                  DateTime?
+  listingExpiresAt        DateTime?
+
+  views Int @default(0)
 
   intelligence          Json?
   intelligenceUpdatedAt DateTime?
 
-  approvedBy     User?         @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
-  rejectedBy     User?         @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
-  user           User          @relation(fields: [userId], references: [id])
+  approvedBy User? @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy User? @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
+  user       User  @relation(fields: [userId], references: [id])
 
-  enquiries      Enquiry[]
-  savedBy        SavedProperty[]
+  enquiries Enquiry[]
+  savedBy   SavedProperty[]
 
   @@index([userId])
   @@index([listingStatus])
   @@index([mode])
   @@index([isFeatured])
   @@index([featuredUntil])
+  @@index([listingPackage])
+  @@index([paymentStatus])
+  @@index([listingExpiresAt])
 }
 
 model Enquiry {
@@ -191,7 +204,7 @@ model Enquiry {
   statusUpdatedAt DateTime?
   createdAt       DateTime      @default(now())
 
-  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([propertyId])
   @@index([buyerEmail])
@@ -226,4 +239,17 @@ enum EnquiryStatus {
   OFFER_IN_PROGRESS
   CLOSED
   ARCHIVED
+}
+
+enum ListingPackage {
+  STANDARD
+  FEATURED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
 }
