@@ -51,8 +51,8 @@ const PRICE_ENV_MAP: Record<
 
 const LISTING_DURATION_DAYS: Record<PropertyMode, number> = {
   BUY: 60,
-  RENT: 30,
-  SHARE: 30,
+  RENT: 60,
+  SHARE: 60,
 };
 
 function normalizeMode(value: unknown): PropertyMode | null {
