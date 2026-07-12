@@ -311,9 +311,9 @@ router.post(
         process.env.STRIPE_FOUNDING_COUPON_ID || ""
       ).trim();
 
-      const foundingOfferAvailable =
-        Boolean(foundingCouponId) &&
-        !property.user.foundingOfferUsedAt;
+	const foundingOfferEligible =
+  	Boolean(foundingCouponId) &&
+  	!property.user.foundingOfferUsedAt;
 
       const flow =
         listingStatus === "PUBLISHED"
@@ -332,6 +332,8 @@ router.post(
 
         customer_email: property.user.email,
 
+	allow_promotion_codes: foundingOfferEligible,
+
         success_url:
           "https://havn.ie/my-listings.html?payment=success&featured=success",
 
@@ -345,18 +347,10 @@ router.post(
           listingPackage: selectedPackage,
           durationDays: String(durationDays),
           stripePriceId,
-          foundingOffer: foundingOfferAvailable ? "true" : "false",
+          foundingOfferEligible: foundingOfferEligible ? "true" : "false",
           flow,
         },
       };
-
-      if (foundingOfferAvailable) {
-        checkoutParameters.discounts = [
-          {
-            coupon: foundingCouponId,
-          },
-        ];
-      }
 
       const session = await stripe.checkout.sessions.create(
         checkoutParameters
@@ -389,7 +383,7 @@ router.post(
         selectedPackage,
         stripePriceId,
         sessionId: session.id,
-        foundingOfferAvailable,
+        foundingOfferEligible,
         flow,
       });
 
@@ -400,7 +394,7 @@ router.post(
         mode,
         package: selectedPackage,
         durationDays,
-        foundingOfferApplied: foundingOfferAvailable,
+        foundingOfferApplied: foundingOfferEligible,
       });
     } catch (err: any) {
       console.error("Stripe session error:", {
@@ -509,17 +503,26 @@ router.post("/webhook", async (req: any, res) => {
       session.metadata?.listingPackage
     );
 
-    const durationDays = Number(
-      session.metadata?.durationDays
-    );
+	const durationDays = Number(
+  	session.metadata?.durationDays
+	);
 
-    const foundingOfferApplied =
-      String(session.metadata?.foundingOffer || "") ===
-      "true";
+	const foundingOfferEligible =
+  	String(
+    	session.metadata?.foundingOfferEligible || ""
+  	) === "true";
 
-    const flow = String(
-      session.metadata?.flow || "LISTING_PACKAGE"
-    );
+	const discountAmountCents = Number(
+  	session.total_details?.amount_discount || 0
+	);
+
+	const foundingOfferApplied =
+  	foundingOfferEligible &&
+  	discountAmountCents > 0;
+
+	const flow = String(
+  	session.metadata?.flow || "LISTING_PACKAGE"
+	);
 
     if (
       !Number.isFinite(propertyId) ||
