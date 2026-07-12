@@ -330,8 +330,6 @@ router.post(
           },
         ],
 
-        payment_method_collection: "if_required",
-
         customer_email: property.user.email,
 
         success_url:
