@@ -155,19 +155,52 @@ router.post(
   async (req: any, res) => {
     try {
       const userId = Number(req.user?.userId);
-      const propertyId = Number(req.body?.propertyId);
 
       /*
-       * The old frontend only sent propertyId because HAVN previously
-       * had one Featured product. Defaulting to FEATURED keeps that
-       * existing flow working until the package-selection page is added.
+       * Accept the property ID from the JSON body first, with the query
+       * string as a safe fallback. The current property-upload page sends
+       * both, so checkout cannot lose the draft ID in transit.
        */
+      const rawPropertyId =
+        req.body?.propertyId ??
+        req.query?.propertyId;
+
+      const propertyId = Number(rawPropertyId);
+
+      /*
+       * Accept both current and compatibility package field names from
+       * either the JSON body or query string. If no package is supplied,
+       * retain compatibility with the previous Featured-only flow.
+       */
+      const rawRequestedPackage =
+        req.body?.package ??
+        req.body?.listingPackage ??
+        req.query?.package ??
+        req.query?.listingPackage;
+
       const requestedPackage =
-        req.body?.package == null || String(req.body.package).trim() === ""
+        rawRequestedPackage == null ||
+        String(rawRequestedPackage).trim() === ""
           ? "FEATURED"
-          : req.body.package;
+          : rawRequestedPackage;
 
       const selectedPackage = normalizePackage(requestedPackage);
+
+      console.log("Stripe checkout request received", {
+        userId,
+        bodyPropertyId: req.body?.propertyId ?? null,
+        queryPropertyId: req.query?.propertyId ?? null,
+        resolvedPropertyId: propertyId,
+        bodyPackage:
+          req.body?.package ??
+          req.body?.listingPackage ??
+          null,
+        queryPackage:
+          req.query?.package ??
+          req.query?.listingPackage ??
+          null,
+        selectedPackage,
+      });
 
       if (!Number.isFinite(userId) || userId <= 0) {
         return res.status(401).json({
