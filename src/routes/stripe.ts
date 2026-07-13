@@ -347,7 +347,12 @@ router.post(
 
         customer_email: property.user.email,
 
-	allow_promotion_codes: foundingOfferEligible,
+	/*
+         * Always show the promotion-code field in Stripe Checkout.
+         * This supports the public founding offer as well as private
+         * admin/testing coupons.
+         */
+        allow_promotion_codes: true,
 
         success_url:
           "https://havn.ie/my-listings.html?payment=success&featured=success",
