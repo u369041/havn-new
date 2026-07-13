@@ -2,6 +2,7 @@ import { Router } from "express";
 import Stripe from "stripe";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
+import { sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -113,6 +114,20 @@ function getPaymentIntentId(
   return null;
 }
 
+
+function buildPropertyAddress(property: any): string {
+  return [
+    property?.address1,
+    property?.address2,
+    property?.city,
+    property?.county,
+    property?.eircode,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 function checkoutWasCompleted(session: any): boolean {
   const paymentStatus = String(session.payment_status || "").toLowerCase();
   const checkoutStatus = String(session.status || "").toLowerCase();
@@ -155,52 +170,19 @@ router.post(
   async (req: any, res) => {
     try {
       const userId = Number(req.user?.userId);
+      const propertyId = Number(req.body?.propertyId);
 
       /*
-       * Accept the property ID from the JSON body first, with the query
-       * string as a safe fallback. The current property-upload page sends
-       * both, so checkout cannot lose the draft ID in transit.
+       * The old frontend only sent propertyId because HAVN previously
+       * had one Featured product. Defaulting to FEATURED keeps that
+       * existing flow working until the package-selection page is added.
        */
-      const rawPropertyId =
-        req.body?.propertyId ??
-        req.query?.propertyId;
-
-      const propertyId = Number(rawPropertyId);
-
-      /*
-       * Accept both current and compatibility package field names from
-       * either the JSON body or query string. If no package is supplied,
-       * retain compatibility with the previous Featured-only flow.
-       */
-      const rawRequestedPackage =
-        req.body?.package ??
-        req.body?.listingPackage ??
-        req.query?.package ??
-        req.query?.listingPackage;
-
       const requestedPackage =
-        rawRequestedPackage == null ||
-        String(rawRequestedPackage).trim() === ""
+        req.body?.package == null || String(req.body.package).trim() === ""
           ? "FEATURED"
-          : rawRequestedPackage;
+          : req.body.package;
 
       const selectedPackage = normalizePackage(requestedPackage);
-
-      console.log("Stripe checkout request received", {
-        userId,
-        bodyPropertyId: req.body?.propertyId ?? null,
-        queryPropertyId: req.query?.propertyId ?? null,
-        resolvedPropertyId: propertyId,
-        bodyPackage:
-          req.body?.package ??
-          req.body?.listingPackage ??
-          null,
-        queryPackage:
-          req.query?.package ??
-          req.query?.listingPackage ??
-          null,
-        selectedPackage,
-      });
 
       if (!Number.isFinite(userId) || userId <= 0) {
         return res.status(401).json({
@@ -644,12 +626,25 @@ router.post("/webhook", async (req: any, res) => {
         mode: true,
         title: true,
         slug: true,
+        price: true,
+        photos: true,
+        address1: true,
+        address2: true,
+        city: true,
+        county: true,
+        eircode: true,
         listingStatus: true,
         listingPackage: true,
         paymentStatus: true,
         stripeCheckoutSessionId: true,
         isFeatured: true,
         featuredUntil: true,
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -830,6 +825,39 @@ router.post("/webhook", async (req: any, res) => {
         });
       }
     });
+
+    void (async () => {
+      try {
+        await sendUserListingEmail({
+          to: property.user.email,
+          recipientName: property.user.name,
+          event: "SUBMITTED",
+          listingTitle: property.title,
+          slug: property.slug,
+          listingId: property.id,
+          coverImageUrl:
+            Array.isArray(property.photos) && property.photos.length
+              ? property.photos[0]
+              : null,
+          propertyAddress: buildPropertyAddress(property),
+          propertyMode: mode,
+          listingPackage: selectedPackage,
+          durationDays: expectedDuration,
+          amountPaidCents,
+          paymentReference:
+            paymentIntentId || session.id,
+          submittedAt: now,
+          price: property.price,
+          myListingsUrl:
+            "https://havn.ie/my-listings.html",
+        });
+      } catch (emailError) {
+        console.warn(
+          "Listing submitted email failed (non-fatal):",
+          emailError
+        );
+      }
+    })();
 
     console.log("Stripe listing package completed", {
       propertyId,

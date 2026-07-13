@@ -59,9 +59,10 @@ export async function sendListingStatusEmail(payload: ListingStatusEmailPayload)
 
 /**
  * ----------------------------
- * USER EMAIL (event-based)
+ * HAVN TRANSACTIONAL EMAIL DESIGN SYSTEM
  * ----------------------------
  */
+
 export type ListingEmailEvent =
   | "DRAFT_CREATED"
   | "DRAFT_SAVED"
@@ -73,96 +74,425 @@ export type ListingEmailEvent =
 export type UserListingEmailPayload = {
   to: string;
   event: ListingEmailEvent;
+  recipientName?: string | null;
   listingTitle?: string;
   slug?: string;
   listingId?: string | number;
   reason?: string;
   publicUrl?: string;
   myListingsUrl?: string;
+  editUrl?: string;
   closeOutcome?: "SOLD" | "RENTED";
+  coverImageUrl?: string | null;
+  propertyAddress?: string | null;
+  propertyMode?: string | null;
+  listingPackage?: "STANDARD" | "FEATURED" | string | null;
+  durationDays?: number | null;
+  amountPaidCents?: number | null;
+  paymentReference?: string | null;
+  submittedAt?: Date | string | null;
+  price?: number | null;
   [key: string]: any;
 };
+
+const HAVN_NAVY = "#0A1A33";
+const HAVN_BLUE = "#346FB6";
+const HAVN_LIGHT = "#F5F8FC";
+const HAVN_TEXT = "#0F172A";
+const HAVN_MUTED = "#64748B";
+const HAVN_BORDER = "#E2E8F0";
+
+function formatCurrencyFromCents(value?: number | null) {
+  const cents = Number(value);
+  if (!Number.isFinite(cents)) return null;
+
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+function formatPropertyPrice(value?: number | null) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+
+  return new Intl.NumberFormat("en-IE", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDateTime(value?: Date | string | null) {
+  if (!value) return null;
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat("en-IE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/Dublin",
+  }).format(date);
+}
+
+function humanMode(value?: string | null) {
+  const mode = String(value || "").trim().toUpperCase();
+
+  if (mode === "BUY") return "Property for Sale";
+  if (mode === "RENT") return "Property to Rent";
+  if (mode === "SHARE") return "Room Share";
+
+  return value ? String(value) : "Property Listing";
+}
+
+function humanPackage(value?: string | null) {
+  const selected = String(value || "").trim().toUpperCase();
+
+  if (selected === "FEATURED") return "Featured Listing";
+  if (selected === "STANDARD") return "Standard Listing";
+
+  return value ? String(value) : "Listing Package";
+}
+
+function emailButton(label: string, url: string) {
+  return `
+    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
+      <tr>
+        <td bgcolor="${HAVN_BLUE}" style="border-radius:10px;">
+          <a href="${escapeAttr(url)}"
+             style="display:inline-block;padding:14px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:10px;">
+            ${escapeHtml(label)}
+          </a>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function emailDetailRow(label: string, value?: string | null, accent = false) {
+  if (!value) return "";
+
+  return `
+    <tr>
+      <td style="padding:10px 0;border-bottom:1px solid ${HAVN_BORDER};color:${HAVN_MUTED};font-size:13px;font-weight:700;width:42%;">
+        ${escapeHtml(label)}
+      </td>
+      <td align="right" style="padding:10px 0;border-bottom:1px solid ${HAVN_BORDER};color:${accent ? HAVN_BLUE : HAVN_TEXT};font-size:13px;font-weight:800;">
+        ${escapeHtml(value)}
+      </td>
+    </tr>
+  `;
+}
+
+function renderHavnEmail(args: {
+  preheader: string;
+  heading: string;
+  introHtml: string;
+  bodyHtml: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+  coverImageUrl?: string | null;
+  statusTone?: "success" | "warning" | "neutral";
+}) {
+  const tone =
+    args.statusTone === "success"
+      ? { bg: "#ECFDF5", border: "#A7F3D0", icon: "#059669" }
+      : args.statusTone === "warning"
+      ? { bg: "#FFF7ED", border: "#FED7AA", icon: "#EA580C" }
+      : { bg: "#EFF6FF", border: "#BFDBFE", icon: HAVN_BLUE };
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>${escapeHtml(args.heading)}</title>
+      </head>
+      <body style="margin:0;padding:0;background:${HAVN_LIGHT};font-family:Arial,Helvetica,sans-serif;color:${HAVN_TEXT};">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+          ${escapeHtml(args.preheader)}
+        </div>
+
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${HAVN_LIGHT};padding:28px 12px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid ${HAVN_BORDER};box-shadow:0 14px 34px rgba(10,26,51,.08);">
+                <tr>
+                  <td align="center" style="background:${HAVN_NAVY};padding:27px 28px 25px;">
+                    <div style="font-size:28px;line-height:1;font-weight:900;letter-spacing:-1.2px;color:#ffffff;">
+                      havn<span style="color:${HAVN_BLUE};">.ie</span>
+                    </div>
+                    <div style="margin-top:7px;color:#D8E3F2;font-size:12px;font-weight:700;letter-spacing:.08em;">
+                      Find Your Haven.
+                    </div>
+                  </td>
+                </tr>
+
+                ${
+                  args.coverImageUrl
+                    ? `
+                      <tr>
+                        <td style="padding:0;line-height:0;">
+                          <img src="${escapeAttr(args.coverImageUrl)}" alt="Property" width="680"
+                               style="display:block;width:100%;height:290px;object-fit:cover;border:0;" />
+                        </td>
+                      </tr>
+                    `
+                    : ""
+                }
+
+                <tr>
+                  <td style="padding:38px 38px 34px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="padding:0 0 24px;">
+                          <div style="display:inline-block;width:42px;height:42px;line-height:42px;text-align:center;border-radius:14px;background:${tone.bg};border:1px solid ${tone.border};color:${tone.icon};font-size:22px;font-weight:900;">
+                            ${args.statusTone === "warning" ? "!" : "✓"}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <h1 style="margin:0 0 18px;color:${HAVN_NAVY};font-size:31px;line-height:1.12;letter-spacing:-1.1px;">
+                      ${escapeHtml(args.heading)}
+                    </h1>
+
+                    <div style="font-size:15px;line-height:1.7;color:#334155;">
+                      ${args.introHtml}
+                    </div>
+
+                    ${args.bodyHtml}
+
+                    ${
+                      args.ctaLabel && args.ctaUrl
+                        ? emailButton(args.ctaLabel, args.ctaUrl)
+                        : ""
+                    }
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="background:${HAVN_NAVY};padding:24px 30px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td valign="top">
+                          <div style="font-size:21px;font-weight:900;color:#ffffff;">
+                            havn<span style="color:${HAVN_BLUE};">.ie</span>
+                          </div>
+                          <div style="margin-top:6px;color:#CBD5E1;font-size:12px;font-weight:700;">
+                            Find Your Haven.
+                          </div>
+                        </td>
+                        <td align="right" valign="top" style="color:#CBD5E1;font-size:11px;line-height:1.6;">
+                          Questions?<br />
+                          Reply to this email or contact<br />
+                          <a href="mailto:support@havn.ie" style="color:#ffffff;text-decoration:none;">support@havn.ie</a>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <div style="border-top:1px solid rgba(255,255,255,.14);margin-top:18px;padding-top:14px;color:#94A3B8;font-size:10px;line-height:1.6;">
+                      HAVN.ie · Ireland's Property Intelligence Platform
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+}
 
 export async function sendUserListingEmail(payload: UserListingEmailPayload) {
   try {
     const title = payload.listingTitle || "your listing";
-    const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
+    const myListingsUrl =
+      payload.myListingsUrl || "https://havn.ie/my-listings.html";
+    const editUrl =
+      payload.editUrl ||
+      (payload.listingId
+        ? `https://havn.ie/property-upload.html?id=${encodeURIComponent(String(payload.listingId))}`
+        : myListingsUrl);
+
+    const displayName = String(payload.recipientName || "").trim();
+    const greeting = displayName
+      ? `Hi ${escapeHtml(displayName)},`
+      : "Hi,";
+
+    const packageName = humanPackage(payload.listingPackage);
+    const modeName = humanMode(payload.propertyMode);
+    const amountPaid = formatCurrencyFromCents(payload.amountPaidCents);
+    const propertyPrice = formatPropertyPrice(payload.price);
+    const submittedAt = formatDateTime(payload.submittedAt);
 
     let subject = "HAVN.ie update";
-    let body = "";
+    let html = "";
 
     switch (payload.event) {
       case "DRAFT_CREATED":
-        subject = "Your draft listing has been created";
-        body = `
-          <h2>Your draft listing has been created</h2>
-          <p>Congratulations — your draft listing has been created on HAVN.ie.</p>
-          <p><strong>${escapeHtml(title)}</strong></p>
-          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
-        `;
+        subject = "Your HAVN draft listing has been created";
+        html = renderHavnEmail({
+          preheader: "Your HAVN draft listing is ready.",
+          heading: "Your Draft Listing Has Been Created",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0;">Your draft listing has been created successfully. You can return at any time to complete it.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:26px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;">
+              <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};">${escapeHtml(title)}</div>
+            </div>
+          `,
+          ctaLabel: "Continue My Listing",
+          ctaUrl: editUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "neutral",
+        });
         break;
 
       case "DRAFT_SAVED":
-        subject = "Your draft listing has been saved";
-        body = `
-          <h2>Your draft listing has been saved</h2>
-          <p>Good news — your draft listing was saved successfully.</p>
-          <p><strong>${escapeHtml(title)}</strong></p>
-          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
-        `;
+        subject = "Your HAVN draft listing has been saved";
+        html = renderHavnEmail({
+          preheader: "Your latest changes have been saved.",
+          heading: "Your Draft Has Been Saved",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0;">Your latest listing changes were saved successfully.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:26px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;">
+              <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};">${escapeHtml(title)}</div>
+            </div>
+          `,
+          ctaLabel: "View My Listings",
+          ctaUrl: myListingsUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "neutral",
+        });
         break;
 
       case "SUBMITTED":
-        subject = "Your listing has been sent for approval";
-        body = `
-          <h2>Your listing has been sent for approval</h2>
-          <p>Congratulations — your listing has been submitted to the HAVN.ie moderation team for review.</p>
-          <p><strong>${escapeHtml(title)}</strong></p>
-          <p>You can check status anytime in <a href="${escapeAttr(myListingsUrl)}">My Listings</a>.</p>
-        `;
+        subject = "Your HAVN Listing Has Been Submitted";
+        html = renderHavnEmail({
+          preheader: "Your listing and payment have been received.",
+          heading: "Your HAVN Listing Has Been Submitted",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0 0 12px;">Thank you for choosing <strong>HAVN.ie</strong>.</p>
+            <p style="margin:0;">We've successfully received your listing submission${amountPaid ? " and payment" : ""}.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
+              <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:13px;">Listing Details</div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                ${emailDetailRow("Property", title)}
+                ${emailDetailRow("Address", payload.propertyAddress || null)}
+                ${emailDetailRow("Type", modeName)}
+                ${emailDetailRow("Package", packageName, true)}
+                ${emailDetailRow("Duration", payload.durationDays ? `${payload.durationDays} Days` : null)}
+                ${emailDetailRow("Property Price", propertyPrice)}
+                ${emailDetailRow("Amount Paid", amountPaid)}
+                ${emailDetailRow("Payment Reference", payload.paymentReference || null)}
+                ${emailDetailRow("Status", "Submitted for Verification", true)}
+                ${emailDetailRow("Submitted On", submittedAt)}
+              </table>
+            </div>
+
+            <div style="margin-top:22px;padding:22px;border:1px solid #BFDBFE;border-radius:18px;background:#EFF6FF;">
+              <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:9px;">What happens next?</div>
+              <p style="margin:0;color:#334155;font-size:14px;line-height:1.7;">
+                Every listing submitted to HAVN is manually reviewed by our verification team.
+                Your listing will normally be verified and published within <strong>24 hours</strong>.
+                This process helps us maintain the highest standards of quality, trust and transparency for everyone using HAVN.
+              </p>
+            </div>
+          `,
+          ctaLabel: "View My Listings",
+          ctaUrl: myListingsUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "success",
+        });
         break;
 
       case "APPROVED_LIVE":
-        subject = "Your listing is now live on HAVN";
-        body = `
-          <h2>Your listing is now live on HAVN</h2>
-          <p>Congratulations — your listing has been approved and is now live.</p>
-          <p><strong>${escapeHtml(title)}</strong></p>
-          ${payload.slug ? `<p><strong>Listing reference:</strong> ${escapeHtml(String(payload.slug))}</p>` : ""}
-          ${payload.publicUrl ? `<p><a href="${escapeAttr(payload.publicUrl)}">View your listing</a></p>` : ""}
-          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
-        `;
+        subject = "Your HAVN Listing Is Now Live";
+        html = renderHavnEmail({
+          preheader: "Great news — your listing is now live on HAVN.ie.",
+          heading: "Great News! Your HAVN Listing Is Now Live",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0;">Your listing has been approved and is now live on <strong>HAVN.ie</strong>.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                ${emailDetailRow("Property", title)}
+                ${emailDetailRow("Address", payload.propertyAddress || null)}
+                ${emailDetailRow("Type", modeName)}
+                ${emailDetailRow("Package", packageName, true)}
+                ${emailDetailRow("Property Price", propertyPrice)}
+                ${emailDetailRow("Status", "Live on HAVN.ie", true)}
+              </table>
+            </div>
+          `,
+          ctaLabel: payload.publicUrl ? "View My Listing" : "View My Listings",
+          ctaUrl: payload.publicUrl || myListingsUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "success",
+        });
         break;
 
       case "REJECTED":
-        subject = "Your listing was rejected";
-        body = `
-          <h2>Your listing was rejected</h2>
-          <p>Unfortunately, your listing was rejected by the HAVN.ie moderation team for the following reason:</p>
-          <blockquote style="border-left:4px solid #e5e7eb;padding-left:12px;color:#0f172a">
-            ${escapeHtml(payload.reason || "No reason provided")}
-          </blockquote>
-          <p>Please re-submit your listing taking this feedback into account.</p>
-          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
-        `;
+        subject = "Your HAVN Listing Requires Attention";
+        html = renderHavnEmail({
+          preheader: "Your listing needs an update before it can go live.",
+          heading: "Your HAVN Listing Requires Attention",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0;">Your listing was not approved during verification. Please review the feedback below and update the listing before resubmitting.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:26px;padding:22px;border:1px solid #FED7AA;border-radius:18px;background:#FFF7ED;">
+              <div style="font-size:14px;font-weight:900;color:#9A3412;margin-bottom:10px;">Reason for Review</div>
+              <div style="font-size:14px;line-height:1.7;color:#7C2D12;">
+                ${escapeHtml(payload.reason || "Additional information is required before this listing can be approved.")}
+              </div>
+            </div>
+          `,
+          ctaLabel: "Edit My Listing",
+          ctaUrl: editUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "warning",
+        });
         break;
 
       case "CLOSED":
-        subject = "Congratulations — Your Listing Has Been Closed";
-        body = `
-          <h2>Congratulations — Your Listing Has Been Closed</h2>
-          <p>Your listing has been marked as closed (${escapeHtml(String(payload.closeOutcome || "CLOSED"))}).</p>
-          <p><strong>${escapeHtml(title)}</strong></p>
-          <p><a href="${escapeAttr(myListingsUrl)}">Go to My Listings</a></p>
-        `;
+        subject = "Your HAVN Listing Has Been Closed";
+        html = renderHavnEmail({
+          preheader: "Your HAVN listing has been marked as closed.",
+          heading: "Your HAVN Listing Has Been Closed",
+          introHtml: `
+            <p style="margin:0 0 12px;">${greeting}</p>
+            <p style="margin:0;">Your listing has been marked as <strong>${escapeHtml(String(payload.closeOutcome || "closed").toLowerCase())}</strong>.</p>
+          `,
+          bodyHtml: `
+            <div style="margin-top:26px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;">
+              <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};">${escapeHtml(title)}</div>
+            </div>
+          `,
+          ctaLabel: "View My Listings",
+          ctaUrl: myListingsUrl,
+          coverImageUrl: payload.coverImageUrl,
+          statusTone: "neutral",
+        });
         break;
     }
-
-    const html = `
-      ${body}
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
-    `;
 
     return await resend.emails.send({
       from: FROM,
@@ -303,20 +633,30 @@ export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
  * WELCOME EMAIL
  * ----------------------------
  */
+
 export async function sendWelcomeEmail(args: { to: string; name?: string | null }) {
   try {
+    const displayName = String(args.name || "").trim();
     const subject = "Welcome to HAVN.ie";
-    const displayName = (args.name || "").trim();
 
-    const html = `
-      <h2>Welcome to HAVN.ie</h2>
-      <p>${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
-      <p>Your account has been created successfully.</p>
-      <p>You can create, save and submit property listings for approval anytime.</p>
-      <p><a href="https://havn.ie/my-listings.html">Go to My Listings</a></p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
-    `;
+    const html = renderHavnEmail({
+      preheader: "Welcome to HAVN.ie — Find Your Haven.",
+      heading: "Welcome to HAVN.ie",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0 0 12px;">Your HAVN account has been created successfully.</p>
+        <p style="margin:0;">You can now create property listings, save searches and manage your property journey in one place.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:22px;border:1px solid #BFDBFE;border-radius:18px;background:#EFF6FF;">
+          <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};margin-bottom:8px;">A cleaner, more trusted property experience</div>
+          <div style="font-size:14px;line-height:1.7;color:#334155;">Explore homes, manage listings and connect with serious buyers, renters and sharers across Ireland.</div>
+        </div>
+      `,
+      ctaLabel: "Go to My Listings",
+      ctaUrl: "https://havn.ie/my-listings.html",
+      statusTone: "success",
+    });
 
     return await resend.emails.send({
       from: FROM,
@@ -335,26 +675,32 @@ export async function sendWelcomeEmail(args: { to: string; name?: string | null 
  * PASSWORD RESET EMAIL
  * ----------------------------
  */
+
 export async function sendPasswordResetEmail(args: {
   to: string;
   name?: string | null;
   resetUrl: string;
 }) {
   try {
-    const displayName = (args.name || "").trim();
+    const displayName = String(args.name || "").trim();
     const subject = "Reset your HAVN.ie password";
 
-    const html = `
-      <h2>Reset your password</h2>
-      <p>${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
-      <p>We received a request to reset your HAVN.ie password.</p>
-      <p><a href="${escapeAttr(args.resetUrl)}">Click here to reset your password</a></p>
-      <p style="color:#64748b;font-size:12px;margin-top:14px">
-        If you didn’t request this, you can ignore this email.
-      </p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
-    `;
+    const html = renderHavnEmail({
+      preheader: "Reset your HAVN.ie password securely.",
+      heading: "Reset Your Password",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0;">We received a request to reset your HAVN.ie password.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;color:${HAVN_MUTED};font-size:13px;line-height:1.7;">
+          If you did not request this password reset, you can safely ignore this email.
+        </div>
+      `,
+      ctaLabel: "Reset My Password",
+      ctaUrl: args.resetUrl,
+      statusTone: "neutral",
+    });
 
     return await resend.emails.send({
       from: FROM,
@@ -373,26 +719,32 @@ export async function sendPasswordResetEmail(args: {
  * EMAIL VERIFICATION EMAIL
  * ----------------------------
  */
+
 export async function sendEmailVerificationEmail(args: {
   to: string;
   name?: string | null;
   verifyUrl: string;
 }) {
   try {
-    const displayName = (args.name || "").trim();
+    const displayName = String(args.name || "").trim();
     const subject = "Verify your email for HAVN.ie";
 
-    const html = `
-      <h2>Verify your email</h2>
-      <p>${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
-      <p>Please verify your email address to finish setting up your HAVN.ie account.</p>
-      <p><a href="${escapeAttr(args.verifyUrl)}">Verify your email</a></p>
-      <p style="color:#64748b;font-size:12px;margin-top:14px">
-        This link expires in 30 minutes.
-      </p>
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-      <p style="color:#64748b;font-size:12px">HAVN.ie</p>
-    `;
+    const html = renderHavnEmail({
+      preheader: "Verify your email to finish setting up your HAVN.ie account.",
+      heading: "Verify Your Email",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0;">Please verify your email address to finish setting up your HAVN.ie account.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;color:${HAVN_MUTED};font-size:13px;line-height:1.7;">
+          This verification link expires in 30 minutes.
+        </div>
+      `,
+      ctaLabel: "Verify My Email",
+      ctaUrl: args.verifyUrl,
+      statusTone: "success",
+    });
 
     return await resend.emails.send({
       from: FROM,

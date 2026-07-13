@@ -114,15 +114,27 @@ function buildModerationData(
   return base;
 }
 
+function buildPropertyAddress(property: any): string {
+  return [
+    property?.address1,
+    property?.address2,
+    property?.city,
+    property?.county,
+    property?.eircode,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function coverImage(property: any): string | null {
+  return Array.isArray(property?.photos) && property.photos.length
+    ? property.photos[0]
+    : null;
+}
+
 /**
  * PATCH /api/admin/properties/:id
- * Body:
- * {
- *   listingStatus: "DRAFT"|"SUBMITTED"|"PUBLISHED"|"REJECTED"|"CLOSED"|"ARCHIVED",
- *   reason?: string
- * }
- *
- * This is the new generic admin moderation route.
  */
 router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
   try {
@@ -167,7 +179,6 @@ router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res)
 
 /**
  * POST /api/admin/properties/:id/approve
- * SUBMITTED -> PUBLISHED
  */
 router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: any, res) => {
   try {
@@ -210,12 +221,29 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
       try {
         await sendUserListingEmail({
           to: updated.user.email,
+          recipientName: updated.user.name,
           event: "APPROVED_LIVE",
           listingTitle: updated.title,
           slug: updated.slug,
           listingId: updated.id,
-          publicUrl: `https://havn.ie/property.html?slug=${updated.slug}`,
-        } as any);
+          publicUrl: `https://havn.ie/property.html?slug=${encodeURIComponent(updated.slug)}`,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+          coverImageUrl: coverImage(updated),
+          propertyAddress: buildPropertyAddress(updated),
+          propertyMode: updated.mode,
+          listingPackage: updated.listingPackage,
+          durationDays: updated.listingExpiresAt && updated.paidAt
+            ? Math.max(
+                1,
+                Math.round(
+                  (new Date(updated.listingExpiresAt).getTime() -
+                    new Date(updated.paidAt).getTime()) /
+                    86400000
+                )
+              )
+            : null,
+          price: updated.price,
+        });
       } catch (e) {
         console.warn("Approve email failed (non-fatal):", e);
       }
@@ -230,8 +258,6 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
 
 /**
  * POST /api/admin/properties/:id/reject
- * Body: { reason?: string }
- * SUBMITTED -> REJECTED
  */
 router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any, res) => {
   try {
@@ -277,13 +303,20 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
       try {
         await sendUserListingEmail({
           to: updated.user.email,
+          recipientName: updated.user.name,
           event: "REJECTED",
           listingTitle: updated.title,
           slug: updated.slug,
           listingId: updated.id,
           reason: reason || updated.rejectedReason || "",
           myListingsUrl: "https://havn.ie/my-listings.html",
-        } as any);
+          editUrl: `https://havn.ie/property-upload.html?id=${encodeURIComponent(String(updated.id))}`,
+          coverImageUrl: coverImage(updated),
+          propertyAddress: buildPropertyAddress(updated),
+          propertyMode: updated.mode,
+          listingPackage: updated.listingPackage,
+          price: updated.price,
+        });
       } catch (e) {
         console.warn("Reject email failed (non-fatal):", e);
       }
