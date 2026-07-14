@@ -199,6 +199,142 @@ function emailDetailRow(label: string, value?: string | null, accent = false) {
   `;
 }
 
+function renderApprovedLiveEmail(args: {
+  preheader: string;
+  recipientName?: string | null;
+  listingTitle: string;
+  propertyAddress?: string | null;
+  propertyMode?: string | null;
+  listingPackage?: string | null;
+  propertyPrice?: string | null;
+  slug?: string | null;
+  publicUrl: string;
+  coverImageUrl?: string | null;
+}) {
+  const displayName = String(args.recipientName || "").trim();
+  const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
+  const imageUrl = args.coverImageUrl ? escapeAttr(args.coverImageUrl) : "";
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Your HAVN Listing Is Now Live</title>
+      </head>
+      <body style="margin:0;padding:0;background:${HAVN_LIGHT};font-family:Arial,Helvetica,sans-serif;color:${HAVN_TEXT};">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+          ${escapeHtml(args.preheader)}
+        </div>
+
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:${HAVN_LIGHT};padding:28px 12px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid ${HAVN_BORDER};box-shadow:0 14px 34px rgba(10,26,51,.10);">
+                <tr>
+                  <td align="center" style="background:${HAVN_NAVY};padding:20px 28px 18px;">
+                    <div style="font-size:25px;line-height:1;font-weight:900;letter-spacing:-1px;color:#ffffff;">
+                      havn<span style="color:${HAVN_BLUE};">.ie</span>
+                    </div>
+                    <div style="margin-top:6px;color:#D8E3F2;font-size:11px;font-weight:700;letter-spacing:.04em;">
+                      Find Your Haven
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td ${imageUrl ? `background="${imageUrl}"` : ""}
+                      style="background-color:${HAVN_NAVY};${imageUrl ? `background-image:url('${imageUrl}');background-position:center;background-size:cover;` : ""}">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td width="58%" valign="top" style="width:58%;padding:30px 30px 31px;background:rgba(3,16,36,.88);">
+                          <div style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;border-radius:50%;background:#10B981;color:#ffffff;font-size:23px;font-weight:900;">
+                            ✓
+                          </div>
+                          <h1 style="margin:14px 0 16px;color:#ffffff;font-size:28px;line-height:1.12;letter-spacing:-.8px;">
+                            Great News!<br />Your HAVN Listing<br />Is Now Live
+                          </h1>
+                          <p style="margin:0 0 9px;color:#ffffff;font-size:14px;line-height:1.6;">${greeting}</p>
+                          <p style="margin:0;color:#E2E8F0;font-size:14px;line-height:1.65;">
+                            Your listing has been approved and is now live on HAVN.ie.
+                          </p>
+                        </td>
+                        <td width="42%" style="width:42%;background:rgba(3,16,36,.18);">&nbsp;</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:26px 30px 30px;background:#ffffff;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        ${imageUrl ? `
+                          <td width="180" valign="top" style="width:180px;padding-right:22px;">
+                            <img src="${imageUrl}" alt="${escapeAttr(args.listingTitle)}" width="180"
+                                 style="display:block;width:180px;max-width:100%;height:170px;object-fit:cover;border:0;border-radius:12px;" />
+                          </td>
+                        ` : ""}
+                        <td valign="top">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                            ${emailDetailRow("Property", args.listingTitle)}
+                            ${emailDetailRow("Address", args.propertyAddress || null)}
+                            ${emailDetailRow("Type", args.propertyMode || null)}
+                            ${emailDetailRow("Package", args.listingPackage || null, true)}
+                            ${emailDetailRow("Price", args.propertyPrice || null)}
+                            ${emailDetailRow("Reference", args.slug || null)}
+                            ${emailDetailRow("Status", "Live on HAVN.ie", true)}
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
+                      <tr>
+                        <td bgcolor="${HAVN_BLUE}" style="border-radius:9px;">
+                          <a href="${escapeAttr(args.publicUrl)}"
+                             style="display:inline-block;padding:14px 34px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:9px;">
+                            View My Listing
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="background:${HAVN_NAVY};padding:22px 28px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td valign="top">
+                          <div style="font-size:21px;font-weight:900;color:#ffffff;">
+                            havn<span style="color:${HAVN_BLUE};">.ie</span>
+                          </div>
+                          <div style="margin-top:6px;color:#CBD5E1;font-size:11px;font-weight:700;">Find Your Haven</div>
+                        </td>
+                        <td align="center" valign="top" style="color:#CBD5E1;font-size:10px;line-height:1.6;">
+                          Questions?<br />
+                          Reply to this email or contact<br />
+                          <a href="mailto:support@havn.ie" style="color:#ffffff;text-decoration:none;">support@havn.ie</a>
+                        </td>
+                        <td align="right" valign="top" style="color:#CBD5E1;font-size:10px;line-height:1.6;">
+                          Ireland's Property<br />Intelligence Platform<br />
+                          <a href="https://havn.ie" style="color:#ffffff;text-decoration:none;">www.havn.ie</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+}
+
 function renderHavnEmail(args: {
   preheader: string;
   heading: string;
@@ -282,7 +418,7 @@ function renderHavnEmail(args: {
 
                     ${
                       args.ctaLabel && args.ctaUrl
-                        ? args.ctaStyle === "text"
+                        ? args.ctaStyle === "text" || args.ctaLabel === "View My Listings"
                           ? emailTextLink(args.ctaLabel, args.ctaUrl)
                           : emailButton(args.ctaLabel, args.ctaUrl)
                         : ""
@@ -438,29 +574,17 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
 
       case "APPROVED_LIVE":
         subject = "Your HAVN Listing Is Now Live";
-        html = renderHavnEmail({
+        html = renderApprovedLiveEmail({
           preheader: "Great news — your listing is now live on HAVN.ie.",
-          heading: "Great News! Your HAVN Listing Is Now Live",
-          introHtml: `
-            <p style="margin:0 0 12px;">${greeting}</p>
-            <p style="margin:0;">Your listing has been approved and is now live on <strong>HAVN.ie</strong>.</p>
-          `,
-          bodyHtml: `
-            <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                ${emailDetailRow("Property", title)}
-                ${emailDetailRow("Address", payload.propertyAddress || null)}
-                ${emailDetailRow("Type", modeName)}
-                ${emailDetailRow("Package", packageName, true)}
-                ${emailDetailRow("Property Price", propertyPrice)}
-                ${emailDetailRow("Status", "Live on HAVN.ie", true)}
-              </table>
-            </div>
-          `,
-          ctaLabel: payload.publicUrl ? "View My Listing" : "View My Listings",
-          ctaUrl: payload.publicUrl || myListingsUrl,
+          recipientName: payload.recipientName,
+          listingTitle: title,
+          propertyAddress: payload.propertyAddress,
+          propertyMode: modeName,
+          listingPackage: packageName,
+          propertyPrice,
+          slug: payload.slug,
+          publicUrl: payload.publicUrl || myListingsUrl,
           coverImageUrl: payload.coverImageUrl,
-          statusTone: "success",
         });
         break;
 
