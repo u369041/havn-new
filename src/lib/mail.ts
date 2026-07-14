@@ -158,6 +158,46 @@ function humanPackage(value?: string | null) {
   return value ? String(value) : "Listing Package";
 }
 
+function emailSafeCoverUrl(value?: string | null) {
+  const url = String(value || "").trim();
+  if (!url) return null;
+
+  if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
+    return url.replace(
+      "/upload/",
+      "/upload/f_jpg,q_auto:good,w_1200/"
+    );
+  }
+
+  return url;
+}
+
+async function buildInlineCoverAttachment(value?: string | null) {
+  const url = emailSafeCoverUrl(value);
+  if (!url) return null;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Cover image request failed with ${response.status}`);
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length) {
+      throw new Error("Cover image response was empty");
+    }
+
+    return {
+      content: bytes.toString("base64"),
+      filename: "havn-property-cover.jpg",
+      contentId: "havn-property-cover",
+    };
+  } catch (error) {
+    console.warn("Could not embed Outlook-safe listing cover:", error);
+    return null;
+  }
+}
+
 function emailButton(label: string, url: string) {
   return `
     <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
@@ -485,6 +525,10 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
     const amountPaid = formatCurrencyFromCents(payload.amountPaidCents);
     const propertyPrice = formatPropertyPrice(payload.price);
     const submittedAt = formatDateTime(payload.submittedAt);
+    const inlineCoverAttachment =
+      payload.event === "APPROVED_LIVE"
+        ? await buildInlineCoverAttachment(payload.coverImageUrl)
+        : null;
 
     let subject = "HAVN.ie update";
     let html = "";
@@ -588,7 +632,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
           propertyPrice,
           slug: payload.slug,
           publicUrl: payload.publicUrl || myListingsUrl,
-          coverImageUrl: payload.coverImageUrl,
+          coverImageUrl: inlineCoverAttachment ? payload.coverImageUrl : null,
         });
         break;
 
@@ -643,16 +687,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
       to: payload.to,
       subject,
       html,
-      attachments:
-        payload.event === "APPROVED_LIVE" && payload.coverImageUrl
-          ? [
-              {
-                path: payload.coverImageUrl,
-                filename: "havn-property-cover.jpg",
-                contentId: "havn-property-cover",
-              },
-            ]
-          : undefined,
+      attachments: inlineCoverAttachment ? [inlineCoverAttachment] : undefined,
     });
   } catch (err) {
     console.error("sendUserListingEmail failed:", err);
