@@ -402,16 +402,10 @@ function renderApprovedLiveEmail(args: {
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin-top:24px;">
                       <tr>
                         <td align="center">
-                          <table role="presentation" cellspacing="0" cellpadding="0">
-                            <tr>
-                              <td align="center" bgcolor="${HAVN_BLUE}" style="border-radius:9px;">
-                                <a href="${escapeAttr(args.publicUrl)}"
-                                   style="display:inline-block;padding:14px 36px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:9px;">
-                                  View My Listing
-                                </a>
-                              </td>
-                            </tr>
-                          </table>
+                          <a href="${escapeAttr(args.publicUrl)}"
+                             style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">
+                            View My Listing
+                          </a>
                         </td>
                       </tr>
                     </table>
