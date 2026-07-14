@@ -97,6 +97,7 @@ export type UserListingEmailPayload = {
 
 const HAVN_NAVY = "#0A1A33";
 const HAVN_BLUE = "#346FB6";
+const HAVN_BUTTON = "#000000";
 const HAVN_LIGHT = "#F5F8FC";
 const HAVN_TEXT = "#0F172A";
 const HAVN_MUTED = "#64748B";
@@ -161,7 +162,7 @@ function emailButton(label: string, url: string) {
   return `
     <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
       <tr>
-        <td bgcolor="${HAVN_BLUE}" style="border-radius:10px;">
+        <td bgcolor="${HAVN_BUTTON}" style="border-radius:10px;">
           <a href="${escapeAttr(url)}"
              style="display:inline-block;padding:14px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:10px;">
             ${escapeHtml(label)}
@@ -227,7 +228,7 @@ function renderHavnEmail(args: {
                       havn<span style="color:${HAVN_BLUE};">.ie</span>
                     </div>
                     <div style="margin-top:7px;color:#D8E3F2;font-size:12px;font-weight:700;letter-spacing:.08em;">
-                      Find Your Haven.
+                      Find Your Haven
                     </div>
                   </td>
                 </tr>
@@ -284,7 +285,7 @@ function renderHavnEmail(args: {
                             havn<span style="color:${HAVN_BLUE};">.ie</span>
                           </div>
                           <div style="margin-top:6px;color:#CBD5E1;font-size:12px;font-weight:700;">
-                            Find Your Haven.
+                            Find Your Haven
                           </div>
                         </td>
                         <td align="right" valign="top" style="color:#CBD5E1;font-size:11px;line-height:1.6;">
@@ -404,7 +405,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
               </table>
             </div>
 
-            <div style="margin-top:22px;padding:22px;border:1px solid #BFDBFE;border-radius:18px;background:#EFF6FF;">
+            <div style="margin-top:22px;padding:22px;border:1px solid #E2E8F0;border-radius:18px;background:#FFFFFF;">
               <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:9px;">What happens next?</div>
               <p style="margin:0;color:#334155;font-size:14px;line-height:1.7;">
                 Every listing submitted to HAVN is manually reviewed by our verification team.
@@ -415,7 +416,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
           `,
           ctaLabel: "View My Listings",
           ctaUrl: myListingsUrl,
-          coverImageUrl: payload.coverImageUrl,
+          coverImageUrl: null,
           statusTone: "success",
         });
         break;
@@ -640,7 +641,7 @@ export async function sendWelcomeEmail(args: { to: string; name?: string | null 
     const subject = "Welcome to HAVN.ie";
 
     const html = renderHavnEmail({
-      preheader: "Welcome to HAVN.ie — Find Your Haven.",
+      preheader: "Welcome to HAVN.ie — Find Your Haven",
       heading: "Welcome to HAVN.ie",
       introHtml: `
         <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
