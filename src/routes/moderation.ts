@@ -128,9 +128,68 @@ function buildPropertyAddress(property: any): string {
 }
 
 function coverImage(property: any): string | null {
-  return Array.isArray(property?.photos) && property.photos.length
-    ? property.photos[0]
-    : null;
+  if (!Array.isArray(property?.photos) || !property.photos.length) return null;
+
+  const firstPhoto = property.photos[0];
+  if (typeof firstPhoto === "string") return firstPhoto;
+
+  if (firstPhoto && typeof firstPhoto === "object") {
+    return firstPhoto.url || firstPhoto.secure_url || firstPhoto.src || null;
+  }
+
+  return null;
+}
+
+function listingDurationDays(property: any): number | null {
+  if (!property?.listingExpiresAt || !property?.paidAt) return null;
+
+  return Math.max(
+    1,
+    Math.round(
+      (new Date(property.listingExpiresAt).getTime() -
+        new Date(property.paidAt).getTime()) /
+        86400000
+    )
+  );
+}
+
+async function sendModerationEmail(
+  property: any,
+  event: "APPROVED_LIVE" | "REJECTED",
+  reason = ""
+) {
+  try {
+    const result = await sendUserListingEmail({
+      to: property.user.email,
+      recipientName: property.user.name,
+      event,
+      listingTitle: property.title,
+      slug: property.slug,
+      listingId: property.id,
+      publicUrl:
+        event === "APPROVED_LIVE"
+          ? `https://havn.ie/property.html?slug=${encodeURIComponent(property.slug)}`
+          : undefined,
+      myListingsUrl: "https://havn.ie/my-listings.html",
+      editUrl:
+        event === "REJECTED"
+          ? `https://havn.ie/property-upload.html?id=${encodeURIComponent(String(property.id))}`
+          : undefined,
+      reason: event === "REJECTED" ? reason || property.rejectedReason || "" : undefined,
+      coverImageUrl: coverImage(property),
+      propertyAddress: buildPropertyAddress(property),
+      propertyMode: property.mode,
+      listingPackage: property.listingPackage,
+      durationDays: listingDurationDays(property),
+      price: property.price,
+    });
+
+    if (!result || (result as any).error) {
+      console.warn(`${event} email was not accepted by Resend:`, result);
+    }
+  } catch (error) {
+    console.warn(`${event} email failed (non-fatal):`, error);
+  }
 }
 
 /**
@@ -170,6 +229,14 @@ router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res)
       include: { user: true },
     });
 
+    if (existing.listingStatus !== nextStatus) {
+      if (nextStatus === "PUBLISHED") {
+        await sendModerationEmail(updated, "APPROVED_LIVE");
+      } else if (nextStatus === "REJECTED") {
+        await sendModerationEmail(updated, "REJECTED", reason);
+      }
+    }
+
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     console.error("admin generic status update error", err);
@@ -203,12 +270,13 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
       });
     }
 
+    const now = new Date();
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "PUBLISHED",
-        publishedAt: new Date(),
-        approvedAt: new Date(),
+        publishedAt: now,
+        approvedAt: now,
         approvedById: req.user.userId,
         rejectedAt: null,
         rejectedById: null,
@@ -217,37 +285,7 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
       include: { user: true },
     });
 
-    void (async () => {
-      try {
-        await sendUserListingEmail({
-          to: updated.user.email,
-          recipientName: updated.user.name,
-          event: "APPROVED_LIVE",
-          listingTitle: updated.title,
-          slug: updated.slug,
-          listingId: updated.id,
-          publicUrl: `https://havn.ie/property.html?slug=${encodeURIComponent(updated.slug)}`,
-          myListingsUrl: "https://havn.ie/my-listings.html",
-          coverImageUrl: coverImage(updated),
-          propertyAddress: buildPropertyAddress(updated),
-          propertyMode: updated.mode,
-          listingPackage: updated.listingPackage,
-          durationDays: updated.listingExpiresAt && updated.paidAt
-            ? Math.max(
-                1,
-                Math.round(
-                  (new Date(updated.listingExpiresAt).getTime() -
-                    new Date(updated.paidAt).getTime()) /
-                    86400000
-                )
-              )
-            : null,
-          price: updated.price,
-        });
-      } catch (e) {
-        console.warn("Approve email failed (non-fatal):", e);
-      }
-    })();
+    await sendModerationEmail(updated, "APPROVED_LIVE");
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
@@ -299,28 +337,7 @@ router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any
       include: { user: true },
     });
 
-    void (async () => {
-      try {
-        await sendUserListingEmail({
-          to: updated.user.email,
-          recipientName: updated.user.name,
-          event: "REJECTED",
-          listingTitle: updated.title,
-          slug: updated.slug,
-          listingId: updated.id,
-          reason: reason || updated.rejectedReason || "",
-          myListingsUrl: "https://havn.ie/my-listings.html",
-          editUrl: `https://havn.ie/property-upload.html?id=${encodeURIComponent(String(updated.id))}`,
-          coverImageUrl: coverImage(updated),
-          propertyAddress: buildPropertyAddress(updated),
-          propertyMode: updated.mode,
-          listingPackage: updated.listingPackage,
-          price: updated.price,
-        });
-      } catch (e) {
-        console.warn("Reject email failed (non-fatal):", e);
-      }
-    })();
+    await sendModerationEmail(updated, "REJECTED", reason);
 
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
