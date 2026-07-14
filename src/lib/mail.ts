@@ -285,28 +285,59 @@ function renderApprovedLiveEmail(args: {
 
                 <tr>
                   <td style="background-color:${HAVN_NAVY};">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                      <tr>
-                        <td width="58%" valign="top" style="width:58%;padding:30px 30px 31px;background:rgba(3,16,36,.88);">
-                          <div style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;border-radius:50%;background:#10B981;color:#ffffff;font-size:23px;font-weight:900;">
-                            ✓
-                          </div>
-                          <h1 style="margin:14px 0 16px;color:#ffffff;font-size:28px;line-height:1.12;letter-spacing:-.8px;">
-                            Great News!<br />Your HAVN Listing<br />Is Now Live
-                          </h1>
-                          <p style="margin:0 0 9px;color:#ffffff;font-size:14px;line-height:1.6;">${greeting}</p>
-                          <p style="margin:0;color:#E2E8F0;font-size:14px;line-height:1.65;">
-                            Your listing has been approved and is now live on HAVN.ie.
-                          </p>
-                        </td>
-                        <td width="42%" valign="middle" style="width:42%;background:${HAVN_NAVY};line-height:0;">
-                          ${imageUrl ? `
-                            <img src="${imageUrl}" alt="${escapeAttr(args.listingTitle)}" width="286"
-                                 style="display:block;width:100%;max-width:286px;height:270px;object-fit:cover;border:0;" />
-                          ` : "&nbsp;"}
-                        </td>
-                      </tr>
-                    </table>
+                    ${imageUrl ? `
+                      <!--[if gte mso 9]>
+                      <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:680px;height:300px;">
+                        <v:fill type="frame" src="${imageUrl}" color="${HAVN_NAVY}" opacity="58%" />
+                        <v:textbox inset="0,0,0,0">
+                          <table role="presentation" width="680" height="300" cellspacing="0" cellpadding="0">
+                            <tr>
+                              <td width="390" height="300" valign="top" style="width:390px;height:300px;padding:28px 30px;color:#ffffff;">
+                                <table role="presentation" cellspacing="0" cellpadding="0"><tr><td width="40" height="40" align="center" valign="middle" bgcolor="#10B981" style="width:40px;height:40px;color:#ffffff;font-size:23px;font-weight:900;">✓</td></tr></table>
+                                <div style="margin-top:14px;color:#ffffff;font-size:28px;line-height:1.14;font-weight:900;">
+                                  Great News!<br />Your HAVN Listing<br />Is Now Live
+                                </div>
+                                <div style="margin-top:16px;color:#ffffff;font-size:14px;line-height:1.6;">${greeting}</div>
+                                <div style="margin-top:8px;color:#E2E8F0;font-size:14px;line-height:1.65;">
+                                  Your listing has been approved and is now live on HAVN.ie.
+                                </div>
+                              </td>
+                              <td width="290" height="300">&nbsp;</td>
+                            </tr>
+                          </table>
+                        </v:textbox>
+                      </v:rect>
+                      <![endif]-->
+
+                      <!--[if !mso]><!-->
+                      <table role="presentation" width="100%" height="300" cellspacing="0" cellpadding="0"
+                             background="${imageUrl}"
+                             style="width:100%;height:300px;background-color:${HAVN_NAVY};background-image:linear-gradient(90deg,rgba(3,16,36,.97) 0%,rgba(3,16,36,.88) 45%,rgba(3,16,36,.24) 100%),url('${imageUrl}');background-position:center;background-size:cover;">
+                        <tr>
+                          <td width="58%" height="300" valign="top" style="width:58%;height:300px;padding:28px 30px;color:#ffffff;">
+                            <div style="display:inline-block;width:40px;height:40px;line-height:40px;text-align:center;border-radius:50%;background:#10B981;color:#ffffff;font-size:23px;font-weight:900;">✓</div>
+                            <h1 style="margin:14px 0 16px;color:#ffffff;font-size:28px;line-height:1.12;letter-spacing:-.8px;">
+                              Great News!<br />Your HAVN Listing<br />Is Now Live
+                            </h1>
+                            <p style="margin:0 0 9px;color:#ffffff;font-size:14px;line-height:1.6;">${greeting}</p>
+                            <p style="margin:0;color:#E2E8F0;font-size:14px;line-height:1.65;">
+                              Your listing has been approved and is now live on HAVN.ie.
+                            </p>
+                          </td>
+                          <td width="42%" height="300" style="width:42%;height:300px;">&nbsp;</td>
+                        </tr>
+                      </table>
+                      <!--<![endif]-->
+                    ` : `
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${HAVN_NAVY};">
+                        <tr>
+                          <td style="padding:30px;color:#ffffff;">
+                            <div style="font-size:28px;line-height:1.15;font-weight:900;">Great News!<br />Your HAVN Listing Is Now Live</div>
+                            <div style="margin-top:16px;font-size:14px;line-height:1.65;">${greeting}<br />Your listing has been approved and is now live on HAVN.ie.</div>
+                          </td>
+                        </tr>
+                      </table>
+                    `}
                   </td>
                 </tr>
 
