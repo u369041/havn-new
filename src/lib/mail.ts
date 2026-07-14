@@ -213,7 +213,7 @@ function renderApprovedLiveEmail(args: {
 }) {
   const displayName = String(args.recipientName || "").trim();
   const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
-  const imageUrl = args.coverImageUrl ? escapeAttr(args.coverImageUrl) : "";
+  const imageUrl = args.coverImageUrl ? "cid:havn-property-cover" : "";
 
   return `
     <!doctype html>
@@ -244,8 +244,7 @@ function renderApprovedLiveEmail(args: {
                 </tr>
 
                 <tr>
-                  <td ${imageUrl ? `background="${imageUrl}"` : ""}
-                      style="background-color:${HAVN_NAVY};${imageUrl ? `background-image:url('${imageUrl}');background-position:center;background-size:cover;` : ""}">
+                  <td style="background-color:${HAVN_NAVY};">
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                       <tr>
                         <td width="58%" valign="top" style="width:58%;padding:30px 30px 31px;background:rgba(3,16,36,.88);">
@@ -260,7 +259,12 @@ function renderApprovedLiveEmail(args: {
                             Your listing has been approved and is now live on HAVN.ie.
                           </p>
                         </td>
-                        <td width="42%" style="width:42%;background:rgba(3,16,36,.18);">&nbsp;</td>
+                        <td width="42%" valign="middle" style="width:42%;background:${HAVN_NAVY};line-height:0;">
+                          ${imageUrl ? `
+                            <img src="${imageUrl}" alt="${escapeAttr(args.listingTitle)}" width="286"
+                                 style="display:block;width:100%;max-width:286px;height:270px;object-fit:cover;border:0;" />
+                          ` : "&nbsp;"}
+                        </td>
                       </tr>
                     </table>
                   </td>
@@ -639,6 +643,16 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
       to: payload.to,
       subject,
       html,
+      attachments:
+        payload.event === "APPROVED_LIVE" && payload.coverImageUrl
+          ? [
+              {
+                path: payload.coverImageUrl,
+                filename: "havn-property-cover.jpg",
+                contentId: "havn-property-cover",
+              },
+            ]
+          : undefined,
     });
   } catch (err) {
     console.error("sendUserListingEmail failed:", err);
