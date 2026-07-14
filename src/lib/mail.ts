@@ -313,12 +313,21 @@ function renderApprovedLiveEmail(args: {
                   <td style="background-color:${HAVN_NAVY};">
                     ${imageUrl ? `
                       <!--[if gte mso 9]>
-                      <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:680px;height:280px;">
-                        <v:fill type="frame" src="${imageUrl}" color="${HAVN_NAVY}" />
+                      <v:group xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" coordorigin="0 0" coordsize="680 280" style="width:680px;height:280px;">
+                        <v:rect fill="true" stroke="false" style="position:absolute;left:0;top:0;width:680px;height:280px;">
+                          <v:fill type="frame" src="${imageUrl}" color="${HAVN_NAVY}" />
+                        </v:rect>
+                        <v:rect fill="true" stroke="false" fillcolor="#071A33" style="position:absolute;left:0;top:0;width:350px;height:280px;">
+                          <v:fill color="#071A33" opacity="84%" />
+                        </v:rect>
+                        <v:rect fill="true" stroke="false" style="position:absolute;left:350px;top:0;width:100px;height:280px;">
+                          <v:fill type="gradient" color="#071A33" color2="#071A33" opacity="84%" o:opacity2="0%" angle="0" />
+                        </v:rect>
+                        <v:rect fill="false" stroke="false" style="position:absolute;left:0;top:0;width:680px;height:280px;">
                         <v:textbox inset="0,0,0,0">
                           <table role="presentation" width="680" height="280" cellspacing="0" cellpadding="0">
                             <tr>
-                              <td width="350" height="280" valign="middle" bgcolor="#071A33" style="width:350px;height:280px;background:#071A33;color:#ffffff;">
+                              <td width="350" height="280" valign="middle" style="width:350px;height:280px;color:#ffffff;">
                                 <table role="presentation" width="350" cellspacing="0" cellpadding="0">
                                   <tr><td width="30">&nbsp;</td><td style="padding-top:22px;font-family:Arial,Helvetica,sans-serif;font-size:32px;line-height:38px;mso-line-height-rule:exactly;">✅</td><td width="24">&nbsp;</td></tr>
                                   <tr><td width="30">&nbsp;</td><td style="padding-top:10px;font-family:Arial,Helvetica,sans-serif;color:#ffffff;font-size:27px;line-height:31px;mso-line-height-rule:exactly;font-weight:900;">Great News!<br />Your HAVN Listing<br />Is Now Live</td><td width="24">&nbsp;</td></tr>
@@ -330,7 +339,8 @@ function renderApprovedLiveEmail(args: {
                             </tr>
                           </table>
                         </v:textbox>
-                      </v:rect>
+                        </v:rect>
+                      </v:group>
                       <![endif]-->
 
                       <!--[if !mso]><!-->
