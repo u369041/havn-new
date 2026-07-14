@@ -173,6 +173,17 @@ function emailButton(label: string, url: string) {
   `;
 }
 
+function emailTextLink(label: string, url: string) {
+  return `
+    <div style="margin-top:26px;text-align:center;">
+      <a href="${escapeAttr(url)}"
+         style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">
+        ${escapeHtml(label)}
+      </a>
+    </div>
+  `;
+}
+
 function emailDetailRow(label: string, value?: string | null, accent = false) {
   if (!value) return "";
 
@@ -195,6 +206,7 @@ function renderHavnEmail(args: {
   bodyHtml: string;
   ctaLabel?: string;
   ctaUrl?: string;
+  ctaStyle?: "button" | "text";
   coverImageUrl?: string | null;
   statusTone?: "success" | "warning" | "neutral";
 }) {
@@ -270,7 +282,9 @@ function renderHavnEmail(args: {
 
                     ${
                       args.ctaLabel && args.ctaUrl
-                        ? emailButton(args.ctaLabel, args.ctaUrl)
+                        ? args.ctaStyle === "text"
+                          ? emailTextLink(args.ctaLabel, args.ctaUrl)
+                          : emailButton(args.ctaLabel, args.ctaUrl)
                         : ""
                     }
                   </td>
@@ -416,6 +430,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
           `,
           ctaLabel: "View My Listings",
           ctaUrl: myListingsUrl,
+          ctaStyle: "text",
           coverImageUrl: null,
           statusTone: "success",
         });
