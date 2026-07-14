@@ -61,6 +61,32 @@ function asOptionalDate(raw: any): Date | null {
   return d;
 }
 
+function buildPropertyAddress(property: any): string {
+  return [
+    property?.address1,
+    property?.address2,
+    property?.city,
+    property?.county,
+    property?.eircode,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function coverImage(property: any): string | null {
+  if (!Array.isArray(property?.photos) || !property.photos.length) return null;
+
+  const firstPhoto = property.photos[0];
+  if (typeof firstPhoto === "string") return firstPhoto;
+
+  if (firstPhoto && typeof firstPhoto === "object") {
+    return firstPhoto.url || firstPhoto.secure_url || firstPhoto.src || null;
+  }
+
+  return null;
+}
+
 async function getUserEmailById(userId: number): Promise<string | null> {
   try {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
@@ -641,26 +667,32 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
         isFeatured: false,
         featuredUntil: null,
       },
+      include: { user: true },
     });
 
-    void (async () => {
-      try {
-        const to = await getUserEmailById(updated.userId);
-        if (!to) return;
+    try {
+      const emailResult = await sendUserListingEmail({
+        to: updated.user.email,
+        recipientName: updated.user.name,
+        event: "CLOSED",
+        listingTitle: updated.title || "Untitled listing",
+        slug: updated.slug,
+        listingId: updated.id,
+        myListingsUrl: "https://havn.ie/my-listings.html",
+        closeOutcome: outcome,
+        coverImageUrl: coverImage(updated),
+        propertyAddress: buildPropertyAddress(updated),
+        propertyMode: updated.mode,
+        listingPackage: updated.listingPackage,
+        price: updated.price,
+      } as any);
 
-        await sendUserListingEmail({
-          to,
-          event: "CLOSED",
-          listingTitle: updated.title || "Untitled listing",
-          slug: updated.slug,
-          listingId: updated.id,
-          myListingsUrl: "https://havn.ie/my-listings.html",
-          closeOutcome: outcome,
-        } as any);
-      } catch (e) {
-        console.warn("Close email failed (non-fatal):", e);
+      if (!emailResult || (emailResult as any).error) {
+        console.warn("Close email was not accepted by Resend:", emailResult);
       }
-    })();
+    } catch (e) {
+      console.warn("Close email failed (non-fatal):", e);
+    }
 
     return res.json({ ok: true, item: updated, outcome });
   } catch (err: any) {
