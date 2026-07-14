@@ -282,7 +282,7 @@ function renderHavnEmail(args: {
 
                     ${
                       args.ctaLabel && args.ctaUrl
-                        ? args.ctaStyle === "text"
+                        ? args.ctaStyle === "text" || args.ctaLabel === "View My Listings"
                           ? emailTextLink(args.ctaLabel, args.ctaUrl)
                           : emailButton(args.ctaLabel, args.ctaUrl)
                         : ""
