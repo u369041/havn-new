@@ -662,6 +662,7 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
     });
 
     let emailSent = false;
+    let emailError = "";
 
     try {
       const emailResult = await sendClosedListingEmail({
@@ -683,9 +684,15 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
       );
 
       if (!emailSent) {
+        emailError = String(
+          (emailResult as any)?.error?.message ||
+          (emailResult as any)?.message ||
+          "Resend did not return an email ID"
+        );
         console.warn("Close email was not accepted by Resend:", emailResult);
       }
     } catch (e) {
+      emailError = String((e as any)?.message || e || "Unknown email error");
       console.warn("Close email failed (non-fatal):", e);
     }
 
@@ -696,7 +703,7 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
       emailSent,
       message: emailSent
         ? "Listing closed and email sent"
-        : "Listing closed, but email failed",
+        : `Listing closed, but email failed: ${emailError || "Unknown email error"}`,
     });
   } catch (err: any) {
     console.error("POST /api/admin/properties/:id/close error", err);
