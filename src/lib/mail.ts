@@ -1414,13 +1414,14 @@ export async function sendHavnWeeklyDigestEmail(args: {
               <table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:760px;max-width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e5e7eb;">
                 
                 <tr>
-                  <td style="background:#071326;padding:22px 28px;border-top:6px solid #4f46e5;">
+                  <td style="background:${HAVN_NAVY};padding:26px 28px;border-top:5px solid ${HAVN_BLUE};">
                     <table role="presentation" width="100%">
                       <tr>
                         <td>
-                          <div style="display:inline-block;border:1px solid rgba(255,255,255,0.35);border-radius:10px;padding:12px 16px;color:#fff;font-weight:900;letter-spacing:.04em;">LOGO</div>
-                          <span style="font-size:28px;font-weight:900;color:#fff;margin-left:14px;vertical-align:middle;">havn.ie</span>
-                          <div style="font-size:13px;color:#cbd5e1;margin-top:6px;">Ireland’s curated property marketplace.</div>
+                          <div style="font-family:Manrope,Arial,Helvetica,sans-serif;font-size:20px;line-height:1;font-weight:700;letter-spacing:-0.03em;color:#ffffff;">
+                            havn<span style="color:#60A5FA;">.ie</span>
+                          </div>
+                          <div style="margin-top:6px;font-family:Manrope,Arial,Helvetica,sans-serif;color:rgba(255,255,255,.62);font-size:10px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;">Weekly Digest</div>
                         </td>
                         <td align="right" style="font-size:13px;">
                           <a href="${escapeAttr(args.matchesUrl)}" style="color:#e0e7ff;text-decoration:underline;">View in browser</a>
@@ -1526,21 +1527,23 @@ export async function sendHavnWeeklyDigestEmail(args: {
                 </tr>
 
                 <tr>
-                  <td style="background:#071326;padding:24px 28px;color:#cbd5e1;">
+                  <td style="background:${HAVN_NAVY};padding:24px 28px;color:#cbd5e1;">
                     <table role="presentation" width="100%">
                       <tr>
                         <td>
-                          <div style="font-size:22px;font-weight:900;color:#fff;">havn.ie</div>
-                          <div style="font-size:12px;margin-top:4px;">Ireland’s curated property marketplace.</div>
+                          <div style="font-family:Manrope,Arial,Helvetica,sans-serif;font-size:20px;line-height:1;font-weight:700;letter-spacing:-0.03em;color:#ffffff;">
+                            havn<span style="color:#60A5FA;">.ie</span>
+                          </div>
+                          <div style="margin-top:6px;font-family:Manrope,Arial,Helvetica,sans-serif;color:rgba(255,255,255,.62);font-size:10px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;">Find Your Haven</div>
                         </td>
                         <td align="right" style="font-size:13px;line-height:1.5;">
-                          We’re here to help.<br />
-                          hello@havn.ie
+                          Questions?<br />
+                          <a href="mailto:support@havn.ie" style="color:#ffffff;text-decoration:none;">support@havn.ie</a>
                         </td>
                       </tr>
                     </table>
                     <div style="border-top:1px solid rgba(255,255,255,0.14);margin-top:18px;padding-top:14px;font-size:11px;color:#94a3b8;">
-                      HAVN Property Group Ltd. Registered in Ireland.
+                      HAVN.ie · Ireland's Property Intelligence Platform
                       <span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Unsubscribe</a></span>
                     </div>
                   </td>
