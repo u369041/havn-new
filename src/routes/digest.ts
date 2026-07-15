@@ -224,6 +224,75 @@ function badgeForProperty(p: any, matchedIds: Set<number>) {
   return "NEW";
 }
 
+router.post("/test-weekly", async (req, res) => {
+  try {
+    if (!isAuthorised(req)) {
+      return res.status(401).json({ ok: false, error: "UNAUTHORISED" });
+    }
+
+    const to = safeStr(req.body?.to, "");
+    const name = safeStr(req.body?.name, "");
+
+    if (!to || !/^\S+@\S+\.\S+$/.test(to)) {
+      return res.status(400).json({ ok: false, message: "A valid recipient email is required" });
+    }
+
+    const publishedProperties = await prisma.property.findMany({
+      where: { listingStatus: "PUBLISHED" },
+      orderBy: { publishedAt: "desc" },
+      take: 50,
+    });
+
+    const sorted = sortDigestProperties(publishedProperties);
+    const previewProperties = sorted.slice(0, 4);
+    const featuredCount = publishedProperties.filter(isActiveFeatured).length;
+    const priceDropsCount = publishedProperties.filter(isActivePriceDrop).length;
+    const matchedIds = new Set<number>(previewProperties.map((p) => p.id));
+
+    const result = await sendHavnWeeklyDigestEmail({
+      to,
+      name: name || null,
+      newMatchesCount: previewProperties.length,
+      featuredCount,
+      priceDropsCount,
+      trendingAreasCount: 3,
+      recentlyViewedCount: previewProperties.length,
+      matchesUrl: `${APP_URL}/properties.html`,
+      manageAlertsUrl: `${APP_URL}/my-listings.html`,
+      properties: previewProperties.map((p) => ({
+        title: p.title,
+        price: p.price,
+        location: propertyLocation(p),
+        beds: p.bedrooms,
+        baths: p.bathrooms,
+        url: propertyUrl(p),
+        imageUrl: propertyImage(p),
+        badge: badgeForProperty(p, matchedIds),
+      })),
+    });
+
+    const emailSent = emailWasAccepted(result);
+
+    return res.json({
+      ok: emailSent,
+      test: true,
+      recipient: to,
+      propertiesIncluded: previewProperties.length,
+      emailSent,
+      message: emailSent
+        ? "Test weekly digest sent"
+        : `Test weekly digest failed: ${emailFailureMessage(result)}`,
+    });
+  } catch (err: any) {
+    console.error("weekly digest test failed:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "WEEKLY_TEST_FAILED",
+      message: err?.message || "Unknown error",
+    });
+  }
+});
+
 router.post("/run-weekly", async (req, res) => {
   try {
     if (!isAuthorised(req)) {
