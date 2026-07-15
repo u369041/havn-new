@@ -1,7 +1,11 @@
 ﻿import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
-import { sendUserListingEmail, sendSavedSearchMatchEmail } from "../lib/mail";
+import {
+  sendUserListingEmail,
+  sendSavedSearchMatchEmail,
+  sendClosedListingEmail,
+} from "../lib/mail";
 
 const router = Router();
 
@@ -72,19 +76,6 @@ function buildPropertyAddress(property: any): string {
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(", ");
-}
-
-function coverImage(property: any): string | null {
-  if (!Array.isArray(property?.photos) || !property.photos.length) return null;
-
-  const firstPhoto = property.photos[0];
-  if (typeof firstPhoto === "string") return firstPhoto;
-
-  if (firstPhoto && typeof firstPhoto === "object") {
-    return firstPhoto.url || firstPhoto.secure_url || firstPhoto.src || null;
-  }
-
-  return null;
 }
 
 async function getUserEmailById(userId: number): Promise<string | null> {
@@ -670,31 +661,43 @@ router.post("/:id/close", requireAuth, async (req: any, res: any) => {
       include: { user: true },
     });
 
+    let emailSent = false;
+
     try {
-      const emailResult = await sendUserListingEmail({
+      const emailResult = await sendClosedListingEmail({
         to: updated.user.email,
         recipientName: updated.user.name,
-        event: "CLOSED",
         listingTitle: updated.title || "Untitled listing",
-        slug: updated.slug,
-        listingId: updated.id,
         myListingsUrl: "https://havn.ie/my-listings.html",
         closeOutcome: outcome,
-        coverImageUrl: coverImage(updated),
         propertyAddress: buildPropertyAddress(updated),
         propertyMode: updated.mode,
         listingPackage: updated.listingPackage,
         price: updated.price,
-      } as any);
+      });
 
-      if (!emailResult || (emailResult as any).error) {
+      emailSent = Boolean(
+        emailResult &&
+          !(emailResult as any).error &&
+          ((emailResult as any).data?.id || (emailResult as any).id)
+      );
+
+      if (!emailSent) {
         console.warn("Close email was not accepted by Resend:", emailResult);
       }
     } catch (e) {
       console.warn("Close email failed (non-fatal):", e);
     }
 
-    return res.json({ ok: true, item: updated, outcome });
+    return res.json({
+      ok: true,
+      item: updated,
+      outcome,
+      emailSent,
+      message: emailSent
+        ? "Listing closed and email sent"
+        : "Listing closed, but email failed",
+    });
   } catch (err: any) {
     console.error("POST /api/admin/properties/:id/close error", err);
     return res.status(500).json({ ok: false, message: "Server error" });

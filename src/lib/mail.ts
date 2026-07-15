@@ -857,6 +857,72 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
   }
 }
 
+export type ClosedListingEmailPayload = {
+  to: string;
+  recipientName?: string | null;
+  listingTitle?: string | null;
+  closeOutcome?: string | null;
+  myListingsUrl?: string | null;
+  propertyAddress?: string | null;
+  propertyMode?: string | null;
+  listingPackage?: string | null;
+  price?: number | null;
+};
+
+export async function sendClosedListingEmail(payload: ClosedListingEmailPayload) {
+  try {
+    const title = payload.listingTitle || "your listing";
+    const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
+    const displayName = String(payload.recipientName || "").trim();
+    const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
+    const rawOutcome = String(payload.closeOutcome || "CLOSED").trim().toUpperCase();
+    const outcome =
+      rawOutcome === "SOLD"
+        ? "sold"
+        : rawOutcome === "RENTED"
+        ? "rented"
+        : rawOutcome === "CANCELLED"
+        ? "cancelled"
+        : "closed";
+
+    const html = renderHavnEmail({
+      preheader: `Your HAVN listing has been marked as ${outcome}.`,
+      heading: "Your HAVN Listing Has Been Closed",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0;">Your listing has been marked as <strong>${escapeHtml(outcome)}</strong> and is no longer live on HAVN.ie.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:26px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;">
+          <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};margin-bottom:10px;">${escapeHtml(title)}</div>
+          ${payload.propertyAddress ? `<div style="font-size:13px;line-height:1.6;color:${HAVN_MUTED};margin-bottom:10px;">${escapeHtml(payload.propertyAddress)}</div>` : ""}
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${emailDetailRow("Type", humanMode(payload.propertyMode))}
+            ${emailDetailRow("Package", humanPackage(payload.listingPackage), true)}
+            ${emailDetailRow("Price", formatPropertyPrice(payload.price))}
+            ${emailDetailRow("Outcome", outcome.charAt(0).toUpperCase() + outcome.slice(1), true)}
+          </table>
+        </div>
+      `,
+      ctaLabel: "View My Listings",
+      ctaUrl: myListingsUrl,
+      ctaStyle: "text",
+      coverImageUrl: null,
+      statusTone: "neutral",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Listing Has Been Closed",
+      html,
+    });
+  } catch (err) {
+    console.error("sendClosedListingEmail failed:", err);
+    return null;
+  }
+}
+
 /**
  * ----------------------------
  * SAVED SEARCH MATCH EMAIL
