@@ -1,7 +1,8 @@
-﻿// src/routes/admin.ts
+// src/routes/admin.ts
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
+import { sendClosedListingEmail } from "../lib/mail";
 
 const router = Router();
 
@@ -296,21 +297,87 @@ router.post("/properties/:id/close", requireAuth, requireAdmin, async (req: any,
       return res.status(400).json({ ok: false, message: "Invalid property id" });
     }
 
+    const payload = normalizePayload(req.body);
+    const rawOutcome = String(payload.outcome || "SOLD").trim().toUpperCase();
+    const outcome = ["SOLD", "RENTED", "CANCELLED", "OTHER"].includes(rawOutcome)
+      ? rawOutcome
+      : "OTHER";
+
     const updated = await prisma.property.update({
       where: { id },
       data: {
         listingStatus: "CLOSED",
         archivedAt: new Date(),
+        marketStatus: outcome,
+        isFeatured: false,
+        featuredUntil: null,
       },
+      include: { user: true },
     });
 
-    return res.json({ ok: true, item: updated });
+    let emailSent = false;
+    let emailError = "";
+
+    try {
+      if (!updated.user?.email) {
+        emailError = "The listing owner has no email address";
+      } else {
+        const propertyAddress = [
+          updated.address1,
+          updated.address2,
+          updated.city,
+          updated.county,
+          updated.eircode,
+        ]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .join(", ");
+
+        const emailResult = await sendClosedListingEmail({
+          to: updated.user.email,
+          recipientName: updated.user.name,
+          listingTitle: updated.title || "Untitled listing",
+          closeOutcome: outcome,
+          myListingsUrl: "https://havn.ie/my-listings.html",
+          propertyAddress,
+          propertyMode: updated.mode,
+          listingPackage: updated.listingPackage,
+          price: updated.price,
+        });
+
+        emailSent = Boolean(
+          emailResult &&
+            !(emailResult as any).error &&
+            ((emailResult as any).data?.id || (emailResult as any).id)
+        );
+
+        if (!emailSent) {
+          emailError = String(
+            (emailResult as any)?.error?.message ||
+              (emailResult as any)?.message ||
+              "Resend did not return an email ID"
+          );
+        }
+      }
+    } catch (emailErr: any) {
+      emailError = String(emailErr?.message || emailErr || "Unknown email error");
+      console.warn("Closed listing email failed:", emailErr);
+    }
+
+    return res.json({
+      ok: true,
+      item: updated,
+      outcome,
+      emailSent,
+      message: emailSent
+        ? "Listing closed and email sent"
+        : `Listing closed, but email failed: ${emailError || "Unknown email error"}`,
+    });
   } catch (err: any) {
     console.error("POST /api/admin/properties/:id/close error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
-
 router.post("/properties/:id/reopen", requireAuth, requireAdmin, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
