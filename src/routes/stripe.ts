@@ -788,6 +788,8 @@ router.post("/webhook", async (req: any, res) => {
           amountPaidCents,
           paidAt: now,
           listingExpiresAt,
+          expiryWarningSentAt: null,
+          expiredEmailSentAt: null,
 
           isFeatured,
           featuredUntil: isFeatured

@@ -24,25 +24,25 @@ model User {
   lastSearchAt        DateTime?
   foundingOfferUsedAt DateTime?
 
-  approvals           Property[] @relation("PropertyApprovedBy")
-  rejections          Property[] @relation("PropertyRejectedBy")
-  properties          Property[]
-  savedSearches       SavedSearch[]
-  savedProperties     SavedProperty[]
+  approvals       Property[]      @relation("PropertyApprovedBy")
+  rejections      Property[]      @relation("PropertyRejectedBy")
+  properties      Property[]
+  savedSearches   SavedSearch[]
+  savedProperties SavedProperty[]
 
   passwordResetTokens PasswordResetToken[]
 }
 
 model SavedSearch {
-  id             Int      @id @default(autoincrement())
+  id             Int       @id @default(autoincrement())
   userId         Int
   name           String?
   filters        Json
-  alertsEnabled  Boolean  @default(true)
-  alertFrequency String   @default("weekly")
+  alertsEnabled  Boolean   @default(true)
+  alertFrequency String    @default("weekly")
   lastDigestAt   DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -160,13 +160,15 @@ model Property {
   featuredUntil DateTime?
 
   listingPackage ListingPackage?
-  paymentStatus  PaymentStatus @default(UNPAID)
+  paymentStatus  PaymentStatus   @default(UNPAID)
 
-  stripeCheckoutSessionId String? @unique
+  stripeCheckoutSessionId String?   @unique
   stripePaymentIntentId   String?
-  amountPaidCents          Int?
+  amountPaidCents         Int?
   paidAt                  DateTime?
   listingExpiresAt        DateTime?
+  expiryWarningSentAt     DateTime?
+  expiredEmailSentAt      DateTime?
 
   views Int @default(0)
 
@@ -188,6 +190,8 @@ model Property {
   @@index([listingPackage])
   @@index([paymentStatus])
   @@index([listingExpiresAt])
+  @@index([expiryWarningSentAt])
+  @@index([expiredEmailSentAt])
 }
 
 model Enquiry {

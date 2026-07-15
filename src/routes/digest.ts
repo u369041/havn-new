@@ -1,6 +1,10 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { sendHavnWeeklyDigestEmail } from "../lib/mail";
+import {
+  sendHavnWeeklyDigestEmail,
+  sendListingExpiredEmail,
+  sendListingExpiresSoonEmail,
+} from "../lib/mail";
 
 const router = Router();
 
@@ -22,6 +26,32 @@ function safeStr(v: any, fallback = "") {
   if (v === null || v === undefined) return fallback;
   const s = String(v).trim();
   return s || fallback;
+}
+
+function emailWasAccepted(result: any) {
+  return Boolean(result && !result.error && (result.data?.id || result.id));
+}
+
+function emailFailureMessage(result: any) {
+  return safeStr(
+    result?.error?.message || result?.message,
+    "Resend did not return an email ID"
+  );
+}
+
+function expiryEmailPayload(property: any) {
+  return {
+    to: property.user.email,
+    recipientName: property.user.name || null,
+    listingTitle: property.title || "Untitled listing",
+    listingId: property.id,
+    expiresAt: property.listingExpiresAt,
+    myListingsUrl: `${APP_URL}/my-listings.html`,
+    propertyAddress: propertyLocation(property),
+    propertyMode: property.mode,
+    listingPackage: property.listingPackage,
+    price: property.price,
+  };
 }
 
 function isActiveFeatured(property: any) {
@@ -381,6 +411,187 @@ router.post("/run-weekly", async (req, res) => {
     res.status(500).json({
       ok: false,
       error: "DIGEST_FAILED",
+      message: err?.message || "Unknown error",
+    });
+  }
+});
+
+router.post("/test-expiry", async (req, res) => {
+  try {
+    if (!isAuthorised(req)) {
+      return res.status(401).json({ ok: false, error: "UNAUTHORISED" });
+    }
+
+    const propertyId = Number(req.body?.propertyId);
+    const type = safeStr(req.body?.type, "warning").toLowerCase();
+
+    if (!Number.isFinite(propertyId) || propertyId <= 0) {
+      return res.status(400).json({ ok: false, message: "A valid propertyId is required" });
+    }
+
+    if (type !== "warning" && type !== "expired") {
+      return res.status(400).json({ ok: false, message: "type must be warning or expired" });
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      include: { user: true },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, message: "Property not found" });
+    }
+
+    if (!property.user?.email) {
+      return res.status(400).json({ ok: false, message: "The listing owner has no email address" });
+    }
+
+    if (!property.listingExpiresAt) {
+      return res.status(400).json({ ok: false, message: "The listing has no expiry date" });
+    }
+
+    const result = type === "expired"
+      ? await sendListingExpiredEmail(expiryEmailPayload(property))
+      : await sendListingExpiresSoonEmail(expiryEmailPayload(property));
+
+    const emailSent = emailWasAccepted(result);
+
+    return res.json({
+      ok: emailSent,
+      test: true,
+      type,
+      propertyId,
+      emailSent,
+      message: emailSent
+        ? `Test ${type} email sent`
+        : `Test ${type} email failed: ${emailFailureMessage(result)}`,
+    });
+  } catch (err: any) {
+    console.error("expiry email test failed:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "EXPIRY_TEST_FAILED",
+      message: err?.message || "Unknown error",
+    });
+  }
+});
+
+router.post("/run-expiry", async (req, res) => {
+  try {
+    if (!isAuthorised(req)) {
+      return res.status(401).json({ ok: false, error: "UNAUTHORISED" });
+    }
+
+    const now = new Date();
+    const warningCutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const warningListings = await prisma.property.findMany({
+      where: {
+        listingStatus: "PUBLISHED",
+        listingExpiresAt: { gt: now, lte: warningCutoff },
+        expiryWarningSentAt: null,
+      },
+      include: { user: true },
+      orderBy: { listingExpiresAt: "asc" },
+      take: 300,
+    });
+
+    const expiredListings = await prisma.property.findMany({
+      where: {
+        listingExpiresAt: { lte: now },
+        expiredEmailSentAt: null,
+        OR: [
+          { listingStatus: "PUBLISHED" },
+          { listingStatus: "CLOSED", marketStatus: "EXPIRED" },
+        ],
+      },
+      include: { user: true },
+      orderBy: { listingExpiresAt: "asc" },
+      take: 300,
+    });
+
+    let warningsSent = 0;
+    let listingsExpired = 0;
+    let expiredEmailsSent = 0;
+    const failures: Array<{ propertyId: number; type: string; message: string }> = [];
+
+    for (const property of warningListings) {
+      if (!property.user?.email || !property.listingExpiresAt) continue;
+
+      const result = await sendListingExpiresSoonEmail(expiryEmailPayload(property));
+
+      if (emailWasAccepted(result)) {
+        await prisma.property.update({
+          where: { id: property.id },
+          data: { expiryWarningSentAt: now },
+        });
+        warningsSent += 1;
+      } else {
+        failures.push({
+          propertyId: property.id,
+          type: "warning",
+          message: emailFailureMessage(result),
+        });
+      }
+    }
+
+    for (const property of expiredListings) {
+      if (!property.listingExpiresAt) continue;
+
+      if (property.listingStatus === "PUBLISHED") {
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            listingStatus: "CLOSED",
+            archivedAt: now,
+            marketStatus: "EXPIRED",
+            isFeatured: false,
+            featuredUntil: null,
+          },
+        });
+        listingsExpired += 1;
+      }
+
+      if (!property.user?.email) {
+        failures.push({
+          propertyId: property.id,
+          type: "expired",
+          message: "The listing owner has no email address",
+        });
+        continue;
+      }
+
+      const result = await sendListingExpiredEmail(expiryEmailPayload(property));
+
+      if (emailWasAccepted(result)) {
+        await prisma.property.update({
+          where: { id: property.id },
+          data: { expiredEmailSentAt: now },
+        });
+        expiredEmailsSent += 1;
+      } else {
+        failures.push({
+          propertyId: property.id,
+          type: "expired",
+          message: emailFailureMessage(result),
+        });
+      }
+    }
+
+    return res.json({
+      ok: failures.length === 0,
+      warningCandidates: warningListings.length,
+      warningsSent,
+      expiredCandidates: expiredListings.length,
+      listingsExpired,
+      expiredEmailsSent,
+      failures,
+    });
+  } catch (err: any) {
+    console.error("expiry processing failed:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "EXPIRY_RUN_FAILED",
       message: err?.message || "Unknown error",
     });
   }

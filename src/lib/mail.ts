@@ -923,6 +923,116 @@ export async function sendClosedListingEmail(payload: ClosedListingEmailPayload)
   }
 }
 
+export type ListingExpiryEmailPayload = {
+  to: string;
+  recipientName?: string | null;
+  listingTitle?: string | null;
+  listingId?: string | number | null;
+  expiresAt: Date | string;
+  myListingsUrl?: string | null;
+  propertyAddress?: string | null;
+  propertyMode?: string | null;
+  listingPackage?: string | null;
+  price?: number | null;
+};
+
+function formatExpiryDate(value: Date | string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "soon";
+
+  return new Intl.DateTimeFormat("en-IE", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Dublin",
+  }).format(date);
+}
+
+function listingExpiryDetails(payload: ListingExpiryEmailPayload, statusLabel: string) {
+  const title = payload.listingTitle || "Your HAVN listing";
+
+  return `
+    <div style="margin-top:26px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;">
+      <div style="font-size:16px;font-weight:900;color:${HAVN_NAVY};margin-bottom:10px;">${escapeHtml(title)}</div>
+      ${payload.propertyAddress ? `<div style="font-size:13px;line-height:1.6;color:${HAVN_MUTED};margin-bottom:10px;">${escapeHtml(payload.propertyAddress)}</div>` : ""}
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+        ${emailDetailRow("Type", humanMode(payload.propertyMode))}
+        ${emailDetailRow("Package", humanPackage(payload.listingPackage), true)}
+        ${emailDetailRow("Price", formatPropertyPrice(payload.price))}
+        ${emailDetailRow("Expiry Date", formatExpiryDate(payload.expiresAt))}
+        ${emailDetailRow("Status", statusLabel, true)}
+      </table>
+    </div>
+  `;
+}
+
+export async function sendListingExpiresSoonEmail(payload: ListingExpiryEmailPayload) {
+  try {
+    const displayName = String(payload.recipientName || "").trim();
+    const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
+    const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
+    const expiryDate = formatExpiryDate(payload.expiresAt);
+
+    const html = renderHavnEmail({
+      preheader: `Your HAVN listing expires on ${expiryDate}.`,
+      heading: "Your HAVN Listing Expires in 7 Days",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0;">Your listing is due to expire on <strong>${escapeHtml(expiryDate)}</strong>. After that date, it will no longer appear in HAVN.ie property searches.</p>
+      `,
+      bodyHtml: listingExpiryDetails(payload, "Expires Soon"),
+      ctaLabel: "Manage My Listing",
+      ctaUrl: myListingsUrl,
+      ctaStyle: "text",
+      coverImageUrl: null,
+      statusTone: "warning",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Listing Expires in 7 Days",
+      html,
+    });
+  } catch (err) {
+    console.error("sendListingExpiresSoonEmail failed:", err);
+    return null;
+  }
+}
+
+export async function sendListingExpiredEmail(payload: ListingExpiryEmailPayload) {
+  try {
+    const displayName = String(payload.recipientName || "").trim();
+    const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
+    const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
+
+    const html = renderHavnEmail({
+      preheader: "Your HAVN listing has expired and is no longer live.",
+      heading: "Your HAVN Listing Has Expired",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0;">Your listing has reached the end of its listing period and is no longer live on HAVN.ie.</p>
+      `,
+      bodyHtml: listingExpiryDetails(payload, "Expired"),
+      ctaLabel: "View My Listings",
+      ctaUrl: myListingsUrl,
+      ctaStyle: "text",
+      coverImageUrl: null,
+      statusTone: "neutral",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Listing Has Expired",
+      html,
+    });
+  } catch (err) {
+    console.error("sendListingExpiredEmail failed:", err);
+    return null;
+  }
+}
+
 /**
  * ----------------------------
  * SAVED SEARCH MATCH EMAIL
