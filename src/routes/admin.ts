@@ -131,109 +131,6 @@ router.get("/statuses", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
-    }
-
-    const payload = normalizePayload(req.body);
-    const nextStatus = normalizeListingStatus(payload.listingStatus);
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ ok: false, message: "Property not found" });
-    }
-
-    const data: any = {};
-
-    if (nextStatus !== "OTHER") {
-      data.listingStatus = nextStatus;
-    }
-
-    if (payload.adminNote || payload.reason) {
-      data.rejectedReason = String(payload.adminNote || payload.reason).trim();
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data,
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("PATCH /api/admin/properties/:id error:", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: any, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
-    }
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ ok: false, message: "Property not found" });
-    }
-
-    const now = new Date();
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        listingStatus: "PUBLISHED",
-        publishedAt: existing.publishedAt || now,
-        approvedAt: now,
-        approvedById: req.user.userId,
-        rejectedAt: null,
-        rejectedById: null,
-        rejectedReason: null,
-      },
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("POST /api/admin/properties/:id/approve error:", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
-router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
-    }
-
-    const payload = normalizePayload(req.body);
-    const reason = String(payload.reason || payload.adminNote || "").trim() || null;
-
-    const existing = await prisma.property.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ ok: false, message: "Property not found" });
-    }
-
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
-        listingStatus: "REJECTED",
-        rejectedAt: new Date(),
-        rejectedById: req.user.userId,
-        rejectedReason: reason,
-      },
-    });
-
-    return res.json({ ok: true, item: updated });
-  } catch (err: any) {
-    console.error("POST /api/admin/properties/:id/reject error:", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
-
 router.post("/properties/:id/feature", requireAuth, requireAdmin, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
@@ -400,5 +297,48 @@ router.post("/properties/:id/reopen", requireAuth, requireAdmin, async (req: any
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
+
+
+router.delete("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
+    }
+
+    const existing = await prisma.property.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        ok: false,
+        message: "Property not found",
+      });
+    }
+
+    await prisma.property.delete({
+      where: { id },
+    });
+
+    return res.json({
+      ok: true,
+      deletedId: id,
+    });
+  } catch (err: any) {
+    console.error("DELETE /api/admin/properties/:id error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+      error: err?.message || String(err),
+    });
+  }
+});
+
 
 export default router;
