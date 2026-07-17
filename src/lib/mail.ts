@@ -1311,6 +1311,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
   recentlyViewedCount?: number;
   matchesUrl: string;
   manageAlertsUrl?: string;
+  unsubscribeUrl?: string;
   properties: HavnWeeklyDigestProperty[];
 }) {
   try {
@@ -1544,7 +1545,11 @@ export async function sendHavnWeeklyDigestEmail(args: {
                     </table>
                     <div style="border-top:1px solid rgba(255,255,255,0.14);margin-top:18px;padding-top:14px;font-size:11px;color:#94a3b8;">
                       HAVN.ie · Ireland's Property Intelligence Platform
-                      <span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Unsubscribe</a></span>
+${
+  args.unsubscribeUrl
+    ? `<span style="float:right;"><a href="${escapeAttr(args.unsubscribeUrl)}" style="color:#cbd5e1;">Unsubscribe</a></span>`
+    : `<span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Manage alerts</a></span>`
+}
                     </div>
                   </td>
                 </tr>
@@ -1561,6 +1566,12 @@ export async function sendHavnWeeklyDigestEmail(args: {
       to: args.to,
       subject,
       html,
+      headers: args.unsubscribeUrl
+        ? {
+            "List-Unsubscribe": `<${args.unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          }
+        : undefined,
     });
   } catch (err) {
     console.error("sendHavnWeeklyDigestEmail failed:", err);

@@ -1,4 +1,5 @@
-import { Router } from "express";
+import express, { Router } from "express";
+import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "../lib/prisma";
 import {
   sendHavnWeeklyDigestEmail,
@@ -7,9 +8,16 @@ import {
 } from "../lib/mail";
 
 const router = Router();
+router.use(express.urlencoded({ extended: false }));
 
 const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
+const API_URL = (process.env.API_URL || "https://api.havn.ie").replace(/\/+$/, "");
 const DIGEST_CRON_SECRET = process.env.DIGEST_CRON_SECRET || "";
+const EMAIL_UNSUBSCRIBE_SECRET = String(
+  process.env.EMAIL_UNSUBSCRIBE_SECRET || ""
+).trim();
+
+const UNSUBSCRIBE_TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 const PRICE_DROP_ACTIVE_DAYS = 14;
 const PRICE_DROP_ACTIVE_MS = PRICE_DROP_ACTIVE_DAYS * 24 * 60 * 60 * 1000;
@@ -20,6 +28,78 @@ function isAuthorised(req: any) {
   const headerSecret = String(req.headers["x-digest-secret"] || "").trim();
 
   return !!DIGEST_CRON_SECRET && (bearer === DIGEST_CRON_SECRET || headerSecret === DIGEST_CRON_SECRET);
+}
+
+type UnsubscribeTokenPayload = {
+  userId: number;
+  email: string;
+  expiresAt: number;
+};
+
+function signUnsubscribeValue(value: string): string {
+  if (!EMAIL_UNSUBSCRIBE_SECRET) {
+    throw new Error("EMAIL_UNSUBSCRIBE_SECRET is not configured");
+  }
+
+  return createHmac("sha256", EMAIL_UNSUBSCRIBE_SECRET)
+    .update(value)
+    .digest("base64url");
+}
+
+function createUnsubscribeToken(userId: number, email: string): string {
+  const payload: UnsubscribeTokenPayload = {
+    userId,
+    email: String(email || "").trim().toLowerCase(),
+    expiresAt: Date.now() + UNSUBSCRIBE_TOKEN_LIFETIME_MS,
+  };
+
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = signUnsubscribeValue(encoded);
+
+  return `${encoded}.${signature}`;
+}
+
+function readUnsubscribeToken(token: string): UnsubscribeTokenPayload | null {
+  try {
+    const [encoded, suppliedSignature, extra] = String(token || "").split(".");
+
+    if (!encoded || !suppliedSignature || extra) return null;
+
+    const expectedSignature = signUnsubscribeValue(encoded);
+    const suppliedBuffer = Buffer.from(suppliedSignature, "utf8");
+    const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+
+    if (
+      suppliedBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(suppliedBuffer, expectedBuffer)
+    ) {
+      return null;
+    }
+
+    const payload = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8")
+    ) as UnsubscribeTokenPayload;
+
+    if (
+      !Number.isInteger(payload.userId) ||
+      payload.userId <= 0 ||
+      !payload.email ||
+      !Number.isFinite(payload.expiresAt) ||
+      payload.expiresAt <= Date.now()
+    ) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function unsubscribeUrlFor(userId: number, email: string): string {
+  const token = createUnsubscribeToken(userId, email);
+
+  return `${API_URL}/api/digest/unsubscribe?token=${encodeURIComponent(token)}`;
 }
 
 function safeStr(v: any, fallback = "") {
@@ -224,6 +304,141 @@ function badgeForProperty(p: any, matchedIds: Set<number>) {
   return "NEW";
 }
 
+function renderUnsubscribePage(args: {
+  title: string;
+  message: string;
+  token?: string;
+}) {
+  const actionUrl = args.token
+    ? `${API_URL}/api/digest/unsubscribe?token=${encodeURIComponent(args.token)}`
+    : "";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>${args.title}</title>
+  </head>
+  <body>
+    <main>
+      <h1>havn.ie</h1>
+      <h2>${args.title}</h2>
+      <p>${args.message}</p>
+      ${
+        args.token
+          ? `
+            <form method="post" action="${actionUrl}">
+              <input type="hidden" name="List-Unsubscribe" value="One-Click" />
+              <button type="submit">Unsubscribe from property emails</button>
+            </form>
+          `
+          : ""
+      }
+      <p><a href="${APP_URL}">Return to HAVN.ie</a></p>
+    </main>
+  </body>
+</html>`;
+}
+
+async function validUnsubscribeUser(token: string) {
+  const payload = readUnsubscribeToken(token);
+  if (!payload) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+    select: { id: true, email: true },
+  });
+
+  if (
+    !user ||
+    String(user.email || "").trim().toLowerCase() !== payload.email
+  ) {
+    return null;
+  }
+
+  return user;
+}
+
+router.get("/unsubscribe", async (req, res) => {
+  try {
+    const token = safeStr(req.query.token, "");
+    const user = token ? await validUnsubscribeUser(token) : null;
+
+    if (!user) {
+      return res.status(400).type("html").send(
+        renderUnsubscribePage({
+          title: "Invalid or expired link",
+          message:
+            "This unsubscribe link is invalid or has expired. You can manage your saved searches from your HAVN account.",
+        })
+      );
+    }
+
+    return res.status(200).type("html").send(
+      renderUnsubscribePage({
+        title: "Unsubscribe from property emails",
+        message:
+          "Confirm below to stop saved-search alerts and weekly HAVN property emails. Essential account and listing emails will continue.",
+        token,
+      })
+    );
+  } catch (err) {
+    console.error("GET /api/digest/unsubscribe failed:", err);
+
+    return res.status(500).type("html").send(
+      renderUnsubscribePage({
+        title: "Something went wrong",
+        message: "We could not process this request. Please try again later.",
+      })
+    );
+  }
+});
+
+router.post("/unsubscribe", async (req, res) => {
+  try {
+    const token = safeStr(req.query.token, "");
+    const user = token ? await validUnsubscribeUser(token) : null;
+
+    if (!user) {
+      return res.status(400).type("html").send(
+        renderUnsubscribePage({
+          title: "Invalid or expired link",
+          message:
+            "This unsubscribe link is invalid or has expired. You can manage your saved searches from your HAVN account.",
+        })
+      );
+    }
+
+    await prisma.savedSearch.updateMany({
+      where: {
+        userId: user.id,
+        alertsEnabled: true,
+      },
+      data: {
+        alertsEnabled: false,
+      },
+    });
+
+    return res.status(200).type("html").send(
+      renderUnsubscribePage({
+        title: "You have been unsubscribed",
+        message:
+          "Saved-search alerts and weekly HAVN property emails have been switched off. Essential account and listing emails will continue.",
+      })
+    );
+  } catch (err) {
+    console.error("POST /api/digest/unsubscribe failed:", err);
+
+    return res.status(500).type("html").send(
+      renderUnsubscribePage({
+        title: "Something went wrong",
+        message: "We could not process this request. Please try again later.",
+      })
+    );
+  }
+});
+
 router.post("/test-weekly", async (req, res) => {
   try {
     if (!isAuthorised(req)) {
@@ -236,6 +451,15 @@ router.post("/test-weekly", async (req, res) => {
     if (!to || !/^\S+@\S+\.\S+$/.test(to)) {
       return res.status(400).json({ ok: false, message: "A valid recipient email is required" });
     }
+
+    const testUser = await prisma.user.findUnique({
+      where: { email: to },
+      select: { id: true, email: true },
+    });
+
+    const unsubscribeUrl = testUser
+      ? unsubscribeUrlFor(testUser.id, testUser.email)
+      : undefined;
 
     const publishedProperties = await prisma.property.findMany({
       where: { listingStatus: "PUBLISHED" },
@@ -259,6 +483,7 @@ router.post("/test-weekly", async (req, res) => {
       recentlyViewedCount: previewProperties.length,
       matchesUrl: `${APP_URL}/properties.html`,
       manageAlertsUrl: `${APP_URL}/my-listings.html`,
+      unsubscribeUrl,
       properties: previewProperties.map((p) => ({
         title: p.title,
         price: p.price,
@@ -433,6 +658,7 @@ router.post("/run-weekly", async (req, res) => {
         recentlyViewedCount: newestProperties.length,
         matchesUrl,
         manageAlertsUrl: `${APP_URL}/my-listings.html`,
+        unsubscribeUrl: unsubscribeUrlFor(user.id, user.email),
         properties: digestProperties.slice(0, 4).map((p) => ({
           title: p.title,
           price: p.price,
@@ -445,7 +671,7 @@ router.post("/run-weekly", async (req, res) => {
         })),
       });
 
-      if (sendResult) {
+      if (emailWasAccepted(sendResult)) {
         emailsSent += 1;
 
         await prisma.savedSearch.updateMany({
