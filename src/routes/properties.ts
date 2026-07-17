@@ -3176,28 +3176,6 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
       },
     });
 
-    void (async () => {
-      try {
-        const to =
-          user?.email ||
-          (user?.userId ? await getUserEmailById(user.userId) : null) ||
-          (existing?.userId ? await getUserEmailById(existing.userId) : null);
-
-        if (!to) return;
-
-        await sendUserListingEmail({
-          to,
-          event: "DRAFT_SAVED",
-          listingTitle: updated.title || "Untitled listing",
-          slug: updated.slug,
-          listingId: updated.id,
-          myListingsUrl: "https://havn.ie/my-listings.html",
-        });
-      } catch (e) {
-        console.warn("Draft saved email failed (non-fatal):", e);
-      }
-    })();
-
     return res.json({ ok: true, item: updated });
   } catch (err: any) {
     console.error("PATCH /properties/:id error", err);
