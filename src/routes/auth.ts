@@ -467,6 +467,92 @@ router.post("/reset-password", async (req, res) => {
 /**
  * VERIFY EMAIL
  */
+/**
+ * RESEND EMAIL VERIFICATION
+ */
+router.post("/request-email-verify", requireAuth, async (req: any, res) => {
+  try {
+    const userId = Number(req.user?.userId);
+
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({
+        ok: false,
+        message: "Invalid authentication session",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        emailVerified: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        ok: false,
+        message: "Account not found",
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.json({
+        ok: true,
+        alreadyVerified: true,
+        message: "Your email address is already verified",
+      });
+    }
+
+    const verifyToken = makeToken(24);
+    const verifyTokenExp = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerifyToken: verifyToken,
+        emailVerifyTokenExp: verifyTokenExp,
+      },
+    });
+
+    const verifyUrl =
+      `${APP_URL}/verify-email.html?token=${encodeURIComponent(verifyToken)}`;
+
+    const emailResult = await sendEmailVerificationEmail({
+      to: user.email,
+      name: user.name || null,
+      verifyUrl,
+    });
+
+    if (!emailResult || (emailResult as any).error) {
+      console.error(
+        "Resend verification email was not accepted:",
+        emailResult
+      );
+
+      return res.status(502).json({
+        ok: false,
+        message: "We could not send the verification email. Please try again.",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: "A new verification email has been sent",
+    });
+  } catch (err: any) {
+    console.error("POST /api/auth/request-email-verify error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      message: "Could not send a new verification email",
+    });
+  }
+});
+
+
 router.post("/verify-email", async (req, res) => {
   try {
     const token = String(req.body?.token || "").trim();
