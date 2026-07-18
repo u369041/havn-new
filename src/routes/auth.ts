@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import requireAuth from "../middleware/requireAuth";
@@ -13,6 +13,15 @@ import crypto from "crypto";
 const router = Router();
 
 const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
+const MIN_PASSWORD_LENGTH = 10;
+const MAX_PASSWORD_LENGTH = 128;
+
+function passwordIsValid(password: string) {
+  return (
+    password.length >= MIN_PASSWORD_LENGTH &&
+    password.length <= MAX_PASSWORD_LENGTH
+  );
+}
 
 function sha256(input: string) {
   return crypto.createHash("sha256").update(input).digest("hex");
@@ -34,6 +43,13 @@ router.post("/register", async (req, res) => {
 
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ ok: false, message: "All fields required" });
+    }
+
+    if (!passwordIsValid(password)) {
+      return res.status(400).json({
+        ok: false,
+        message: `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters`,
+      });
     }
 
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -124,15 +140,28 @@ router.post("/login", async (req, res) => {
 router.get("/me", requireAuth, async (req: any, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      createdAt: true,
+      emailVerified: true,
+      lastLoginAt: true,
+      loginCount: true,
+      lastSearch: true,
+      lastSearchAt: true,
+      foundingOfferUsedAt: true,
+    },
   });
+
+  if (!user) {
+    return res.status(404).json({ ok: false, message: "User not found" });
+  }
 
   res.json({
     ok: true,
-    user: {
-      ...user,
-      lastSearch: user?.lastSearch,
-      lastSearchAt: user?.lastSearchAt,
-    },
+    user,
   });
 });
 
@@ -342,7 +371,7 @@ router.delete("/saved-properties/:propertyId", requireAuth, async (req: any, res
  */
 router.post("/forgot-password", async (req, res) => {
   try {
-    const email = String(req.body.email || "").toLowerCase();
+    const email = String(req.body.email || "").trim().toLowerCase();
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json({ ok: true });
@@ -373,7 +402,15 @@ router.post("/forgot-password", async (req, res) => {
  */
 router.post("/reset-password", async (req, res) => {
   try {
-    const { token, email, newPassword } = req.body;
+    const token = String(req.body?.token || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!token || !passwordIsValid(newPassword)) {
+      return res.status(400).json({
+        ok: false,
+        message: `Invalid reset request or password. Passwords must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters`,
+      });
+    }
 
     const hash = sha256(token);
 
@@ -381,21 +418,48 @@ router.post("/reset-password", async (req, res) => {
       where: { tokenHash: hash },
     });
 
-    if (!rec) return res.status(400).json({ ok: false });
+    if (!rec || rec.usedAt || rec.expiresAt.getTime() <= Date.now()) {
+      return res.status(400).json({
+        ok: false,
+        message: "This password reset link is invalid or has expired",
+      });
+    }
 
     const hashed = await bcrypt.hash(newPassword, 10);
 
-    await prisma.user.update({
-      where: { id: rec.userId },
-      data: { password: hashed },
-    });
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.passwordResetToken.updateMany({
+        where: {
+          id: rec.id,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { usedAt: new Date() },
+      });
 
-    await prisma.passwordResetToken.deleteMany({
-      where: { userId: rec.userId },
+      if (claimed.count !== 1) {
+        throw new Error("RESET_TOKEN_ALREADY_USED_OR_EXPIRED");
+      }
+
+      await tx.user.update({
+        where: { id: rec.userId },
+        data: { password: hashed },
+      });
+
+      await tx.passwordResetToken.deleteMany({
+        where: { userId: rec.userId },
+      });
     });
 
     res.json({ ok: true });
-  } catch {
+  } catch (err: any) {
+    if (err?.message === "RESET_TOKEN_ALREADY_USED_OR_EXPIRED") {
+      return res.status(400).json({
+        ok: false,
+        message: "This password reset link is invalid or has expired",
+      });
+    }
+
     res.status(500).json({ ok: false });
   }
 });
@@ -405,22 +469,31 @@ router.post("/reset-password", async (req, res) => {
  */
 router.post("/verify-email", async (req, res) => {
   try {
-    const { token } = req.body;
+    const token = String(req.body?.token || "").trim();
 
-    const user = await prisma.user.findFirst({
-      where: { emailVerifyToken: token },
-    });
+    if (!token) {
+      return res.status(400).json({ ok: false, message: "Invalid verification link" });
+    }
 
-    if (!user) return res.status(400).json({ ok: false });
-
-    await prisma.user.update({
-      where: { id: user.id },
+    const verified = await prisma.user.updateMany({
+      where: {
+        emailVerifyToken: token,
+        emailVerifyTokenExp: { gt: new Date() },
+        emailVerified: false,
+      },
       data: {
         emailVerified: true,
         emailVerifyToken: null,
         emailVerifyTokenExp: null,
       },
     });
+
+    if (verified.count !== 1) {
+      return res.status(400).json({
+        ok: false,
+        message: "This verification link is invalid or has expired",
+      });
+    }
 
     res.json({ ok: true });
   } catch {
