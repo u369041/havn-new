@@ -19,6 +19,7 @@ const stripe = new Stripe(stripeSecretKey);
 
 type PropertyMode = "BUY" | "RENT" | "SHARE";
 type ListingPackageName = "STANDARD" | "FEATURED";
+type CheckoutFlow = "LISTING_PACKAGE" | "FEATURE_UPGRADE";
 
 const ALLOWED_PACKAGES = new Set<ListingPackageName>([
   "STANDARD",
@@ -48,6 +49,12 @@ const PRICE_ENV_MAP: Record<
     STANDARD: "STRIPE_PRICE_SHARE_STANDARD",
     FEATURED: "STRIPE_PRICE_SHARE_FEATURED",
   },
+};
+
+const UPGRADE_PRICE_ENV_MAP: Record<PropertyMode, string> = {
+  BUY: "STRIPE_PRICE_BUY_UPGRADE",
+  RENT: "STRIPE_PRICE_RENT_UPGRADE",
+  SHARE: "STRIPE_PRICE_SHARE_UPGRADE",
 };
 
 const LISTING_DURATION_DAYS: Record<PropertyMode, number> = {
@@ -82,10 +89,25 @@ function normalizePackage(value: unknown): ListingPackageName | null {
 
 function getConfiguredPriceId(
   mode: PropertyMode,
-  selectedPackage: ListingPackageName
+  selectedPackage: ListingPackageName,
+  flow: CheckoutFlow = "LISTING_PACKAGE"
 ): string {
-  const environmentKey = PRICE_ENV_MAP[mode][selectedPackage];
+  const environmentKey =
+    flow === "FEATURE_UPGRADE"
+      ? UPGRADE_PRICE_ENV_MAP[mode]
+      : PRICE_ENV_MAP[mode][selectedPackage];
+
   return String(process.env[environmentKey] || "").trim();
+}
+
+function getConfiguredPriceEnvironmentKey(
+  mode: PropertyMode,
+  selectedPackage: ListingPackageName,
+  flow: CheckoutFlow
+): string {
+  return flow === "FEATURE_UPGRADE"
+    ? UPGRADE_PRICE_ENV_MAP[mode]
+    : PRICE_ENV_MAP[mode][selectedPackage];
 }
 
 function addDays(date: Date, days: number): Date {
@@ -293,14 +315,34 @@ router.post(
         });
       }
 
+      const flow: CheckoutFlow =
+        listingStatus === "PUBLISHED"
+          ? "FEATURE_UPGRADE"
+          : "LISTING_PACKAGE";
+
+      if (
+        flow === "FEATURE_UPGRADE" &&
+        normalizePackage(property.listingPackage) !== "STANDARD"
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            "Only published Standard listings can be upgraded to Featured",
+        });
+      }
+
       const stripePriceId = getConfiguredPriceId(
         mode,
-        selectedPackage
+        selectedPackage,
+        flow
       );
 
       if (!stripePriceId) {
-        const environmentKey =
-          PRICE_ENV_MAP[mode][selectedPackage];
+        const environmentKey = getConfiguredPriceEnvironmentKey(
+          mode,
+          selectedPackage,
+          flow
+        );
 
         console.error("Stripe price environment variable missing", {
           mode,
@@ -327,13 +369,9 @@ router.post(
       ).trim();
 
 	const foundingOfferEligible =
-  	Boolean(foundingCouponId) &&
-  	!property.user.foundingOfferUsedAt;
-
-      const flow =
-        listingStatus === "PUBLISHED"
-          ? "FEATURE_UPGRADE"
-          : "LISTING_PACKAGE";
+	  flow === "LISTING_PACKAGE" &&
+	  Boolean(foundingCouponId) &&
+	  !property.user.foundingOfferUsedAt;
 
       const checkoutParameters: any = {
         mode: "payment",
@@ -367,6 +405,9 @@ router.post(
           listingPackage: selectedPackage,
           durationDays: String(durationDays),
           stripePriceId,
+          originalListingPackage: String(
+            property.listingPackage || ""
+          ),
           foundingOfferEligible: foundingOfferEligible ? "true" : "false",
           flow,
         },
@@ -382,19 +423,26 @@ router.post(
         );
       }
 
-      await prisma.property.update({
-        where: {
-          id: property.id,
-        },
-        data: {
-          listingPackage: selectedPackage,
-          paymentStatus: "PENDING",
-          stripeCheckoutSessionId: session.id,
-          stripePaymentIntentId: null,
-          amountPaidCents: null,
-          paidAt: null,
-        },
-      });
+      /*
+       * For a new listing purchase, record the pending package checkout.
+       * For an upgrade, leave the existing paid Standard listing untouched
+       * until Stripe confirms payment through the signed webhook.
+       */
+      if (flow === "LISTING_PACKAGE") {
+        await prisma.property.update({
+          where: {
+            id: property.id,
+          },
+          data: {
+            listingPackage: selectedPackage,
+            paymentStatus: "PENDING",
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: null,
+            amountPaidCents: null,
+            paidAt: null,
+          },
+        });
+      }
 
       console.log("Stripe checkout session created", {
         propertyId: property.id,
@@ -536,13 +584,20 @@ router.post("/webhook", async (req: any, res) => {
   	session.total_details?.amount_discount || 0
 	);
 
+    const rawFlow = String(
+      session.metadata?.flow || "LISTING_PACKAGE"
+    );
+
+	const flow: CheckoutFlow | null =
+	  rawFlow === "LISTING_PACKAGE" ||
+	  rawFlow === "FEATURE_UPGRADE"
+	    ? rawFlow
+	    : null;
+
 	const foundingOfferApplied =
+	  flow === "LISTING_PACKAGE" &&
   	foundingOfferEligible &&
   	discountAmountCents > 0;
-
-	const flow = String(
-  	session.metadata?.flow || "LISTING_PACKAGE"
-	);
 
     if (
       !Number.isFinite(propertyId) ||
@@ -582,7 +637,7 @@ router.post("/webhook", async (req: any, res) => {
       });
     }
 
-    if (!mode || !selectedPackage) {
+    if (!mode || !selectedPackage || !flow) {
       console.warn(
         "Stripe webhook ignored: invalid package metadata",
         {
@@ -595,6 +650,53 @@ router.post("/webhook", async (req: any, res) => {
         received: true,
         ignored: true,
         reason: "invalid_package_metadata",
+      });
+    }
+
+    if (
+      flow === "FEATURE_UPGRADE" &&
+      selectedPackage !== "FEATURED"
+    ) {
+      console.warn(
+        "Stripe webhook ignored: invalid upgrade package",
+        {
+          sessionId: session.id,
+          selectedPackage,
+          flow,
+        }
+      );
+
+      return res.json({
+        received: true,
+        ignored: true,
+        reason: "invalid_upgrade_package",
+      });
+    }
+
+    const expectedPriceId = getConfiguredPriceId(
+      mode,
+      selectedPackage,
+      flow
+    );
+
+    if (
+      !expectedPriceId ||
+      String(session.metadata?.stripePriceId || "") !== expectedPriceId
+    ) {
+      console.warn(
+        "Stripe webhook ignored: price configuration mismatch",
+        {
+          sessionId: session.id,
+          mode,
+          selectedPackage,
+          flow,
+        }
+      );
+
+      return res.json({
+        received: true,
+        ignored: true,
+        reason: "price_configuration_mismatch",
       });
     }
 
@@ -723,7 +825,39 @@ router.post("/webhook", async (req: any, res) => {
       });
     }
 
+    const propertyIsActivelyFeatured =
+      property.isFeatured === true &&
+      property.featuredUntil != null &&
+      new Date(property.featuredUntil).getTime() > Date.now();
+
     if (
+      flow === "FEATURE_UPGRADE" &&
+      (
+        property.listingStatus !== "PUBLISHED" ||
+        normalizePackage(property.listingPackage) !== "STANDARD" ||
+        propertyIsActivelyFeatured
+      )
+    ) {
+      console.warn(
+        "Stripe webhook ignored: listing is not eligible for upgrade",
+        {
+          propertyId,
+          sessionId: session.id,
+          listingStatus: property.listingStatus,
+          listingPackage: property.listingPackage,
+          propertyIsActivelyFeatured,
+        }
+      );
+
+      return res.json({
+        received: true,
+        ignored: true,
+        reason: "upgrade_not_eligible",
+      });
+    }
+
+    if (
+      flow === "LISTING_PACKAGE" &&
       property.stripeCheckoutSessionId &&
       property.stripeCheckoutSessionId !== session.id &&
       property.paymentStatus === "COMPLETED"
@@ -769,6 +903,7 @@ router.post("/webhook", async (req: any, res) => {
      * after Checkout completes.
      */
     const nextListingStatus =
+      flow === "FEATURE_UPGRADE" ||
       property.listingStatus === "PUBLISHED"
         ? "PUBLISHED"
         : "SUBMITTED";
@@ -820,7 +955,10 @@ router.post("/webhook", async (req: any, res) => {
         },
       });
 
-      if (foundingOfferApplied) {
+      if (
+        flow === "LISTING_PACKAGE" &&
+        foundingOfferApplied
+      ) {
         await tx.user.updateMany({
           where: {
             id: userId,
@@ -833,9 +971,10 @@ router.post("/webhook", async (req: any, res) => {
       }
     });
 
-    void (async () => {
-      try {
-        await sendUserListingEmail({
+    if (flow === "LISTING_PACKAGE") {
+      void (async () => {
+        try {
+          await sendUserListingEmail({
           to: property.user.email,
           recipientName: property.user.name,
           event: "SUBMITTED",
@@ -857,14 +996,15 @@ router.post("/webhook", async (req: any, res) => {
           price: property.price,
           myListingsUrl:
             "https://havn.ie/my-listings.html",
-        });
-      } catch (emailError) {
-        console.warn(
-          "Listing submitted email failed (non-fatal):",
-          emailError
-        );
-      }
-    })();
+          });
+        } catch (emailError) {
+          console.warn(
+            "Listing submitted email failed (non-fatal):",
+            emailError
+          );
+        }
+      })();
+    }
 
     console.log("Stripe listing package completed", {
       propertyId,
@@ -885,6 +1025,7 @@ router.post("/webhook", async (req: any, res) => {
       received: true,
       completed: true,
       propertyId,
+      flow,
       package: selectedPackage,
       mode,
       amountPaidCents,
