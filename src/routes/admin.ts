@@ -64,7 +64,6 @@ router.get("/properties", requireAuth, requireAdmin, async (req, res) => {
         { isFeatured: "desc" },
         { updatedAt: "desc" },
       ],
-      take: 300,
     });
 
     let filtered = items as any[];
@@ -105,7 +104,6 @@ router.get("/statuses", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const items = await prisma.property.findMany({
       select: { listingStatus: true },
-      take: 5000,
     });
 
     const counts: Record<string, number> = {
