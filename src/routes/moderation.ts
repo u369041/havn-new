@@ -1,7 +1,9 @@
 // src/routes/moderation.ts
+// src/routes/moderation.ts
 import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
+import requireAdminAuth from "../middleware/adminAuth";
 import { sendUserListingEmail } from "../lib/mail";
 
 const router = Router();
@@ -14,13 +16,6 @@ type ListingStatus =
   | "REJECTED"
   | "CLOSED"
   | "ARCHIVED";
-
-function requireAdmin(req: any, res: any, next: any) {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ ok: false, message: "Admin only" });
-  }
-  next();
-}
 
 function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
@@ -195,7 +190,7 @@ async function sendModerationEmail(
 /**
  * PATCH /api/admin/properties/:id
  */
-router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
+router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) {
@@ -247,7 +242,7 @@ router.patch("/properties/:id", requireAuth, requireAdmin, async (req: any, res)
 /**
  * POST /api/admin/properties/:id/approve
  */
-router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) {
@@ -297,7 +292,7 @@ router.post("/properties/:id/approve", requireAuth, requireAdmin, async (req: an
 /**
  * POST /api/admin/properties/:id/reject
  */
-router.post("/properties/:id/reject", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/reject", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) {

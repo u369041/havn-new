@@ -3,15 +3,9 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 import { sendClosedListingEmail } from "../lib/mail";
+import requireAdminAuth from "../middleware/adminAuth";
 
 const router = Router();
-
-function requireAdmin(req: any, res: any, next: any) {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ ok: false, error: "Admin only" });
-  }
-  next();
-}
 
 function normalizeListingStatus(raw: any) {
   const s = String(raw || "").trim().toUpperCase();
@@ -54,7 +48,7 @@ router.get("/ping", (_req, res) => {
   res.json({ ok: true, route: "admin", ts: Date.now() });
 });
 
-router.get("/properties", requireAuth, requireAdmin, async (req, res) => {
+router.get("/properties", requireAuth, requireAdminAuth, async (req, res) => {
   try {
     const statusFilter = String(req.query.status || "").trim().toUpperCase();
     const q = String(req.query.q || "").trim().toLowerCase();
@@ -100,7 +94,7 @@ router.get("/properties", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-router.get("/statuses", requireAuth, requireAdmin, async (_req, res) => {
+router.get("/statuses", requireAuth, requireAdminAuth, async (_req, res) => {
   try {
     const items = await prisma.property.findMany({
       select: { listingStatus: true },
@@ -129,7 +123,7 @@ router.get("/statuses", requireAuth, requireAdmin, async (_req, res) => {
   }
 });
 
-router.post("/properties/:id/feature", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/feature", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
@@ -163,7 +157,7 @@ router.post("/properties/:id/feature", requireAuth, requireAdmin, async (req: an
   }
 });
 
-router.post("/properties/:id/unfeature", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/unfeature", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
@@ -185,7 +179,7 @@ router.post("/properties/:id/unfeature", requireAuth, requireAdmin, async (req: 
   }
 });
 
-router.post("/properties/:id/close", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/close", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
@@ -273,7 +267,7 @@ router.post("/properties/:id/close", requireAuth, requireAdmin, async (req: any,
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
-router.post("/properties/:id/reopen", requireAuth, requireAdmin, async (req: any, res) => {
+router.post("/properties/:id/reopen", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) {
@@ -297,7 +291,7 @@ router.post("/properties/:id/reopen", requireAuth, requireAdmin, async (req: any
 });
 
 
-router.delete("/properties/:id", requireAuth, requireAdmin, async (req: any, res) => {
+router.delete("/properties/:id", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
 

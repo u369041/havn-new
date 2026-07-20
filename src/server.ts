@@ -6,7 +6,6 @@ import rateLimit from "express-rate-limit";
 import authRouter from "./routes/auth";
 import propertiesRouter from "./routes/properties";
 import uploadsRouter from "./routes/uploads";
-import debugRouter from "./routes/debug";
 import moderationRouter from "./routes/moderation";
 import stripeRouter from "./routes/stripe";
 import adminRouter from "./routes/admin";
@@ -66,7 +65,6 @@ app.use("/api/stripe", strictLimiter, stripeRouter);
 app.use("/api/admin", strictLimiter, adminRouter);
 app.use("/api/admin/moderation", strictLimiter, moderationRouter);
 app.use("/api/digest", strictLimiter, digestRouter);
-app.use("/api/debug", strictLimiter, debugRouter);
 
 /* 404 */
 app.use((_req, res) => {
