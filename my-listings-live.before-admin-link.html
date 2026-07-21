@@ -1,0 +1,5827 @@
+<!DOCTYPE html>
+<!-- HAVN.ie — My Listings (Stable Baseline + Seller Enquiry Inbox + Monetisation UI + Views + Featured CTA) -->
+<html lang="en">
+<head>
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script defer data-domain="havn.ie" src="https://plausible.io/js/script.js"></script>
+  <script>
+    window.plausible = window.plausible || function () {
+      (window.plausible.q = window.plausible.q || []).push(arguments);
+    };
+    window.plausible.init = window.plausible.init || function (i) {
+      window.plausible.o = i || {};
+    };
+    window.plausible.init();
+  </script>
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>havn.ie — My Listings</title>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --card:rgba(255,255,255,0.86);
+      --card2:rgba(255,255,255,0.92);
+      --text:#0b1220;
+      --muted:#5c6b86;
+      --line:rgba(15,23,42,0.10);
+      --shadow:0 18px 55px rgba(15,23,42,0.12);
+      --shadow2:0 10px 26px rgba(15,23,42,0.08);
+      --radius:26px;
+      --blue:#2563eb;
+      --blue2:#0ea5e9;
+      --ok:#22c55e;
+      --warn:#f59e0b;
+      --danger:#ef4444;
+      --purple:#a21caf;
+      --slate:#475569;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(1200px 700px at 15% -10%, rgba(37,99,235,0.07), transparent 55%),
+        radial-gradient(900px 550px at 85% -10%, rgba(14,165,233,0.08), transparent 50%),
+        var(--bg);
+      color:var(--text);
+      letter-spacing:-0.01em;
+    }
+
+    .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 90px;}
+
+    .nav{
+      position:sticky;top:12px;z-index:20;
+      display:flex;align-items:center;justify-content:space-between;gap:14px;
+      padding:14px 16px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(10px);
+      border-radius:22px;
+      box-shadow: var(--shadow2);
+    }
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+    .logo{
+      width:34px;height:34px;border-radius:12px;
+      background:linear-gradient(135deg, rgba(37,99,235,0.95), rgba(14,165,233,0.95));
+      box-shadow:0 12px 28px rgba(37,99,235,0.18);
+      position:relative;
+      flex:0 0 auto;
+    }
+    .logo:before{
+      content:""; position:absolute; inset:9px 10px 10px 10px;
+      border:2px solid rgba(255,255,255,0.92);
+      border-bottom-left-radius:7px;border-bottom-right-radius:7px;
+      border-top-left-radius:3px;border-top-right-radius:3px;
+      transform: skewY(-2deg);
+    }
+    .brand .name{font-weight:950;font-size:18px;line-height:1}
+    .brand .tag{font-size:12px;color:var(--muted);margin-top:2px}
+    .navActions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    .btn{
+      text-decoration:none;
+      border:1px solid var(--line);
+      background:#fff;color:var(--text);
+      border-radius:14px;padding:10px 12px;
+      font-weight:900;font-size:14px;
+      display:inline-flex;align-items:center;gap:8px;
+      box-shadow:0 1px 0 rgba(15,23,42,0.04);
+      transition:all .15s ease;
+      white-space:nowrap;
+      cursor:pointer;
+    }
+    .btn:hover{transform:translateY(-1px);box-shadow:var(--shadow2);}
+    .btn.primary{
+      background:linear-gradient(135deg, rgba(11,18,32,0.96), rgba(17,24,39,0.96));
+      color:#fff;border-color:rgba(255,255,255,0.14);
+      box-shadow:0 14px 32px rgba(11,18,32,0.18);
+    }
+    .btn.ghost{background:rgba(255,255,255,0.72);}
+    .btn.blue{
+      background:linear-gradient(135deg, rgba(37,99,235,0.98), rgba(14,165,233,0.98));
+      color:#fff;
+      border-color:rgba(255,255,255,0.10);
+      box-shadow:0 14px 34px rgba(37,99,235,0.18);
+    }
+
+    .hero{
+      margin-top:14px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(255,255,255,0.76);
+      backdrop-filter: blur(10px);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow2);
+      padding:16px 16px 14px;
+      overflow:hidden;
+    }
+    .heroTop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+    h1{margin:0;font-size:34px;font-weight:950;letter-spacing:-0.03em;}
+    .sub{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.6;max-width:70ch;}
+    .toolbar{
+      margin-top:14px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .search{
+      flex:1 1 320px;
+      min-width:220px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:16px;
+      padding:12px 14px;
+      font-size:14px;
+      outline:none;
+      box-shadow:0 1px 0 rgba(15,23,42,0.04);
+    }
+    .pill{
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.88);
+      border-radius:999px;
+      padding:10px 12px;
+      font-weight:950;
+      font-size:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      box-shadow:0 6px 14px rgba(15,23,42,0.06);
+      user-select:none;
+    }
+    .pill strong{font-weight:950;color:rgba(11,18,32,0.92);}
+    .pillDot{
+      width:10px;height:10px;border-radius:50%;
+      background:rgba(15,23,42,0.20);
+      box-shadow:0 0 0 4px rgba(15,23,42,0.06);
+    }
+
+    .verifyCard{
+      margin-top:12px;
+      border:1px solid rgba(245,158,11,0.28);
+      background: linear-gradient(180deg, rgba(245,158,11,.10), rgba(255,255,255,1));
+      border-radius:22px;
+      box-shadow:var(--shadow2);
+      padding:12px 14px;
+      display:none;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .verifyLeft{display:flex;gap:10px;align-items:flex-start;min-width:240px;flex:1 1 420px;}
+    .verifyDot{
+      width:10px;height:10px;border-radius:50%;
+      background: var(--warn);
+      box-shadow:0 0 0 4px rgba(245,158,11,.18);
+      margin-top:6px;
+      flex:0 0 auto;
+    }
+    .verifyTxt .ttl{
+      margin:0;
+      font-weight:950;
+      font-size:13px;
+      color: rgba(11,18,32,.92);
+      line-height:1.25;
+    }
+    .verifyTxt .subt{
+      margin:2px 0 0;
+      font-size:12px;
+      font-weight:800;
+      color: rgba(11,18,32,.65);
+      line-height:1.35;
+    }
+    .verifyActions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto;}
+    .linkBtn{
+      color:#1d4ed8;
+      font-weight:950;
+      font-size:12px;
+      text-decoration:none;
+      white-space:nowrap;
+    }
+    .linkBtn:hover{text-decoration:underline;}
+    .miniMsg{
+      font-size:12px;
+      font-weight:900;
+      color: rgba(11,18,32,.72);
+      white-space:nowrap;
+    }
+
+    .debugBar{
+      margin-top:10px;
+      display:flex;align-items:center;justify-content:space-between;
+      gap:10px;padding:10px 14px;
+      border-radius:999px;border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(10px);
+      box-shadow:var(--shadow2);
+      font-size:12px;color:rgba(11,18,32,0.75);
+      overflow:hidden;
+    }
+    .debugLeft{display:flex;align-items:center;gap:10px;min-width:0;}
+    .dotLive{
+      width:10px;height:10px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 0 4px rgba(34,197,94,0.18);
+      flex:0 0 auto;
+    }
+    .debugText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:820px;}
+    .debugTag{font-weight:950;color:rgba(11,18,32,0.88);}
+
+    .sellerStats{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:14px;
+    }
+    .statCard{
+      border:1px solid rgba(15,23,42,0.10);
+      background:var(--card);
+      border-radius:22px;
+      box-shadow:var(--shadow2);
+      padding:16px 16px 14px;
+    }
+    .statLabel{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:900;
+      margin-bottom:8px;
+    }
+    .statValue{
+      font-size:30px;
+      line-height:1;
+      font-weight:950;
+      letter-spacing:-0.03em;
+      margin:0;
+    }
+    .statSub{
+      margin-top:8px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+      min-height:18px;
+    }
+
+    .sellerGrid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns:1.1fr 0.9fr;
+      gap:14px;
+    }
+    .panel{
+      border:1px solid rgba(15,23,42,0.10);
+      background:var(--card);
+      border-radius:22px;
+      box-shadow:var(--shadow2);
+      overflow:hidden;
+    }
+    .panelHead{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      padding:16px 16px 12px;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+      flex-wrap:wrap;
+    }
+    .panelTitle{
+      margin:0;
+      font-size:18px;
+      font-weight:950;
+      letter-spacing:-0.02em;
+    }
+    .panelSub{
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.55;
+    }
+    .panelBody{padding:14px;}
+
+    .tableWrap{
+      overflow:auto;
+      border:1px solid rgba(15,23,42,0.08);
+      border-radius:18px;
+      background:#fff;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      min-width:720px;
+    }
+    th, td{
+      text-align:left;
+      vertical-align:top;
+      padding:12px 12px;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+      font-size:13px;
+    }
+    th{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      color:var(--muted);
+      font-weight:950;
+      background:rgba(15,23,42,0.03);
+    }
+    tr:last-child td{border-bottom:none;}
+
+    .miniTitle{
+      font-weight:950;
+      font-size:14px;
+      line-height:1.3;
+      margin:0 0 4px;
+    }
+    .miniSub{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.45;
+    }
+    .mono{font-variant-numeric:tabular-nums;}
+
+    .inboxList{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:12px;
+    }
+    .leadCard{
+      border:1px solid rgba(15,23,42,0.08);
+      background:#fff;
+      border-radius:18px;
+      padding:14px;
+      box-shadow:0 8px 20px rgba(15,23,42,0.05);
+    }
+    .leadHead{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+    .leadTitle{
+      margin:0 0 4px;
+      font-weight:950;
+      font-size:15px;
+      line-height:1.35;
+    }
+    .leadMeta{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.55;
+    }
+    .msgBox{
+      margin-top:10px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(15,23,42,0.03);
+      border-radius:14px;
+      padding:11px 12px;
+      font-size:13px;
+      line-height:1.6;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .leadActions{
+      margin-top:12px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .savedSearchList{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:12px;
+    }
+
+    .savedSearchCard{
+      border:1px solid rgba(15,23,42,0.08);
+      background:#fff;
+      border-radius:18px;
+      padding:14px;
+      box-shadow:0 8px 20px rgba(15,23,42,0.05);
+    }
+
+    .savedSearchHead{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+
+    .savedSearchTitle{
+      margin:0 0 4px;
+      font-weight:950;
+      font-size:15px;
+      line-height:1.35;
+    }
+
+    .savedSearchMeta{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.55;
+    }
+
+    .savedSearchFilters{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+
+    .savedSearchActions{
+      margin-top:12px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .savedSearchNameInput{
+      width:100%;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:14px;
+      padding:10px 12px;
+      font:inherit;
+      font-size:13px;
+      font-weight:850;
+      outline:none;
+      margin-top:10px;
+    }
+
+    .tinyBtn.danger{
+      border-color:rgba(239,68,68,0.22);
+      background:rgba(239,68,68,0.08);
+      color:#991b1b;
+    }
+
+    .tinyBtn.warn{
+      border-color:rgba(245,158,11,0.28);
+      background:rgba(245,158,11,0.10);
+      color:#92400e;
+    }
+    .tinyBtn{
+      border-radius:14px;
+      padding:10px 12px;
+      font-weight:950;
+      font-size:12px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      cursor:pointer;
+      text-decoration:none;
+      color:rgba(11,18,32,0.92);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      transition:all .15s ease;
+    }
+    .tinyBtn:hover{transform:translateY(-1px);box-shadow:var(--shadow2);}
+    .tinyBtn.primary{
+      border:0;
+      color:#fff;
+      background: linear-gradient(135deg, rgba(37,99,235,0.98), rgba(14,165,233,0.98));
+      box-shadow: 0 14px 34px rgba(37,99,235,0.18);
+    }
+    .tinyBtn.success{
+      border-color:rgba(34,197,94,0.26);
+      background:rgba(34,197,94,0.10);
+      color:#166534;
+    }
+
+    .statusPill{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:7px 10px;
+      border-radius:999px;
+      font-weight:950;
+      font-size:12px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(255,255,255,0.86);
+      backdrop-filter: blur(10px);
+      color:rgba(11,18,32,0.90);
+      white-space:nowrap;
+    }
+    .statusPill.draft{background:rgba(245,158,11,0.14);border-color:rgba(245,158,11,0.25);color:rgba(146,64,14,0.95);}
+    .statusPill.pending{background:rgba(14,165,233,0.14);border-color:rgba(14,165,233,0.25);color:rgba(3,105,161,0.95);}
+    .statusPill.published{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.25);color:rgba(20,83,45,0.95);}
+    .statusPill.closed{background:rgba(15,23,42,0.08);border-color:rgba(15,23,42,0.12);color:rgba(15,23,42,0.78);}
+    .statusPill.fresh{background:rgba(34,197,94,0.14);border-color:rgba(34,197,94,0.25);color:rgba(20,83,45,0.95);}
+    .statusPill.today{background:rgba(245,158,11,0.14);border-color:rgba(245,158,11,0.25);color:rgba(146,64,14,0.95);}
+    .statusPill.aging{background:rgba(239,68,68,0.12);border-color:rgba(239,68,68,0.22);color:rgba(153,27,27,0.95);}
+
+    .chip{
+      display:inline-flex;align-items:center;
+      padding:5px 9px;border-radius:999px;
+      border:1px solid rgba(15,23,42,0.08);
+      background:rgba(15,23,42,0.04);
+      color:var(--muted);
+      font-size:11px;font-weight:950;line-height:1;
+    }
+    .chip.blue{background:rgba(37,99,235,0.10);border-color:rgba(37,99,235,0.16);color:#1d4ed8;}
+    .chip.dark{background:rgba(11,18,32,0.88);border-color:rgba(255,255,255,0.14);color:#fff;}
+    .chip.green{background:rgba(34,197,94,0.10);border-color:rgba(34,197,94,0.16);color:#166534;}
+    .chip.status-new{background:#eff6ff;border-color:#dbeafe;color:#1d4ed8}
+    .chip.status-contacted{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+    .chip.status-viewing_booked{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+    .chip.status-offer_in_progress{background:#fdf4ff;border-color:#f5d0fe;color:#a21caf}
+    .chip.status-closed{background:#f8fafc;border-color:#e2e8f0;color:#334155}
+    .chip.status-archived{background:#fff1f2;border-color:#fecdd3;color:#be123c}
+
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:14px;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns:repeat(2, minmax(0, 1fr));}
+      .sellerStats{grid-template-columns:repeat(2, minmax(0, 1fr));}
+      .sellerGrid{grid-template-columns:1fr;}
+    }
+    @media (max-width: 620px){
+      .grid{grid-template-columns:1fr;}
+      .sellerStats{grid-template-columns:1fr;}
+      h1{font-size:28px;}
+      .brand .tag{display:none;}
+    }
+
+    .card{
+      border:1px solid rgba(15,23,42,0.10);
+      background:var(--card);
+      border-radius:22px;
+      box-shadow:var(--shadow2);
+      overflow:hidden;
+      transition:all .15s ease;
+      display:flex;
+      flex-direction:column;
+      min-height:240px;
+    }
+    .card:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
+    .thumb{
+      height:150px;
+      background:#0b1220;
+      position:relative;
+    }
+    .thumb img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .thumbStatus{position:absolute;left:12px;top:12px;}
+
+    .card.isFeatured{
+      border-color:rgba(245,158,11,0.48);
+      box-shadow:0 18px 44px rgba(245,158,11,0.14), 0 10px 26px rgba(15,23,42,0.08);
+    }
+
+    .thumbFeatured{
+      position:absolute;
+      right:12px;
+      top:12px;
+    }
+
+    .chip.featured{
+      background:#fff;
+      border-color:rgba(245,158,11,0.50);
+      color:#92400e;
+      box-shadow:0 10px 24px rgba(15,23,42,0.16);
+    }
+
+    .featureBox{
+      border:1px solid rgba(245,158,11,0.28);
+      background:linear-gradient(180deg, rgba(255,251,235,0.96), rgba(255,255,255,0.92));
+      border-radius:18px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      box-shadow:0 12px 26px rgba(245,158,11,0.08);
+    }
+
+    .featureBox.active{
+      border-color:rgba(34,197,94,0.25);
+      background:linear-gradient(180deg, rgba(240,253,244,0.96), rgba(255,255,255,0.92));
+      box-shadow:0 12px 26px rgba(34,197,94,0.07);
+    }
+
+    .featureBoxTop{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .featureTitle{
+      font-size:13px;
+      font-weight:1000;
+      color:#0b1220;
+      line-height:1.2;
+    }
+
+    .featureSub{
+      margin-top:3px;
+      font-size:12px;
+      font-weight:800;
+      color:rgba(11,18,32,0.62);
+      line-height:1.35;
+    }
+
+    .featurePrice{
+      flex:0 0 auto;
+      border:1px solid rgba(245,158,11,0.30);
+      background:#fff;
+      color:#92400e;
+      border-radius:999px;
+      padding:6px 9px;
+      font-size:12px;
+      font-weight:1000;
+      white-space:nowrap;
+    }
+
+    .featurePerks{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+    }
+
+    .featurePerk{
+      border:1px solid rgba(15,23,42,0.08);
+      background:#fff;
+      color:rgba(11,18,32,0.68);
+      border-radius:999px;
+      padding:5px 8px;
+      font-size:11px;
+      font-weight:900;
+    }
+
+    .miniBtn.featuredLocked{
+      cursor:default;
+      background:rgba(34,197,94,0.10);
+      border-color:rgba(34,197,94,0.22);
+      color:#166534;
+    }
+
+    .miniBtn.featuredLocked:hover{
+      transform:none;
+      box-shadow:none;
+    }
+
+    .miniBtn.promote{
+      flex:1 1 100%;
+      border:0;
+      color:#fff;
+      background:linear-gradient(135deg, rgba(245,158,11,1), rgba(251,191,36,1));
+      box-shadow:0 14px 32px rgba(245,158,11,0.22);
+    }
+
+    .miniBtn.promote:hover{
+      box-shadow:0 18px 40px rgba(245,158,11,0.28);
+    }
+
+    .miniBtn.promote[disabled]{
+      opacity:.72;
+      cursor:not-allowed;
+      transform:none;
+      box-shadow:none;
+    }
+
+    .priceDropBox{
+      border:1px solid rgba(37,99,235,0.14);
+      background:linear-gradient(180deg, rgba(239,246,255,0.92), rgba(255,255,255,0.96));
+      border-radius:14px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:9px;
+    }
+
+    .priceDropTitle{
+      font-size:13px;
+      font-weight:1000;
+      color:#0f172a;
+      line-height:1.25;
+    }
+
+    .priceDropSub{
+      font-size:12px;
+      font-weight:800;
+      color:#64748b;
+      line-height:1.35;
+    }
+
+    .priceDropForm{
+      display:grid;
+      grid-template-columns:minmax(0, 1fr) auto;
+      gap:8px;
+      align-items:center;
+    }
+
+    .priceDropInput{
+      width:100%;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:12px;
+      padding:10px 11px;
+      font:inherit;
+      font-size:13px;
+      font-weight:850;
+      outline:none;
+      min-height:39px;
+    }
+
+    .priceDropHint{
+      color:#64748b;
+      font-size:11px;
+      font-weight:800;
+      line-height:1.35;
+    }
+
+    .chip.priceDrop{
+      background:rgba(245,158,11,0.12);
+      border-color:rgba(245,158,11,0.25);
+      color:#92400e;
+    }
+
+    .content{
+      padding:14px 14px 16px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+    }
+    .price{font-weight:950;font-size:16px;margin:0;}
+    .title{font-weight:950;font-size:15px;margin:0;line-height:1.3;}
+    .meta{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .dot{width:6px;height:6px;border-radius:999px;background:rgba(14,165,233,0.95);box-shadow:0 0 0 3px rgba(14,165,233,0.12);}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;}
+    .cardActions{
+      margin-top:auto;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .miniBtn{
+      flex:1 1 140px;
+      border-radius:16px;
+      padding:11px 12px;
+      font-weight:950;
+      font-size:13px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      cursor:pointer;
+      transition:all .15s ease;
+      text-align:center;
+      user-select:none;
+      text-decoration:none;
+      color:rgba(11,18,32,0.92);
+    }
+    .miniBtn:hover{transform:translateY(-1px);box-shadow:var(--shadow2);}
+    .miniBtn.primary{
+      border:0;
+      color:#fff;
+      background: linear-gradient(135deg, rgba(37,99,235,0.98), rgba(14,165,233,0.98));
+      box-shadow: 0 14px 34px rgba(37,99,235,0.18);
+    }
+
+    .empty{
+      margin-top:14px;
+      border:1px solid rgba(15,23,42,0.10);
+      background:rgba(255,255,255,0.86);
+      border-radius:26px;
+      box-shadow:var(--shadow2);
+      padding:26px 18px;
+      text-align:center;
+    }
+    .empty h2{margin:0;font-size:18px;font-weight:950;}
+    .empty p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.7;}
+    .emptyActions{margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+
+    .drawerBackdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(11,18,32,0.36);
+      z-index:49;
+      display:none;
+    }
+    .drawerBackdrop.show{display:block;}
+    .drawer{
+      position:fixed;
+      top:0;
+      right:0;
+      width:min(720px, 100vw);
+      height:100vh;
+      background:#fff;
+      box-shadow:-20px 0 40px rgba(15,23,42,.18);
+      z-index:50;
+      transform:translateX(100%);
+      transition:transform .22s ease;
+      display:flex;
+      flex-direction:column;
+    }
+    .drawer.open{transform:translateX(0);}
+    .drawerHead{
+      padding:18px;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .drawerBody{
+      flex:1;
+      overflow:auto;
+      padding:16px;
+      background:rgba(15,23,42,0.03);
+    }
+    .fieldLabel{
+      display:block;
+      font-size:12px;
+      font-weight:900;
+      margin:10px 0 6px;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+    .selectField, .textareaField{
+      width:100%;
+      border:1px solid rgba(15,23,42,0.10);
+      background:#fff;
+      border-radius:14px;
+      padding:11px 12px;
+      font:inherit;
+    }
+    .textareaField{min-height:100px;resize:vertical;}
+
+    .saveRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .saveHint{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:800;
+    }
+
+    .toastWrap{
+      position:fixed;
+      right:18px;
+      bottom:18px;
+      z-index:80;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      pointer-events:none;
+    }
+    .toast{
+      min-width:240px;
+      max-width:360px;
+      border-radius:16px;
+      padding:12px 14px;
+      box-shadow:0 18px 40px rgba(15,23,42,.18);
+      border:1px solid rgba(15,23,42,0.08);
+      background:#fff;
+      color:var(--text);
+      font-size:13px;
+      font-weight:900;
+      transform:translateY(10px);
+      opacity:0;
+      transition:all .18s ease;
+    }
+    .toast.show{
+      transform:translateY(0);
+      opacity:1;
+    }
+    .toast.success{
+      background:linear-gradient(180deg, #ffffff, #f0fdf4);
+      border-color:rgba(34,197,94,.18);
+      color:#166534;
+    }
+    .toast.error{
+      background:linear-gradient(180deg, #ffffff, #fff1f2);
+      border-color:rgba(239,68,68,.18);
+      color:#991b1b;
+    }
+
+    /* =========================================================
+       HAVN Seller OS layout layer — visual architecture only
+       Preserves existing IDs, API calls, Stripe, enquiries, saved searches.
+       ========================================================= */
+    :root{
+      --os-navy:#071326;
+      --os-navy2:#0b1b34;
+      --os-purple:#6d28d9;
+      --os-blue:#2563eb;
+      --os-soft:#f5f7fb;
+      --os-card:#ffffff;
+      --os-border:rgba(15,23,42,.08);
+      --os-shadow:0 18px 45px rgba(15,23,42,.08);
+      --os-shadow-soft:0 8px 22px rgba(15,23,42,.06);
+    }
+
+    body{
+      background:
+        radial-gradient(900px 520px at 24% -20%, rgba(37,99,235,.08), transparent 62%),
+        radial-gradient(720px 520px at 92% 0%, rgba(109,40,217,.07), transparent 58%),
+        #f4f7fb;
+      color:#0f172a;
+    }
+
+    .sellerOsSidebar{
+      position:fixed;
+      inset:0 auto 0 0;
+      width:250px;
+      z-index:60;
+      background:
+        radial-gradient(500px 360px at 25% 0%, rgba(37,99,235,.34), transparent 58%),
+        linear-gradient(180deg, #071326 0%, #061120 100%);
+      color:#fff;
+      padding:22px 16px;
+      display:flex;
+      flex-direction:column;
+      box-shadow:20px 0 55px rgba(15,23,42,.16);
+    }
+
+    .sellerOsBrand{
+      display:flex;
+      align-items:center;
+      gap:11px;
+      color:#fff;
+      text-decoration:none;
+      margin-bottom:28px;
+    }
+
+
+    .sellerOsUser{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:14px 10px 20px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      margin-bottom:16px;
+    }
+
+    .sellerOsAvatar{
+      width:46px;
+      height:46px;
+      border-radius:999px;
+      display:grid;
+      place-items:center;
+      font-weight:1000;
+      background:linear-gradient(135deg, #2563eb, #7c3aed);
+      box-shadow:0 18px 34px rgba(37,99,235,.30);
+    }
+
+    .sellerOsUserName{
+      font-weight:950;
+      font-size:14px;
+      line-height:1.1;
+    }
+
+    .sellerOsUserRole{
+      margin-top:5px;
+      display:flex;
+      align-items:center;
+      gap:7px;
+      color:#a7f3d0;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .sellerOsUserRole span{
+      color:#a7f3d0;
+      border:1px solid rgba(34,197,94,.22);
+      background:rgba(34,197,94,.12);
+      padding:3px 7px;
+      border-radius:999px;
+      font-size:10px;
+      font-weight:1000;
+    }
+
+    .sellerOsNav{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .sellerOsSpacer{
+      flex:1;
+    }
+
+    .sellerOsLink{
+      border:0;
+      width:100%;
+      text-align:left;
+      color:rgba(255,255,255,.80);
+      background:transparent;
+      border-radius:12px;
+      padding:12px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:14px;
+      font-weight:900;
+      cursor:pointer;
+      text-decoration:none;
+      transition:all .16s ease;
+    }
+
+    .sellerOsLink:hover,
+    .sellerOsLink.active{
+      color:#fff;
+      background:linear-gradient(135deg, rgba(37,99,235,.95), rgba(109,40,217,.92));
+      box-shadow:0 15px 35px rgba(37,99,235,.22);
+    }
+
+    .sellerOsLinkMain{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .sellerOsIcon{
+      width:19px;
+      display:inline-grid;
+      place-items:center;
+      opacity:.96;
+      flex:0 0 auto;
+    }
+
+    .sellerOsBadge{
+      min-width:22px;
+      height:22px;
+      padding:0 7px;
+      border-radius:999px;
+      background:linear-gradient(135deg, #2563eb, #7c3aed);
+      color:#fff;
+      display:inline-grid;
+      place-items:center;
+      font-size:11px;
+      font-weight:1000;
+      box-shadow:0 10px 25px rgba(37,99,235,.24);
+    }
+
+    .sellerOsDivider{
+      height:1px;
+      background:rgba(255,255,255,.10);
+      margin:14px 0;
+    }
+
+    .sellerOsPromo{
+      margin-top:18px;
+      border:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.06));
+      border-radius:16px;
+      padding:16px;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+    }
+
+    .sellerOsPromoStar{
+      width:38px;
+      height:38px;
+      border-radius:999px;
+      display:grid;
+      place-items:center;
+      background:linear-gradient(135deg, #f59e0b, #7c3aed);
+      margin-bottom:12px;
+    }
+
+    .sellerOsPromoTitle{
+      font-weight:1000;
+      font-size:15px;
+      margin-bottom:7px;
+    }
+
+    .sellerOsPromoText{
+      color:rgba(255,255,255,.74);
+      font-size:12px;
+      line-height:1.5;
+      margin-bottom:14px;
+    }
+
+    .sellerOsPromoBtn{
+      width:100%;
+      justify-content:center;
+      border:0;
+      color:#fff;
+      background:linear-gradient(135deg, #2563eb, #7c3aed);
+      border-radius:10px;
+      padding:10px 12px;
+      font-weight:1000;
+      cursor:pointer;
+      box-shadow:0 15px 30px rgba(37,99,235,.25);
+    }
+
+    .wrap{
+      max-width:none;
+      margin-left:250px;
+      padding:28px 30px 80px;
+    }
+
+    .nav{
+      position:static;
+      top:auto;
+      border-radius:0;
+      box-shadow:none;
+      background:transparent;
+      border:0;
+      padding:0 0 22px;
+      backdrop-filter:none;
+    }
+
+    .nav .brand{
+      display:none;
+    }
+
+    .navActions{
+      margin-left:auto;
+      gap:12px;
+    }
+
+    .navActions .pill{
+      display:none !important;
+    }
+
+    .navActions .btn{
+      border-radius:11px;
+      min-height:40px;
+      padding:10px 14px;
+      box-shadow:0 8px 18px rgba(15,23,42,.05);
+    }
+
+    .navActions .btn.primary{
+      background:linear-gradient(135deg, #2563eb, #4f46e5);
+      box-shadow:0 14px 30px rgba(37,99,235,.22);
+    }
+
+    .hero{
+      margin-top:0;
+      padding:0 0 16px;
+      border:0;
+      border-radius:0;
+      background:transparent;
+      box-shadow:none;
+      backdrop-filter:none;
+      overflow:visible;
+    }
+
+    h1{
+      font-size:34px;
+      letter-spacing:-.045em;
+    }
+
+    .sub{
+      font-size:14px;
+      color:#52617a;
+      margin-top:8px;
+    }
+
+    .toolbar{
+      margin-top:0;
+      align-items:center;
+      justify-content:flex-start;
+      background:#fff;
+      border:1px solid rgba(15,23,42,.08);
+      border-radius:16px;
+      padding:10px;
+      box-shadow:var(--os-shadow-soft);
+    }
+
+    .toolbar .search{
+      max-width:520px;
+      flex:1 1 430px;
+      border-radius:13px;
+      background:#f8fafc;
+      box-shadow:none;
+    }
+
+    .toolbar .pill{
+      background:#fff;
+      box-shadow:none;
+      min-height:40px;
+    }
+
+    .debugBar{
+      display:none;
+    }
+
+    .sellerOsTabs{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      border:1px solid rgba(15,23,42,.08);
+      background:#fff;
+      border-radius:14px;
+      box-shadow:var(--os-shadow-soft);
+      padding:0 12px;
+      overflow:auto;
+    }
+
+    .sellerOsTabsInner{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:max-content;
+    }
+
+    .sellerOsTab{
+      border:0;
+      background:transparent;
+      color:#1e293b;
+      min-height:56px;
+      padding:0 18px;
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      font-weight:950;
+      cursor:pointer;
+      position:relative;
+      white-space:nowrap;
+    }
+
+    .sellerOsTab:after{
+      content:"";
+      position:absolute;
+      left:14px;
+      right:14px;
+      bottom:0;
+      height:3px;
+      border-radius:999px 999px 0 0;
+      background:transparent;
+    }
+
+    .sellerOsTab.active{
+      color:#2563eb;
+    }
+
+    .sellerOsTab.active:after{
+      background:#2563eb;
+    }
+
+    .sellerOsTabBadge{
+      min-width:22px;
+      height:22px;
+      padding:0 7px;
+      border-radius:999px;
+      background:#eef2ff;
+      color:#4f46e5;
+      display:inline-grid;
+      place-items:center;
+      font-size:11px;
+      font-weight:1000;
+    }
+
+    .sellerStats{
+      margin-top:18px;
+      grid-template-columns:repeat(5, minmax(0, 1fr));
+    }
+
+    .statCard{
+      background:#fff;
+      border-radius:14px;
+      padding:18px;
+      min-height:96px;
+      box-shadow:var(--os-shadow-soft);
+      display:grid;
+      grid-template-columns:54px 1fr;
+      column-gap:14px;
+      align-items:center;
+    }
+
+    .statCard:before{
+      content:"⌂";
+      width:54px;
+      height:54px;
+      border-radius:14px;
+      display:grid;
+      place-items:center;
+      background:#eef2ff;
+      color:#2563eb;
+      font-size:25px;
+      font-weight:900;
+      grid-row:1 / span 3;
+    }
+
+    .statCard:nth-child(2):before{content:"↗";background:#eff6ff;color:#2563eb;}
+    .statCard:nth-child(3):before{content:"✉";background:#ecfdf5;color:#16a34a;}
+    .statCard:nth-child(4):before{content:"★";background:#faf5ff;color:#7c3aed;}
+
+    .statLabel{
+      margin:0;
+      font-size:12px;
+      color:#64748b;
+      font-weight:900;
+    }
+
+    .statValue{
+      font-size:25px;
+      letter-spacing:-.035em;
+    }
+
+    .statSub{
+      margin-top:3px;
+      min-height:auto;
+      font-size:12px;
+      color:#64748b;
+    }
+
+    .sellerGrid{
+      margin-top:18px;
+      grid-template-columns:1fr 1fr;
+    }
+
+    .panel,
+    #savedSearchPanel{
+      background:#fff !important;
+      border-radius:14px;
+      box-shadow:var(--os-shadow-soft);
+      border:1px solid rgba(15,23,42,.08);
+    }
+
+    .panelHead{
+      padding:18px 18px 14px;
+    }
+
+    .panelTitle{
+      font-size:16px;
+    }
+
+    .panelSub{
+      color:#64748b;
+    }
+
+    .panelBody{
+      padding:16px;
+    }
+
+    #savedSearchPanel{
+      margin-top:18px !important;
+    }
+
+    .sellerOsOverviewGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr 1fr;
+      gap:18px;
+      margin-top:18px;
+    }
+
+    .sellerOsOverviewGrid .panel{
+      margin:0 !important;
+      min-width:0;
+    }
+
+    .savedSearchCard,
+    .leadCard{
+      border-radius:12px;
+      box-shadow:none;
+    }
+
+    .savedSearchNameInput{
+      display:none;
+    }
+
+    .grid{
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:18px;
+      margin-top:18px;
+    }
+
+    .card{
+      border-radius:14px;
+      background:#fff;
+      box-shadow:var(--os-shadow-soft);
+    }
+
+    .featureBox{
+      border-radius:14px;
+    }
+
+    .sellerOsFeaturedStrip{
+      margin-top:18px;
+      display:grid;
+      grid-template-columns:1.1fr .9fr;
+      gap:18px;
+    }
+
+    .sellerOsFeatureCard{
+      border-radius:14px;
+      background:linear-gradient(135deg, #071326 0%, #0b1b34 58%, #111827 100%);
+      color:#fff;
+      box-shadow:var(--os-shadow);
+      padding:24px;
+      min-height:132px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      overflow:hidden;
+      position:relative;
+    }
+
+    .sellerOsFeatureCard:after{
+      content:"";
+      position:absolute;
+      width:250px;
+      height:250px;
+      border-radius:999px;
+      right:-90px;
+      top:-80px;
+      background:radial-gradient(circle, rgba(124,58,237,.45), transparent 64%);
+    }
+
+    .sellerOsFeatureTitle{
+      font-weight:1000;
+      font-size:17px;
+      margin-bottom:7px;
+    }
+
+    .sellerOsFeatureText{
+      color:rgba(255,255,255,.76);
+      font-size:13px;
+      line-height:1.5;
+      max-width:56ch;
+    }
+
+    .sellerOsAccountCard{
+      border:1px solid rgba(15,23,42,.08);
+      background:#fff;
+      border-radius:14px;
+      box-shadow:var(--os-shadow-soft);
+      padding:22px;
+    }
+
+    .sellerOsAccountTitle{
+      font-weight:1000;
+      font-size:17px;
+      margin-bottom:10px;
+    }
+
+    .sellerOsCheck{
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      padding:12px 0;
+      border-top:1px solid rgba(15,23,42,.06);
+    }
+
+    .sellerOsCheck:first-of-type{
+      border-top:0;
+    }
+
+    .sellerOsCheckIcon{
+      width:30px;
+      height:30px;
+      border-radius:999px;
+      display:grid;
+      place-items:center;
+      background:#dcfce7;
+      color:#16a34a;
+      font-weight:1000;
+      flex:0 0 auto;
+    }
+
+    .sellerOsCheckTitle{
+      font-weight:950;
+      font-size:13px;
+    }
+
+    .sellerOsCheckText{
+      color:#64748b;
+      font-size:12px;
+      margin-top:3px;
+    }
+
+    body[data-tab="overview"] #grid,
+    body[data-tab="overview"] #empty{
+      display:none !important;
+    }
+
+    body[data-tab="overview"] #sellerStats{
+      display:grid !important;
+    }
+
+    body[data-tab="listings"] #sellerGrid,
+    body[data-tab="listings"] #savedSearchPanel,
+    body[data-tab="listings"] .sellerOsFeaturedStrip{
+      display:none !important;
+    }
+
+    body[data-tab="listings"] #sellerStats{
+      display:none !important;
+    }
+
+    body[data-tab="leads"] #sellerStats,
+    body[data-tab="leads"] #grid,
+    body[data-tab="leads"] #empty,
+    body[data-tab="leads"] #savedSearchPanel,
+    body[data-tab="leads"] .sellerOsFeaturedStrip{
+      display:none !important;
+    }
+
+    body[data-tab="leads"] #sellerGrid{
+      display:grid !important;
+      grid-template-columns:1.1fr .9fr;
+    }
+
+    body[data-tab="saved"] #sellerStats,
+    body[data-tab="saved"] #sellerGrid,
+    body[data-tab="saved"] #grid,
+    body[data-tab="saved"] #empty,
+    body[data-tab="saved"] .sellerOsFeaturedStrip{
+      display:none !important;
+    }
+
+    body[data-tab="saved"] #savedSearchPanel{
+      display:block !important;
+    }
+
+    body[data-tab="performance"] #grid,
+    body[data-tab="performance"] #empty,
+    body[data-tab="performance"] #savedSearchPanel,
+    body[data-tab="performance"] .sellerOsFeaturedStrip{
+      display:none !important;
+    }
+
+    body[data-tab="performance"] #sellerStats{
+      display:grid !important;
+    }
+
+    body[data-tab="performance"] #sellerGrid{
+      display:grid !important;
+    }
+
+    @media (max-width: 1180px){
+      .sellerStats{grid-template-columns:repeat(2, minmax(0, 1fr));}
+      .sellerOsOverviewGrid{grid-template-columns:1fr;}
+      .sellerGrid{grid-template-columns:1fr;}
+      .sellerOsFeaturedStrip{grid-template-columns:1fr;}
+      .grid{grid-template-columns:repeat(2, minmax(0, 1fr));}
+    }
+
+    @media (max-width: 860px){
+      .sellerOsSidebar{
+        position:static;
+        width:auto;
+        min-height:auto;
+        border-radius:0 0 22px 22px;
+      }
+
+      .sellerOsNav{
+        display:grid;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+      }
+
+      .sellerOsPromo{
+        display:none;
+      }
+
+      .wrap{
+        margin-left:0;
+        padding:18px 14px 70px;
+      }
+
+      .nav{
+        padding-top:0;
+      }
+
+      .sellerStats,
+      .grid{
+        grid-template-columns:1fr;
+      }
+
+      .toolbar{
+        align-items:stretch;
+      }
+    }
+
+
+    
+/* =========================================================
+   HAVN Seller OS v2.5 — SAFE Lead Volume sizing fix
+   Restores side-by-side layout while preventing clipping.
+   ========================================================= */
+
+.sellerGrid{
+  grid-template-columns:1.08fr 0.92fr !important;
+  align-items:start;
+}
+
+body[data-tab="leads"] #sellerGrid,
+body[data-tab="performance"] #sellerGrid{
+  grid-template-columns:1.08fr 0.92fr !important;
+}
+
+#leadVolumeWrap{
+  width:100%;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+}
+
+#leadVolumeWrap table{
+  width:100%;
+  min-width:760px;
+  table-layout:auto;
+}
+
+#leadVolumeWrap th,
+#leadVolumeWrap td{
+  padding:9px 10px;
+  font-size:12px;
+}
+
+#leadVolumeWrap .miniTitle{
+  font-size:13px;
+  line-height:1.25;
+}
+
+#leadVolumeWrap .miniSub{
+  font-size:11px;
+  line-height:1.35;
+}
+
+#leadVolumeWrap .tinyBtn{
+  padding:8px 10px;
+  font-size:11px;
+  border-radius:11px;
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+
+#leadVolumeWrap td:nth-child(7){
+  white-space:nowrap;
+}
+
+@media (max-width: 1180px){
+  .sellerGrid{
+    grid-template-columns:1fr !important;
+  }
+}
+
+
+
+    /* =========================================================
+       HAVN Seller OS v2.7 — Lead Volume rows with photos ONLY
+       Does not alter the Seller OS shell/layout.
+       ========================================================= */
+
+    #leadVolumeWrap{
+      overflow:visible;
+      border:0;
+      border-radius:0;
+      background:transparent;
+    }
+
+    .leadVolumeList{
+      display:flex;
+      flex-direction:column;
+      background:#fff;
+      border:1px solid rgba(15,23,42,0.08);
+      border-radius:14px;
+      overflow:hidden;
+    }
+
+    .leadVolumeRow{
+      display:grid;
+      grid-template-columns:88px minmax(0, 1fr) 112px 128px;
+      gap:13px;
+      align-items:center;
+      padding:14px 14px;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+    }
+
+    .leadVolumeRow:last-child{
+      border-bottom:0;
+    }
+
+    .leadVolumeThumb{
+      width:88px;
+      height:66px;
+      border-radius:12px;
+      overflow:hidden;
+      background:linear-gradient(135deg, rgba(15,23,42,0.08), rgba(15,23,42,0.03));
+      border:1px solid rgba(15,23,42,0.08);
+      box-shadow:0 8px 18px rgba(15,23,42,0.05);
+    }
+
+    .leadVolumeThumb img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+
+    .leadVolumeThumbFallback{
+      width:100%;
+      height:100%;
+      display:grid;
+      place-items:center;
+      color:#64748b;
+      font-size:20px;
+      font-weight:1000;
+      background:linear-gradient(135deg, #f8fafc, #eef2ff);
+    }
+
+    .leadVolumeMain{
+      min-width:0;
+    }
+
+    .leadVolumeTitle{
+      margin:0;
+      font-size:13px;
+      font-weight:1000;
+      line-height:1.22;
+      letter-spacing:-0.02em;
+      color:#0f172a;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    .leadVolumeAddress{
+      margin-top:5px;
+      font-size:11px;
+      line-height:1.35;
+      color:#64748b;
+      display:-webkit-box;
+      -webkit-line-clamp:1;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    .leadVolumeMeta{
+      margin-top:9px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:7px 9px;
+      align-items:center;
+      font-size:10.5px;
+      font-weight:850;
+      color:#475569;
+    }
+
+    .leadVolumeMetric{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      white-space:nowrap;
+    }
+
+    .leadVolumeDot{
+      width:7px;
+      height:7px;
+      border-radius:999px;
+      background:#2563eb;
+      box-shadow:0 0 0 3px rgba(37,99,235,0.10);
+      display:inline-block;
+      flex:0 0 auto;
+    }
+
+    .leadVolumeDot.green{
+      background:#22c55e;
+      box-shadow:0 0 0 3px rgba(34,197,94,0.12);
+    }
+
+    .leadVolumeDot.gray{
+      background:#94a3b8;
+      box-shadow:0 0 0 3px rgba(148,163,184,0.12);
+    }
+
+    .leadVolumeStatus{
+      display:flex;
+      justify-content:center;
+      align-items:center;
+    }
+
+    .leadVolumeStatus .statusPill{
+      padding:7px 10px;
+      font-size:10.5px;
+      min-width:74px;
+    }
+
+    .leadVolumeActions{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:stretch;
+    }
+
+    .leadVolumeActions .tinyBtn{
+      width:100%;
+      min-height:35px;
+      padding:8px 9px;
+      border-radius:11px;
+      font-size:11px;
+      font-weight:1000;
+      white-space:nowrap;
+      box-shadow:none;
+    }
+
+    .leadVolumeActions .tinyBtn.primary{
+      box-shadow:0 10px 22px rgba(37,99,235,0.18);
+    }
+
+    .leadVolumeFooter{
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-top:1px solid rgba(15,23,42,0.06);
+      background:#fff;
+    }
+
+    .leadVolumeFooter .tinyBtn{
+      min-width:190px;
+    }
+
+    @media (max-width: 1320px){
+      .leadVolumeRow{
+        grid-template-columns:78px minmax(0, 1fr) 96px 114px;
+        gap:10px;
+        padding:13px 12px;
+      }
+
+      .leadVolumeThumb{
+        width:78px;
+        height:60px;
+      }
+
+      .leadVolumeTitle{
+        font-size:12.2px;
+      }
+
+      .leadVolumeAddress{
+        font-size:10.5px;
+      }
+
+      .leadVolumeMeta{
+        font-size:10px;
+        gap:6px;
+      }
+
+      .leadVolumeActions .tinyBtn{
+        font-size:10.5px;
+        padding:8px 8px;
+      }
+    }
+
+    @media (max-width: 1180px){
+      .leadVolumeRow{
+        grid-template-columns:88px minmax(0, 1fr) 108px 126px;
+      }
+    }
+
+    @media (max-width: 700px){
+      .leadVolumeRow{
+        grid-template-columns:78px minmax(0, 1fr);
+        gap:12px;
+      }
+
+      .leadVolumeThumb{
+        width:78px;
+        height:62px;
+      }
+
+      .leadVolumeStatus{
+        grid-column:1 / -1;
+        justify-content:flex-start;
+      }
+
+      .leadVolumeActions{
+        grid-column:1 / -1;
+        flex-direction:row;
+      }
+    }
+
+
+    /* =========================================================
+       HAVN Seller OS v2.8 — Saved Search management polish
+       Visual/UI polish only. Preserves saved search endpoints.
+       ========================================================= */
+
+    .savedSearchList{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .savedSearchCard{
+      border:1px solid rgba(15,23,42,0.08);
+      background:linear-gradient(180deg, #ffffff, #fbfdff);
+      border-radius:16px;
+      padding:16px;
+      box-shadow:0 10px 24px rgba(15,23,42,0.05);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      min-height:220px;
+    }
+
+    .savedSearchCard:hover{
+      border-color:rgba(37,99,235,0.18);
+      box-shadow:0 14px 32px rgba(15,23,42,0.08);
+    }
+
+    .savedSearchHead{
+      margin-bottom:0;
+      align-items:flex-start;
+    }
+
+    .savedSearchIcon{
+      width:38px;
+      height:38px;
+      border-radius:13px;
+      display:grid;
+      place-items:center;
+      color:#2563eb;
+      background:#eff6ff;
+      border:1px solid rgba(37,99,235,0.12);
+      font-weight:1000;
+      flex:0 0 auto;
+    }
+
+    .savedSearchTitleRow{
+      display:flex;
+      gap:11px;
+      align-items:flex-start;
+      min-width:0;
+      flex:1 1 auto;
+    }
+
+    .savedSearchTitle{
+      font-size:15px;
+      line-height:1.25;
+      letter-spacing:-0.02em;
+      color:#0f172a;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    .savedSearchMeta{
+      margin-top:5px;
+      color:#64748b;
+      font-size:11.5px;
+      line-height:1.45;
+    }
+
+    .savedSearchStatus{
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+      align-items:flex-end;
+      flex:0 0 auto;
+    }
+
+    .savedSearchStatus .statusPill{
+      padding:6px 9px;
+      font-size:10.5px;
+    }
+
+    .savedSearchMode{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:999px;
+      padding:5px 8px;
+      background:#f8fafc;
+      color:#475569;
+      border:1px solid rgba(15,23,42,0.08);
+      font-size:10.5px;
+      font-weight:950;
+      white-space:nowrap;
+    }
+
+    .savedSearchFilters{
+      margin-top:0;
+      gap:7px;
+      max-height:70px;
+      overflow:hidden;
+    }
+
+    .savedSearchFilters .chip{
+      font-size:10.5px;
+      padding:6px 8px;
+      background:#f8fafc;
+    }
+
+    .savedSearchControls{
+      margin-top:auto;
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:10px;
+      align-items:center;
+    }
+
+    .savedSearchNameInput{
+      display:block;
+      margin-top:0;
+      min-height:40px;
+      border-radius:12px;
+      font-size:12.5px;
+      font-weight:850;
+      background:#f8fafc;
+    }
+
+    .savedSearchActions{
+      margin-top:0;
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:9px;
+    }
+
+    .savedSearchActions .tinyBtn{
+      min-height:38px;
+      border-radius:12px;
+      font-size:11.5px;
+      padding:9px 10px;
+      white-space:nowrap;
+    }
+
+    .savedSearchActions .tinyBtn.primary{
+      grid-column:span 2;
+    }
+
+    .savedSearchActions .tinyBtn.danger{
+      background:#fff1f2;
+    }
+
+    .savedSearchFineprint{
+      color:#64748b;
+      font-size:11px;
+      line-height:1.45;
+      border-top:1px solid rgba(15,23,42,0.06);
+      padding-top:10px;
+    }
+
+    @media (max-width: 1180px){
+      .savedSearchList{
+        grid-template-columns:1fr;
+      }
+    }
+
+    @media (max-width: 640px){
+      .savedSearchHead{
+        flex-direction:column;
+      }
+
+      .savedSearchStatus{
+        align-items:flex-start;
+        flex-direction:row;
+      }
+
+      .savedSearchActions{
+        grid-template-columns:1fr;
+      }
+
+      .savedSearchActions .tinyBtn.primary{
+        grid-column:span 1;
+      }
+    }
+
+/* =========================================================
+   HAVN Seller OS — Image 1 top dashboard upgrade
+   ========================================================= */
+
+.sellerWelcome{
+  margin-bottom:7px;
+  color:#0f172a;
+  font-size:14px;
+  line-height:1.4;
+  font-weight:900;
+}
+
+.heroTop h1{
+  margin:0;
+  font-size:38px;
+  line-height:1;
+  letter-spacing:-.05em;
+  color:#071326;
+}
+
+.heroTop .sub{
+  margin-top:10px;
+  font-size:14px;
+  line-height:1.55;
+  color:#64748b;
+  font-weight:650;
+}
+
+.sellerStats{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:14px;
+  margin-top:18px;
+}
+
+.statCard{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  min-width:0;
+  min-height:130px;
+  padding:18px;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid rgba(15,23,42,.08);
+  border-radius:15px;
+  box-shadow:0 10px 24px rgba(15,23,42,.06);
+}
+
+.statCard:before{
+  display:none !important;
+}
+
+.statCard:after{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  height:3px;
+  background:#2563eb;
+}
+
+.statIcon{
+  width:48px;
+  height:48px;
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  border-radius:14px;
+  background:#eef2ff;
+  color:#2563eb;
+  font-size:22px;
+  line-height:1;
+  font-weight:1000;
+}
+
+.statContent{
+  min-width:0;
+}
+
+.statValue{
+  margin:0 0 4px;
+  color:#071326;
+  font-size:28px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.04em;
+}
+
+.statLabel{
+  margin:0;
+  color:#0f172a;
+  font-size:13px;
+  line-height:1.25;
+  font-weight:950;
+}
+
+.statSub{
+  margin-top:5px;
+  min-height:0;
+  color:#64748b;
+  font-size:11px;
+  line-height:1.35;
+  font-weight:650;
+}
+
+.statDrafts .statIcon{
+  background:#f1f5f9;
+  color:#475569;
+}
+
+.statDrafts:after{
+  background:#94a3b8;
+}
+
+.statSubmitted .statIcon{
+  background:#fff7ed;
+  color:#f97316;
+}
+
+.statSubmitted:after{
+  background:#f59e0b;
+}
+
+.statPublished .statIcon{
+  background:#ecfdf5;
+  color:#16a34a;
+}
+
+.statPublished:after{
+  background:#16a34a;
+}
+
+.statEnquiries .statIcon{
+  background:#faf5ff;
+  color:#7c3aed;
+}
+
+.statEnquiries:after{
+  background:#7c3aed;
+}
+
+.statViews .statIcon{
+  background:#eff6ff;
+  color:#2563eb;
+}
+
+.statViews:after{
+  background:#2563eb;
+}
+
+@media (max-width:1380px){
+  .sellerStats{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
+
+@media (max-width:980px){
+  .sellerStats{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media (max-width:620px){
+  .sellerStats{
+    grid-template-columns:1fr;
+  }
+
+  .heroTop h1{
+    font-size:32px;
+  }
+
+  .statCard{
+    min-height:110px;
+  }
+}
+
+/* =========================================================
+   HAVN Seller OS — premium listing management rows
+   ========================================================= */
+
+body[data-tab="listings"] #grid{
+  display:grid !important;
+  grid-template-columns:1fr !important;
+  gap:14px;
+}
+
+.sellerListingRow{
+  display:grid;
+  grid-template-columns:230px minmax(0,1fr);
+  min-width:0;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid rgba(15,23,42,.08);
+  border-radius:16px;
+  box-shadow:0 10px 28px rgba(15,23,42,.06);
+  transition:
+    transform .18s ease,
+    box-shadow .18s ease,
+    border-color .18s ease;
+}
+
+.sellerListingRow:hover{
+  transform:translateY(-1px);
+  border-color:rgba(37,99,235,.16);
+  box-shadow:0 16px 34px rgba(15,23,42,.09);
+}
+
+.sellerListingRow.isFeatured{
+  border-color:rgba(245,158,11,.34);
+  box-shadow:
+    0 15px 34px rgba(245,158,11,.10),
+    0 10px 28px rgba(15,23,42,.06);
+}
+
+.sellerListingImage{
+  position:relative;
+  min-height:220px;
+  overflow:hidden;
+  background:#e2e8f0;
+}
+
+.sellerListingImage img{
+  width:100%;
+  height:100%;
+  min-height:220px;
+  object-fit:cover;
+  display:block;
+}
+
+.sellerListingImageFallback{
+  width:100%;
+  height:100%;
+  min-height:220px;
+  display:grid;
+  place-items:center;
+  color:#64748b;
+  font-size:34px;
+  font-weight:1000;
+  background:linear-gradient(135deg,#f8fafc,#e9efff);
+}
+
+.sellerPhotoCount,
+.sellerFeaturedFlag{
+  position:absolute;
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  font-size:11px;
+  line-height:1;
+  font-weight:950;
+  backdrop-filter:blur(10px);
+}
+
+.sellerPhotoCount{
+  left:12px;
+  bottom:12px;
+  padding:7px 9px;
+  color:#fff;
+  background:rgba(7,19,38,.78);
+  border:1px solid rgba(255,255,255,.16);
+}
+
+.sellerFeaturedFlag{
+  left:12px;
+  top:12px;
+  padding:7px 10px;
+  color:#92400e;
+  background:rgba(255,255,255,.94);
+  border:1px solid rgba(245,158,11,.38);
+  box-shadow:0 8px 22px rgba(15,23,42,.14);
+}
+
+.sellerListingMain{
+  min-width:0;
+  padding:18px;
+  display:flex;
+  flex-direction:column;
+}
+
+.sellerListingTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+}
+
+.sellerListingIdentity{
+  min-width:0;
+}
+
+.sellerListingIdentity h3{
+  margin:0;
+  color:#071326;
+  font-size:18px;
+  line-height:1.25;
+  font-weight:1000;
+  letter-spacing:-.025em;
+}
+
+.sellerListingAddress{
+  margin-top:5px;
+  color:#64748b;
+  font-size:12px;
+  line-height:1.45;
+  font-weight:650;
+}
+
+.sellerListingStatusBlock{
+  flex:0 0 auto;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:7px;
+}
+
+.sellerListingDate{
+  color:#64748b;
+  font-size:10.5px;
+  font-weight:750;
+  white-space:nowrap;
+}
+
+.sellerListingExpiry{
+  color:#334155;
+  font-size:10.5px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.sellerListingPrice{
+  margin-top:8px;
+  color:#0f172a;
+  font-size:16px;
+  line-height:1.2;
+  font-weight:1000;
+}
+
+.sellerListingMetrics{
+  margin-top:16px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.sellerMetric{
+  min-width:92px;
+  display:grid;
+  grid-template-columns:auto auto;
+  grid-template-rows:auto auto;
+  column-gap:7px;
+  align-items:center;
+  padding-right:12px;
+  border-right:1px solid rgba(15,23,42,.08);
+}
+
+.sellerMetric:last-child{
+  border-right:0;
+}
+
+.sellerMetricIcon{
+  grid-row:1 / span 2;
+  color:#2563eb;
+  font-size:14px;
+  font-weight:1000;
+}
+
+.sellerMetric strong{
+  color:#0f172a;
+  font-size:12.5px;
+  line-height:1.1;
+  font-weight:1000;
+}
+
+.sellerMetric small{
+  margin-top:2px;
+  color:#64748b;
+  font-size:10px;
+  line-height:1.1;
+  font-weight:750;
+}
+
+.sellerMetricWide{
+  min-width:130px;
+}
+
+.sellerLatestLead{
+  margin-top:15px;
+  padding:11px 12px;
+  border:1px solid rgba(15,23,42,.07);
+  border-radius:12px;
+  background:#f8fafc;
+}
+
+.sellerLatestLead > div{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.sellerLatestLead strong{
+  color:#0f172a;
+  font-size:11.5px;
+  font-weight:1000;
+}
+
+.sellerLatestLead span{
+  color:#64748b;
+  font-size:10.5px;
+  font-weight:750;
+}
+
+.sellerLatestLead p{
+  margin:5px 0 0;
+  color:#475569;
+  font-size:11px;
+  line-height:1.45;
+  font-weight:650;
+}
+
+.sellerListingActions{
+  margin-top:16px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.sellerActionBtn{
+  min-height:36px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:8px 12px;
+  border:1px solid rgba(15,23,42,.10);
+  border-radius:11px;
+  background:#fff;
+  color:#0f172a;
+  font:inherit;
+  font-size:11px;
+  line-height:1;
+  font-weight:950;
+  text-decoration:none;
+  cursor:pointer;
+  transition:.16s ease;
+}
+
+.sellerActionBtn:hover{
+  transform:translateY(-1px);
+  border-color:rgba(37,99,235,.22);
+  box-shadow:0 8px 20px rgba(15,23,42,.08);
+}
+
+.sellerActionPrimary{
+  border-color:#2563eb;
+  background:linear-gradient(135deg,#2563eb,#4f46e5);
+  color:#fff;
+  box-shadow:0 10px 24px rgba(37,99,235,.20);
+}
+
+.sellerActionFeature{
+  border-color:rgba(245,158,11,.34);
+  color:#92400e;
+  background:#fffbeb;
+}
+
+.sellerFeaturedUntil{
+  display:inline-flex;
+  align-items:center;
+  min-height:36px;
+  padding:8px 11px;
+  border-radius:11px;
+  color:#166534;
+  background:#f0fdf4;
+  border:1px solid rgba(34,197,94,.20);
+  font-size:10.5px;
+  font-weight:900;
+}
+
+.sellerListingTools{
+  margin-top:14px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+
+.sellerListingTools:empty{
+  display:none;
+}
+
+.sellerListingTools .priceDropBox,
+.sellerListingTools .featureBox{
+  margin:0;
+}
+
+@media (max-width:1180px){
+  .sellerListingRow{
+    grid-template-columns:190px minmax(0,1fr);
+  }
+
+  .sellerListingImage,
+  .sellerListingImage img,
+  .sellerListingImageFallback{
+    min-height:210px;
+  }
+
+  .sellerListingTools{
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width:760px){
+  .sellerListingRow{
+    grid-template-columns:1fr;
+  }
+
+  .sellerListingImage,
+  .sellerListingImage img,
+  .sellerListingImageFallback{
+    min-height:220px;
+    max-height:280px;
+  }
+
+  .sellerListingTop{
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .sellerListingStatusBlock{
+    align-items:flex-start;
+  }
+
+  .sellerMetric{
+    min-width:calc(50% - 8px);
+    border-right:0;
+  }
+
+  .sellerListingActions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+  }
+
+  .sellerActionBtn,
+  .sellerFeaturedUntil{
+    width:100%;
+  }
+}
+
+/* =========================================================
+   HAVN Seller Dashboard — official sidebar branding
+   ========================================================= */
+
+/* =========================================================
+   HAVN Seller Dashboard Branding
+========================================================= */
+
+.sellerOsOfficialBrand{
+    display:flex;
+    align-items:flex-start;
+    justify-content:flex-start;
+    padding:4px 8px 18px;
+    margin-bottom:22px;
+    border-bottom:1px solid rgba(255,255,255,.10);
+    text-decoration:none;
+}
+
+.sellerOsOfficialCopy{
+    display:flex;
+    flex-direction:column;
+}
+
+.sellerOsOfficialName{
+    font-family:"Manrope",sans-serif;
+    font-size:20px;
+    font-weight:800;
+    line-height:1;
+    letter-spacing:-0.04em;
+    color:#ffffff;
+}
+
+.sellerOsOfficialName span{
+    color:#60A5FA;
+}
+
+.sellerOsOfficialTag{
+    margin-top:6px;
+    font-family:"Manrope",sans-serif;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.22em;
+    text-transform:uppercase;
+    color:rgba(255,255,255,.62);
+}
+
+/* =========================================================
+   HAVN Seller Dashboard — profile card polish
+   ========================================================= */
+
+.sellerOsUser{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:13px;
+  margin:0 0 18px;
+  padding:14px 12px 17px;
+  border-bottom:1px solid rgba(255,255,255,.10);
+}
+
+.sellerOsAvatar{
+  width:48px;
+  height:48px;
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  border-radius:16px;
+  background:linear-gradient(135deg,#315cff,#7c3aed);
+  color:#fff;
+  font-size:14px;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:-.02em;
+  box-shadow:
+    0 14px 30px rgba(37,99,235,.26),
+    inset 0 1px 0 rgba(255,255,255,.20);
+}
+
+.sellerOsUserDetails{
+  min-width:0;
+  flex:1;
+}
+
+.sellerOsUserName{
+  overflow:hidden;
+  color:#fff;
+  font-size:14px;
+  line-height:1.2;
+  font-weight:1000;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.sellerOsAccountType{
+  margin-top:4px;
+  color:rgba(255,255,255,.58);
+  font-size:10.5px;
+  line-height:1.2;
+  font-weight:750;
+  letter-spacing:.02em;
+}
+
+.sellerOsVerifiedRow{
+  width:max-content;
+  max-width:100%;
+  margin-top:7px;
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:4px 8px;
+  border:1px solid rgba(34,197,94,.22);
+  border-radius:999px;
+  background:rgba(34,197,94,.11);
+  color:#a7f3d0;
+  font-size:9.5px;
+  line-height:1;
+  font-weight:950;
+  white-space:nowrap;
+}
+
+.sellerOsVerifiedIcon{
+  width:14px;
+  height:14px;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  background:rgba(34,197,94,.20);
+  color:#bbf7d0;
+  font-size:9px;
+  font-weight:1000;
+}
+
+.sellerOsVerifiedRow.isPending{
+  border-color:rgba(245,158,11,.30);
+  background:rgba(245,158,11,.13);
+  color:#fde68a;
+}
+
+.sellerOsVerifiedRow.isPending .sellerOsVerifiedIcon{
+  background:rgba(245,158,11,.22);
+  color:#fde68a;
+}
+
+
+/* =========================================================
+   HAVN Seller OS — compact sidebar Featured panel
+   ========================================================= */
+
+.sellerOsSidebar{
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+}
+
+.sellerOsSpacer{
+  min-height:8px;
+}
+
+.sellerOsPromo{
+  flex:0 0 auto;
+  margin-top:10px;
+  padding:12px;
+  border-radius:14px;
+}
+
+.sellerOsPromoStar{
+  width:32px;
+  height:32px;
+  margin-bottom:8px;
+  font-size:15px;
+}
+
+.sellerOsPromoTitle{
+  margin-bottom:4px;
+  font-size:14px;
+}
+
+.sellerOsPromoText{
+  margin-bottom:10px;
+  font-size:10.5px;
+  line-height:1.4;
+}
+
+.sellerOsPromoBtn{
+  min-height:34px;
+  padding:8px 10px;
+  font-size:10.5px;
+  border-radius:9px;
+}
+
+.upgradeFilterBar{
+  display:none;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:14px;
+  margin:0 0 14px;
+  padding:12px 14px;
+  border:1px solid rgba(245,158,11,.30);
+  border-radius:14px;
+  background:rgba(255,251,235,.92);
+  color:#713f12;
+  box-shadow:0 10px 24px rgba(15,23,42,.05);
+}
+
+.upgradeFilterBar.show{
+  display:flex;
+}
+
+.upgradeFilterCopy strong{
+  display:block;
+  color:#0f172a;
+  font-size:13px;
+  line-height:1.25;
+}
+
+.upgradeFilterCopy span{
+  display:block;
+  margin-top:3px;
+  color:#785b2b;
+  font-size:11px;
+  font-weight:750;
+  line-height:1.35;
+}
+
+.upgradeFilterClear{
+  flex:0 0 auto;
+  min-height:34px;
+  padding:8px 11px;
+  border:1px solid rgba(245,158,11,.35);
+  border-radius:9px;
+  background:#fff;
+  color:#0f172a;
+  font-size:10.5px;
+  font-weight:950;
+  cursor:pointer;
+}
+
+/* =========================================================
+   HAVN Seller OS — compact listing cards and gallery
+   ========================================================= */
+
+body[data-tab="listings"] #grid{
+  gap:12px !important;
+}
+
+.sellerListingRow{
+  grid-template-columns:190px minmax(0,1fr);
+  min-height:210px;
+}
+
+.sellerListingImage{
+  height:210px;
+  min-height:210px;
+}
+
+.sellerListingImage img,
+.sellerListingImageFallback{
+  width:100%;
+  height:210px;
+  min-height:210px;
+}
+
+.sellerListingMain{
+  justify-content:center;
+  padding:15px 16px;
+}
+
+.sellerListingIdentity h3{
+  font-size:16px;
+}
+
+.sellerListingAddress{
+  margin-top:4px;
+  font-size:11px;
+}
+
+.sellerListingPrice{
+  margin-top:6px;
+  font-size:15px;
+}
+
+.sellerListingMetrics{
+  margin-top:12px;
+  gap:9px;
+}
+
+.sellerMetric{
+  min-width:82px;
+  padding-right:9px;
+}
+
+.sellerMetricWide{
+  min-width:118px;
+}
+
+.sellerListingActions{
+  margin-top:12px;
+}
+
+.sellerActionBtn,
+.sellerFeaturedUntil{
+  min-height:33px;
+  padding:7px 10px;
+  font-size:10.5px;
+}
+
+.sellerPhotoCount{
+  left:10px;
+  bottom:10px;
+  padding:6px 8px;
+  font-size:10px;
+}
+
+.sellerFeaturedFlag{
+  left:10px;
+  top:10px;
+  padding:6px 8px;
+  font-size:10px;
+}
+
+.sellerGalleryArrow{
+  position:absolute;
+  top:50%;
+  z-index:8;
+  width:32px;
+  height:32px;
+  padding:0;
+  transform:translateY(-50%);
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.76);
+  border-radius:999px;
+  background:rgba(255,255,255,.93);
+  color:#071326;
+  font-family:inherit;
+  font-size:24px;
+  line-height:1;
+  font-weight:900;
+  cursor:pointer;
+  box-shadow:0 10px 24px rgba(15,23,42,.20);
+  opacity:0;
+  transition:
+    opacity .15s ease,
+    transform .15s ease;
+}
+
+.sellerListingImage:hover .sellerGalleryArrow{
+  opacity:1;
+}
+
+.sellerGalleryArrow:hover{
+  transform:translateY(-50%) scale(1.06);
+}
+
+.sellerGalleryArrow.prev{
+  left:9px;
+}
+
+.sellerGalleryArrow.next{
+  right:9px;
+}
+
+.sellerGalleryDots{
+  position:absolute;
+  left:50%;
+  bottom:12px;
+  z-index:7;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:4px;
+  padding:5px 7px;
+  border-radius:999px;
+  background:rgba(7,19,38,.52);
+  backdrop-filter:blur(8px);
+}
+
+.sellerGalleryDots span{
+  width:5px;
+  height:5px;
+  border-radius:999px;
+  background:rgba(255,255,255,.52);
+  transition:.15s ease;
+}
+
+.sellerGalleryDots span.active{
+  width:12px;
+  background:#fff;
+}
+
+.sellerManageDetails{
+  margin-top:12px;
+  border-top:1px solid rgba(15,23,42,.07);
+}
+
+.sellerManageDetails summary{
+  min-height:36px;
+  padding:11px 2px 0;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  color:#2563eb;
+  font-size:10.5px;
+  line-height:1;
+  font-weight:950;
+  cursor:pointer;
+  list-style:none;
+}
+
+.sellerManageDetails summary::-webkit-details-marker{
+  display:none;
+}
+
+.sellerManageChevron{
+  transition:transform .16s ease;
+}
+
+.sellerManageDetails[open] .sellerManageChevron{
+  transform:rotate(180deg);
+}
+
+.sellerManageDetails .sellerListingTools{
+  margin-top:12px;
+  padding-bottom:2px;
+}
+
+@media (max-width:1000px){
+  .sellerListingRow{
+    grid-template-columns:175px minmax(0,1fr);
+  }
+
+  .sellerListingImage,
+  .sellerListingImage img,
+  .sellerListingImageFallback{
+    height:205px;
+    min-height:205px;
+  }
+
+  .sellerGalleryArrow{
+    opacity:1;
+  }
+}
+
+@media (max-width:760px){
+  .sellerListingRow{
+    grid-template-columns:1fr;
+  }
+
+  .sellerListingImage,
+  .sellerListingImage img,
+  .sellerListingImageFallback{
+    height:220px;
+    min-height:220px;
+    max-height:220px;
+  }
+}
+
+
+
+  </style>
+</head>
+
+<body data-tab="overview">
+
+  <aside class="sellerOsSidebar" aria-label="Seller OS navigation">
+<a class="sellerOsBrand sellerOsOfficialBrand" href="/index.html" aria-label="Go to HAVN homepage">
+
+    <div class="sellerOsOfficialCopy">
+
+        <div class="sellerOsOfficialName">
+            havn<span>.ie</span>
+        </div>
+
+        <div class="sellerOsOfficialTag">
+            Seller Dashboard
+        </div>
+
+    </div>
+
+</a>
+
+<div class="sellerOsUser">
+  <div class="sellerOsAvatar" id="sellerAvatar">JD</div>
+
+  <div class="sellerOsUserDetails">
+    <div class="sellerOsUserName" id="sellerUserName">My Account</div>
+
+    <div class="sellerOsAccountType">
+      Seller account
+    </div>
+
+    <div class="sellerOsVerifiedRow">
+      <span class="sellerOsVerifiedIcon">✓</span>
+      <span id="sellerVerifiedSide">Verified seller</span>
+    </div>
+  </div>
+</div>
+
+    <nav class="sellerOsNav">
+      <button class="sellerOsLink active" type="button" data-tab="overview">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">▦</span>Overview</span>
+      </button>
+      <button class="sellerOsLink" type="button" data-tab="listings">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">⌂</span>My Listings</span>
+        <span class="sellerOsBadge" id="sideListingCount">0</span>
+      </button>
+      <button class="sellerOsLink" type="button" data-tab="leads">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">✉</span>Lead Inbox</span>
+        <span class="sellerOsBadge" id="sideLeadCount">0</span>
+      </button>
+      <button class="sellerOsLink" type="button" data-tab="saved">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">⌕</span>Saved Searches</span>
+        <span class="sellerOsBadge" id="sideSavedCount">0</span>
+      </button>
+      <button class="sellerOsLink" type="button" data-tab="performance">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">▥</span>Performance</span>
+      </button>
+
+      <div class="sellerOsDivider"></div>
+
+      <a class="sellerOsLink" href="/dashboard.html">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">○</span>Account</span>
+      </a>
+      <a class="sellerOsLink" href="/property-upload.html?new=1">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">＋</span>Add Listing</span>
+      </a>
+      <button class="sellerOsLink" type="button" id="sellerSideLogout">
+        <span class="sellerOsLinkMain"><span class="sellerOsIcon">↪</span>Log out</span>
+      </button>
+    </nav>
+
+    <div class="sellerOsSpacer"></div>
+
+    <div class="sellerOsPromo">
+      <div class="sellerOsPromoStar">⭐</div>
+      <div class="sellerOsPromoTitle">Go Featured</div>
+      <div class="sellerOsPromoText">Boost visibility for your best listings.</div>
+      <button class="sellerOsPromoBtn" type="button" onclick="window.__HAVN_SHOW_UPGRADES && window.__HAVN_SHOW_UPGRADES()">Upgrade</button>
+    </div>
+  </aside>
+
+  <div class="wrap">
+
+    <header class="nav">
+      <a class="brand" href="/index.html">
+        <div class="logo"></div>
+        <div>
+          <div class="name">havn.ie</div>
+          <div class="tag">Ireland’s most curated property marketplace.</div>
+        </div>
+      </a>
+
+      <div class="navActions">
+        <span class="pill" id="verifiedPill" style="display:none;">
+          <span class="pillDot" style="background:rgba(34,197,94,0.70)"></span>
+          Verified <strong>✅</strong>
+        </span>
+        <a class="btn ghost" href="/properties.html">Browse listings</a>
+        <a class="btn" href="/dashboard.html">Dashboard</a>
+        <a class="btn primary" href="/property-upload.html?new=1">Create new</a>
+        <button class="btn" id="logoutBtn" type="button">Logout</button>
+      </div>
+    </header>
+
+    <section class="hero">
+    <div class="heroTop">
+      <div>
+        <div class="sellerWelcome">
+          Welcome back, <span id="sellerWelcomeName">Seller</span> 👋
+        </div>
+    
+        <h1>My Listings</h1>
+    
+        <div class="sub">
+          Manage your properties, track performance and respond to enquiries.
+        </div>
+      </div>
+    </div>
+
+      <div class="toolbar">
+        <input class="search" id="search" placeholder="Search title, location, status, package or mode..." />
+        <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        <div class="pill"><span class="pillDot"></span> Count: <strong id="countAll">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(245,158,11,0.55)"></span> Drafts: <strong id="countDrafts">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(14,165,233,0.55)"></span> Submitted: <strong id="countSubmitted">—</strong></div>
+        <div class="pill"><span class="pillDot" style="background:rgba(34,197,94,0.55)"></span> Published: <strong id="countPublished">—</strong></div>
+      </div>
+
+      <div class="verifyCard" id="verifyCard" aria-live="polite">
+        <div class="verifyLeft">
+          <div class="verifyDot"></div>
+          <div class="verifyTxt">
+            <div class="ttl">Verify your email to submit listings</div>
+            <div class="subt">Your drafts are safe. We require a verified email before a listing can be submitted for review.</div>
+          </div>
+        </div>
+        <div class="verifyActions">
+          <button class="btn blue" id="resendVerifyBtn" type="button">Resend email</button>
+          <button class="btn" id="recheckVerifyBtn" type="button">I’ve verified</button>
+          <a class="linkBtn" id="verifyLink" href="/verify-email.html">Enter token</a>
+          <span class="miniMsg" id="verifyMiniMsg"></span>
+        </div>
+      </div>
+    </section>
+
+    <div class="debugBar">
+      <div class="debugLeft">
+        <span class="dotLive"></span>
+        <span class="debugTag">vLISTINGS.6-MONETISATION-UI</span>
+        <span class="debugText" id="debugText">Loading…</span>
+      </div>
+      <div class="debugRight" id="debugRight">—</div>
+    </div>
+
+    <section class="sellerOsTabs" aria-label="Seller workspace tabs">
+      <div class="sellerOsTabsInner">
+        <button class="sellerOsTab active" type="button" data-tab="overview">▦ Overview</button>
+        <button class="sellerOsTab" type="button" data-tab="listings">⌂ My Listings <span class="sellerOsTabBadge" id="tabListingCount">0</span></button>
+        <button class="sellerOsTab" type="button" data-tab="leads">✉ Lead Inbox <span class="sellerOsTabBadge" id="tabLeadCount">0</span></button>
+        <button class="sellerOsTab" type="button" data-tab="saved">⌕ Saved Searches <span class="sellerOsTabBadge" id="tabSavedCount">0</span></button>
+        <button class="sellerOsTab" type="button" data-tab="performance">▥ Performance</button>
+      </div>
+      <a class="btn blue" href="/property-upload.html?new=1">+ Add New Listing</a>
+    </section>
+
+    <div class="upgradeFilterBar" id="upgradeFilterBar" aria-live="polite">
+      <div class="upgradeFilterCopy">
+        <strong>Featured upgrade options</strong>
+        <span>Showing published Standard listings that can be upgraded.</span>
+      </div>
+      <button class="upgradeFilterClear" type="button" onclick="window.__HAVN_CLEAR_UPGRADES && window.__HAVN_CLEAR_UPGRADES()">Show all listings</button>
+    </div>
+
+
+    <section class="sellerStats" id="sellerStats" style="display:none;">
+      <div class="statCard statAll">
+        <div class="statIcon">⌂</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statListings">—</div>
+          <div class="statLabel">All listings</div>
+          <div class="statSub" id="statListingsSub">Across all statuses</div>
+        </div>
+      </div>
+    
+      <div class="statCard statDrafts">
+        <div class="statIcon">✎</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statDrafts">—</div>
+          <div class="statLabel">Drafts</div>
+          <div class="statSub" id="statDraftsSub">Not yet submitted</div>
+        </div>
+      </div>
+    
+      <div class="statCard statSubmitted">
+        <div class="statIcon">➤</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statSubmitted">—</div>
+          <div class="statLabel">Submitted</div>
+          <div class="statSub" id="statSubmittedSub">Awaiting review</div>
+        </div>
+      </div>
+    
+      <div class="statCard statPublished">
+        <div class="statIcon">✓</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statPublished">—</div>
+          <div class="statLabel">Published</div>
+          <div class="statSub" id="statPublishedSub">Live on havn.ie</div>
+        </div>
+      </div>
+    
+      <div class="statCard statEnquiries">
+        <div class="statIcon">♙</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statEnquiries">—</div>
+          <div class="statLabel">Enquiries</div>
+          <div class="statSub" id="statEnquiriesSub">Total leads received</div>
+        </div>
+      </div>
+    
+      <div class="statCard statViews">
+        <div class="statIcon">◉</div>
+        <div class="statContent">
+          <div class="statValue mono" id="statViews">—</div>
+          <div class="statLabel">Total views</div>
+          <div class="statSub" id="statViewsSub">Across all listings</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sellerGrid" id="sellerGrid" style="display:none;">
+      <div class="panel">
+        <div class="panelHead">
+          <div>
+            <h2 class="panelTitle">Lead volume by listing</h2>
+            <div class="panelSub">See which of your properties are generating the strongest buyer demand.</div>
+          </div>
+          <div class="pill">Tracked listings: <strong id="trackedListings">0</strong></div>
+        </div>
+        <div class="panelBody">
+          <div class="tableWrap" id="leadVolumeWrap"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panelHead">
+          <div>
+            <h2 class="panelTitle">Latest enquiry inbox</h2>
+            <div class="panelSub">Your newest buyer messages across all listings.</div>
+          </div>
+          <div class="pill">Recent leads: <strong id="recentLeadCount">0</strong></div>
+        </div>
+        <div class="panelBody">
+          <div class="inboxList" id="latestInbox"></div>
+        </div>
+      </div>
+    </section>
+
+
+    <section class="panel" id="savedSearchPanel" style="display:none; margin-top:14px;">
+      <div class="panelHead">
+        <div>
+          <h2 class="panelTitle">Saved Searches & Alerts</h2>
+          <div class="panelSub">Manage your buyer alerts, pause email notifications, delete old searches, or jump straight back into matching results.</div>
+        </div>
+        <div class="pill">Saved searches: <strong id="savedSearchCount">0</strong></div>
+      </div>
+      <div class="panelBody">
+        <div class="savedSearchList" id="savedSearchList"></div>
+      </div>
+    </section>
+
+
+    <section class="sellerOsFeaturedStrip">
+      <div class="sellerOsFeatureCard">
+        <div>
+          <div class="sellerOsFeatureTitle">Boost your visibility</div>
+          <div class="sellerOsFeatureText">Get homepage priority, a premium badge, and stronger visibility for your published listings.</div>
+        </div>
+        <a class="btn" href="#" onclick="window.__HAVN_SHOW_UPGRADES && window.__HAVN_SHOW_UPGRADES(); return false;">View Upgrade Options</a>
+      </div>
+
+      <div class="sellerOsAccountCard">
+        <div class="sellerOsAccountTitle">Account Status</div>
+        <div class="sellerOsCheck">
+          <div class="sellerOsCheckIcon">✓</div>
+          <div>
+            <div class="sellerOsCheckTitle">All good</div>
+            <div class="sellerOsCheckText">Your account is in good standing.</div>
+          </div>
+        </div>
+        <div class="sellerOsCheck">
+          <div class="sellerOsCheckIcon">✓</div>
+          <div>
+            <div class="sellerOsCheckTitle">Email verified</div>
+            <div class="sellerOsCheckText">Your email verification status is active.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <div id="grid" class="grid" style="display:none;"></div>
+
+    <div id="empty" class="empty" style="display:none;">
+      <h2>No listings yet</h2>
+      <p>Create your first listing to see it here. Drafts and published properties will appear in this dashboard.</p>
+      <div class="emptyActions">
+        <a class="btn primary" href="/property-upload.html?new=1">Create listing</a>
+        <a class="btn" href="/properties.html">Browse listings</a>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="drawerBackdrop" id="drawerBackdrop"></div>
+
+  <aside class="drawer" id="drawer">
+    <div class="drawerHead">
+      <div>
+        <div class="miniSub" style="font-weight:950; text-transform:uppercase; letter-spacing:.05em;">Seller Lead Inbox</div>
+        <div class="miniTitle" id="drawerTitle">Property enquiries</div>
+        <div class="miniSub" id="drawerMeta">—</div>
+      </div>
+      <button class="btn" id="closeDrawerBtn" type="button">Close</button>
+    </div>
+    <div class="drawerBody" id="drawerBody">
+      <div class="empty" style="margin-top:0;">
+        <h2>No enquiries selected</h2>
+        <p>Choose a listing to open its lead history.</p>
+      </div>
+    </div>
+  </aside>
+
+  <div class="toastWrap" id="toastWrap"></div>
+
+  <script>
+    const API = "https://api.havn.ie";
+    const token = localStorage.getItem("token");
+    const $ = (id) => document.getElementById(id);
+    const STORAGE_SAVED_SEARCH_LAST_VIEWED = "havn_saved_search_last_viewed_v1";
+    
+    const state = {
+      rawItems: [],
+      sellerProperties: [],
+      sellerEnquiries: [],
+      grouped: [],
+      savedSearches: [],
+      savedSearchInsights: {},
+      selectedPropertyId: null,
+      upgradeOnly: false
+    };
+
+    function setDebug(text, right=""){
+      $("debugText").textContent = text;
+      $("debugRight").textContent = right || "";
+    }
+
+    function showToast(message, type="success"){
+      const wrap = $("toastWrap");
+      const el = document.createElement("div");
+      el.className = `toast ${type}`;
+      el.textContent = message;
+      wrap.appendChild(el);
+      requestAnimationFrame(() => el.classList.add("show"));
+      setTimeout(() => {
+        el.classList.remove("show");
+        setTimeout(() => el.remove(), 220);
+      }, 2200);
+    }
+
+    function plausibleTrack(eventName, props){
+      try{
+        if(typeof window.plausible === "function"){
+          window.plausible(eventName, { props: props || {} });
+        }
+      }catch(e){}
+    }
+
+    function handleStripeReturnMessage(){
+      const params = new URLSearchParams(window.location.search);
+      const featured = params.get("featured");
+
+      if(featured === "success"){
+        plausibleTrack("Featured Checkout Success", {
+          source: "my-listings",
+          product: "featured-listing"
+        });
+        showToast("Your listing is now featured.", "success");
+      }
+
+      if(featured === "cancel"){
+        plausibleTrack("Featured Checkout Cancelled", {
+          source: "my-listings",
+          product: "featured-listing"
+        });
+        showToast("Checkout cancelled.", "error");
+      }
+
+      if(featured === "success" || featured === "cancel"){
+        params.delete("featured");
+        const cleanUrl = window.location.pathname + (params.toString() ? "?" + params.toString() : "");
+        window.history.replaceState({}, "", cleanUrl);
+      }
+    }
+
+    function safeStr(v, fallback=""){
+      if(v === null || v === undefined) return fallback;
+      const s = String(v).trim();
+      return s ? s : fallback;
+    }
+
+    function eur(n){
+      if(n === null || n === undefined || n === "") return "—";
+      const num = Number(n);
+      if(!isFinite(num)) return String(n);
+      return new Intl.NumberFormat("en-IE",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(num);
+    }
+
+    function toTitleCase(s){
+      return safeStr(s,"").replace(/_/g," ").toLowerCase().replace(/\b\w/g, m => m.toUpperCase()) || "—";
+    }
+
+    function escapeHtml(str){
+      return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function formatDate(v){
+      if(!v) return "—";
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleString("en-IE", {
+        year:"numeric",
+        month:"short",
+        day:"numeric",
+        hour:"2-digit",
+        minute:"2-digit"
+      });
+    }
+
+    function formatDateShort(v){
+      if(!v) return "—";
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString("en-IE", {
+        year:"numeric",
+        month:"short",
+        day:"numeric"
+      });
+    }
+
+    function listingExpiryText(p){
+      if(!p || !p.listingExpiresAt) return "";
+
+      const expiry = new Date(p.listingExpiresAt);
+      if(Number.isNaN(expiry.getTime())) return "";
+
+      const packageName = safeStr(p.listingPackage, "").toUpperCase();
+      const packageLabel =
+        packageName === "FEATURED" ? "Featured Listing" :
+        packageName === "STANDARD" ? "Standard Listing" :
+        "Listing";
+
+      const expiryLabel = expiry.toLocaleDateString("en-IE", {
+        year:"numeric",
+        month:"long",
+        day:"numeric"
+      });
+
+      return `${packageLabel} · Expires ${expiryLabel}`;
+    }
+
+    function isActiveFeatured(p){
+      if(!p) return false;
+
+      const flag = p.isFeatured === true || p.featured === true;
+      if(!flag) return false;
+
+      if(!p.featuredUntil) return true;
+
+      const d = new Date(p.featuredUntil);
+      if(Number.isNaN(d.getTime())) return true;
+
+      return d.getTime() > Date.now();
+    }
+
+    function formatFeaturedUntil(v){
+      if(!v) return "active";
+      const d = new Date(v);
+      if(Number.isNaN(d.getTime())) return "active";
+      return d.toLocaleDateString("en-IE", {
+        year:"numeric",
+        month:"short",
+        day:"numeric"
+      });
+    }
+
+
+    function priceDropHTML(p, status){
+      if(status !== "published") return "";
+
+      const currentPrice = Number(p.price || 0);
+      const previousPrice = Number(p.previousPrice || 0);
+      const hasDrop = previousPrice > 0 && currentPrice > 0 && currentPrice < previousPrice;
+      const reduction = hasDrop ? previousPrice - currentPrice : 0;
+
+      return `
+        <div class="priceDropBox">
+          <div>
+            <div class="priceDropTitle">Update listing price</div>
+            <div class="priceDropSub">
+              ${hasDrop
+                ? `Reduced from ${escapeHtml(eur(previousPrice))} • Saving ${escapeHtml(eur(reduction))}`
+                : `Change the public price without reopening full listing edits.`}
+            </div>
+          </div>
+
+          <div class="priceDropForm">
+            <input
+              class="priceDropInput"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              step="1000"
+              value="${escapeHtml(String(currentPrice || ""))}"
+              data-price-input-for="${Number(p.id)}"
+              aria-label="New listing price"
+            />
+            <button
+              class="tinyBtn primary"
+              type="button"
+              data-price-update-id="${Number(p.id)}"
+              onclick="window.__HAVN_UPDATE_PRICE(${Number(p.id)}, this)"
+            >Update</button>
+          </div>
+
+          <div class="priceDropHint">
+            If the new price is lower, HAVN will mark it as a price drop automatically.
+          </div>
+        </div>
+      `;
+    }
+
+    function featureButtonHTML(p, status){
+      if(status !== "published") return "";
+
+      if(isActiveFeatured(p)){
+        return `
+          <div class="featureBox active">
+            <div class="featureBoxTop">
+              <div>
+                <div class="featureTitle">⭐ Featured listing active</div>
+                <div class="featureSub">Included in homepage Featured Listings, premium placement, and HAVN weekly buyer digest visibility.</div>
+              </div>
+              <div class="featurePrice">Active</div>
+            </div>
+            <div class="featurePerks">
+              <span class="featurePerk">Homepage priority</span>
+              <span class="featurePerk">Weekly digest</span>
+              <span class="featurePerk">Premium badge</span>
+            </div>
+            <button class="miniBtn featuredLocked" type="button" disabled>Featured until ${escapeHtml(formatFeaturedUntil(p.featuredUntil))}</button>
+          </div>
+        `;
+      }
+
+      const label = p && p.isFeatured === true ? "Feature again" : "Promote listing";
+
+      return `
+        <div class="featureBox">
+          <div class="featureBoxTop">
+            <div>
+              <div class="featureTitle">⭐ Boost visibility across HAVN</div>
+              <div class="featureSub">Feature this listing across the homepage, premium cards, and the weekly buyer digest for 30 days.</div>
+            </div>
+            <div class="featurePrice">€29 / 30 days</div>
+          </div>
+          <div class="featurePerks">
+            <span class="featurePerk">Homepage Featured</span>
+            <span class="featurePerk">Weekly digest</span>
+            <span class="featurePerk">Premium badge</span>
+          </div>
+          <button class="miniBtn promote" type="button" data-feature-property-id="${Number(p.id)}" onclick="window.__HAVN_FEATURE_LISTING(${Number(p.id)}, this)">${label}</button>
+        </div>
+      `;
+    }
+
+    function hoursAgo(v){
+      if(!v) return null;
+      const t = new Date(v).getTime();
+      if(!Number.isFinite(t)) return null;
+      return Math.max(0, (Date.now() - t) / 36e5);
+    }
+
+    function normalizeStatus(pOrStatus){
+      let raw = "";
+      if (pOrStatus && typeof pOrStatus === "object") {
+        raw = pOrStatus.listingStatus || pOrStatus.status || "";
+      } else {
+        raw = pOrStatus || "";
+      }
+
+      const v = safeStr(raw, "").toUpperCase();
+      if(v === "DRAFT") return "draft";
+      if(v === "PENDING" || v === "SUBMITTED") return "pending";
+      if(v === "PUBLISHED") return "published";
+      if(v === "CLOSED" || v === "ARCHIVED") return "closed";
+      return v ? v.toLowerCase() : "draft";
+    }
+
+    function statusLabelFromNormalized(status){
+      return status === "draft" ? "Draft" :
+             status === "pending" ? "Submitted" :
+             status === "published" ? "Published" :
+             status === "closed" ? "Closed" :
+             toTitleCase(status);
+    }
+
+    function normalizeEnquiryStatus(raw){
+      const v = safeStr(raw, "NEW").toUpperCase();
+      if (["NEW","CONTACTED","VIEWING_BOOKED","OFFER_IN_PROGRESS","CLOSED","ARCHIVED"].includes(v)) return v;
+      return "NEW";
+    }
+
+    function enquiryStatusLabel(raw){
+      const v = normalizeEnquiryStatus(raw);
+      return v === "NEW" ? "New" :
+             v === "CONTACTED" ? "Contacted" :
+             v === "VIEWING_BOOKED" ? "Viewing booked" :
+             v === "OFFER_IN_PROGRESS" ? "Offer in progress" :
+             v === "CLOSED" ? "Closed" :
+             v === "ARCHIVED" ? "Archived" : "New";
+    }
+
+    function enquiryStatusClass(raw){
+      return "status-" + normalizeEnquiryStatus(raw).toLowerCase();
+    }
+
+    function firstImage(p){
+      const imgs = p.images || p.photos || p.imageUrls || [];
+      if(Array.isArray(imgs) && imgs.length) return imgs.find(Boolean) || "";
+      return p.heroImage || p.coverImage || p.image || "";
+    }
+    
+function getSellerListingPhotos(p){
+  const candidates = [];
+
+  if(Array.isArray(p?.photos)){
+    candidates.push(...p.photos);
+  }
+
+  if(Array.isArray(p?.images)){
+    candidates.push(...p.images);
+  }
+
+  if(Array.isArray(p?.imageUrls)){
+    candidates.push(...p.imageUrls);
+  }
+
+  [
+    p?.heroImage,
+    p?.coverImage,
+    p?.image
+  ].forEach((src) => {
+    if(src) candidates.push(src);
+  });
+
+  return [...new Set(
+    candidates
+      .map((src) => safeStr(src, ""))
+      .filter(Boolean)
+  )];
+}    
+
+    async function apiGet(path){
+      const res = await fetch(API + path, {
+        headers: token ? { "Authorization": "Bearer " + token } : {}
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+    async function apiPost(path, bodyObj){
+      const res = await fetch(API + path, {
+        method: "POST",
+        headers: Object.assign(
+          { "Content-Type": "application/json" },
+          token ? { "Authorization": "Bearer " + token } : {}
+        ),
+        body: JSON.stringify(bodyObj || {})
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+    async function apiPatch(path, bodyObj){
+      const res = await fetch(API + path, {
+        method: "PATCH",
+        headers: Object.assign(
+          { "Content-Type": "application/json" },
+          token ? { "Authorization": "Bearer " + token } : {}
+        ),
+        body: JSON.stringify(bodyObj || {})
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+
+    async function apiDelete(path){
+      const res = await fetch(API + path, {
+        method: "DELETE",
+        headers: token ? { "Authorization": "Bearer " + token } : {}
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e) {}
+      return { ok: res.ok, status: res.status, json, text };
+    }
+
+
+    async function updatePublishedPrice(propertyId, btn){
+      const id = Number(propertyId);
+      if(!id){
+        showToast("Missing property ID.", "error");
+        return;
+      }
+
+      const input = document.querySelector(`[data-price-input-for="${id}"]`);
+      const nextPrice = input ? Number(input.value) : NaN;
+
+      if(!Number.isFinite(nextPrice) || nextPrice <= 0){
+        showToast("Enter a valid price.", "error");
+        if(input) input.focus();
+        return;
+      }
+
+      const originalText = btn ? btn.textContent : "";
+
+      if(btn){
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+      }
+
+      const res = await apiPatch(`/api/properties/${encodeURIComponent(id)}/price`, {
+        price: Math.round(nextPrice)
+      });
+
+      if(!res.ok || !res.json || !res.json.item){
+        if(btn){
+          btn.disabled = false;
+          btn.textContent = originalText || "Update";
+        }
+
+        showToast((res.json && res.json.message) || "Could not update price.", "error");
+        return;
+      }
+
+      const updated = res.json.item;
+
+      state.rawItems = (state.rawItems || []).map((p) =>
+        Number(p.id) === Number(updated.id) ? Object.assign({}, p, updated) : p
+      );
+
+      state.sellerProperties = (state.sellerProperties || []).map((p) =>
+        Number(p.id) === Number(updated.id) ? Object.assign({}, p, updated) : p
+      );
+
+      state.grouped = groupSellerData(
+        state.sellerProperties.length ? state.sellerProperties : state.rawItems,
+        state.sellerEnquiries
+      );
+
+      applyAllFiltersAndRender();
+      updateSellerOsCounts();
+
+      if(res.json.priceDrop){
+        showToast(`Price reduced by ${eur(res.json.priceDrop.reduction)}.`, "success");
+      } else {
+        showToast("Price updated.", "success");
+      }
+    }
+
+    async function startFeatureCheckout(propertyId, btn){
+      if(!propertyId){
+        showToast("Missing property ID.", "error");
+        return;
+      }
+
+      plausibleTrack("Promote Listing Click", {
+        source: "my-listings",
+        propertyId: String(propertyId),
+        product: "featured-listing",
+        price: "29",
+        duration: "30-days"
+      });
+
+      const originalText = btn ? btn.textContent : "";
+
+      if(btn){
+        btn.disabled = true;
+        btn.textContent = "Opening Stripe…";
+      }
+
+      const res = await apiPost("/api/stripe/create-checkout-session", {
+        propertyId: Number(propertyId)
+      });
+
+      if(!res.ok || !res.json || !res.json.url){
+        plausibleTrack("Featured Checkout Failed", {
+          source: "my-listings",
+          propertyId: String(propertyId),
+          product: "featured-listing",
+          status: String(res.status || "unknown")
+        });
+
+        if(btn){
+          btn.disabled = false;
+          btn.textContent = originalText || "Promote listing";
+        }
+
+        showToast((res.json && res.json.message) || "Could not start Stripe checkout.", "error");
+        return;
+      }
+
+      plausibleTrack("Stripe Checkout Started", {
+        source: "my-listings",
+        propertyId: String(propertyId),
+        product: "featured-listing",
+        price: "29",
+        duration: "30-days"
+      });
+
+      window.location.href = res.json.url;
+    }
+
+    function extractItems(payload){
+      if(!payload) return [];
+      if(Array.isArray(payload)) return payload;
+      if(Array.isArray(payload.items)) return payload.items;
+      if(Array.isArray(payload.data)) return payload.data;
+      if(payload.items && Array.isArray(payload.items.items)) return payload.items.items;
+      if(payload.data && Array.isArray(payload.data.items)) return payload.data.items;
+      return [];
+    }
+
+    function extractProperties(payload){
+      if(!payload) return [];
+      if(Array.isArray(payload.properties)) return payload.properties;
+      if(Array.isArray(payload.items)) return payload.items;
+      if(Array.isArray(payload.data)) return payload.data;
+      if(Array.isArray(payload)) return payload;
+      return [];
+    }
+
+    function extractEnquiries(payload){
+      if(!payload) return [];
+      if(Array.isArray(payload.enquiries)) return payload.enquiries;
+      if(Array.isArray(payload.items)) return payload.items;
+      if(Array.isArray(payload.data)) return payload.data;
+      if(Array.isArray(payload)) return payload;
+      return [];
+    }
+
+    function updateCounts(items){
+      $("countAll").textContent = items.length;
+      $("countDrafts").textContent = items.filter(x => normalizeStatus(x) === "draft").length;
+      $("countSubmitted").textContent = items.filter(x => normalizeStatus(x) === "pending").length;
+      $("countPublished").textContent = items.filter(x => normalizeStatus(x) === "published").length;
+    }
+
+    function groupSellerData(properties, enquiries){
+      const map = new Map();
+
+      for (const p of properties){
+        map.set(String(p.id), {
+          propertyId: p.id,
+          id: p.id,
+          slug: p.slug || "",
+          title: p.title || "Untitled listing",
+          address1: p.address1 || "",
+          city: p.city || "",
+          county: p.county || "",
+          eircode: p.eircode || "",
+          price: p.price,
+          bedrooms: p.bedrooms,
+          bathrooms: p.bathrooms,
+          propertyType: p.propertyType || "",
+          listingStatus: p.listingStatus || "",
+          photos: Array.isArray(p.photos) ? p.photos : [],
+          createdAt: p.createdAt || null,
+          updatedAt: p.updatedAt || null,
+          enquiries: [],
+          enquiryCount: 0,
+          latestEnquiry: null,
+          latestCreatedAt: null,
+          hotScore: 0,
+          last24h: 0,
+          last72h: 0
+        });
+      }
+
+      for (const e of enquiries){
+        const p = e.property || {};
+        const key = String(p.id || e.propertyId || "");
+        if (!key) continue;
+
+        if (!map.has(key)){
+          map.set(key, {
+            propertyId: p.id || e.propertyId,
+            id: p.id || e.propertyId,
+            slug: p.slug || "",
+            title: p.title || "Untitled listing",
+            address1: p.address1 || "",
+            city: p.city || "",
+            county: p.county || "",
+            eircode: p.eircode || "",
+            price: null,
+            bedrooms: null,
+            bathrooms: null,
+            propertyType: "",
+            listingStatus: p.listingStatus || "",
+            photos: [],
+            createdAt: null,
+            updatedAt: null,
+            enquiries: [],
+            enquiryCount: 0,
+            latestEnquiry: null,
+            latestCreatedAt: null,
+            hotScore: 0,
+            last24h: 0,
+            last72h: 0
+          });
+        }
+
+        const row = map.get(key);
+        row.enquiries.push(e);
+
+        if (!row.latestCreatedAt || new Date(e.createdAt).getTime() > new Date(row.latestCreatedAt).getTime()){
+          row.latestCreatedAt = e.createdAt;
+          row.latestEnquiry = e;
+        }
+      }
+
+      const grouped = Array.from(map.values()).map((row) => {
+        row.enquiries.sort((a,b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        row.enquiryCount = row.enquiries.length;
+        row.last24h = row.enquiries.filter(x => {
+          const h = hoursAgo(x.createdAt);
+          return h != null && h <= 24;
+        }).length;
+        row.last72h = row.enquiries.filter(x => {
+          const h = hoursAgo(x.createdAt);
+          return h != null && h <= 72;
+        }).length;
+        row.hotScore = row.enquiryCount * 10 + row.last24h * 8 + row.last72h * 4;
+        return row;
+      });
+
+      grouped.sort((a,b) => {
+        if (b.hotScore !== a.hotScore) return b.hotScore - a.hotScore;
+        return new Date(b.latestCreatedAt || 0).getTime() - new Date(a.latestCreatedAt || 0).getTime();
+      });
+
+      return grouped;
+    }
+
+    function isEligibleForFeaturedUpgrade(p){
+      const packageName = safeStr(p && p.listingPackage, "").toUpperCase();
+
+      return (
+        normalizeStatus(p) === "published" &&
+        packageName === "STANDARD" &&
+        !isActiveFeatured(p)
+      );
+    }
+
+    function listingSearchAliases(item){
+      const mode = safeStr(item && item.mode, "").toUpperCase();
+      const packageName = safeStr(item && item.listingPackage, "").toUpperCase();
+
+      const modeAliases =
+        mode === "BUY"
+          ? "buy sale for sale"
+          : mode === "RENT"
+            ? "rent rental to rent"
+            : mode === "SHARE"
+              ? "share room share sharing"
+              : "";
+
+      const packageAliases =
+        packageName === "FEATURED"
+          ? "featured featured listing"
+          : packageName === "STANDARD"
+            ? "standard standard listing"
+            : "";
+
+      return `${modeAliases} ${packageAliases}`.trim();
+    }
+
+    function matchesListingSearch(haystack, query){
+      const terms = safeStr(query, "")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
+
+      if(!terms.length) return true;
+
+      const searchable = safeStr(haystack, "").toLowerCase();
+      return terms.every(term => searchable.includes(term));
+    }
+
+    function currentFilteredListings(){
+      const q = safeStr($("search").value, "").toLowerCase();
+
+      return state.rawItems.filter(p => {
+        if(state.upgradeOnly && !isEligibleForFeaturedUpgrade(p)){
+          return false;
+        }
+
+        if(!q) return true;
+
+        const row = state.grouped.find(x => Number(x.propertyId) === Number(p.id));
+        const latest = row?.latestEnquiry || {};
+        const hay = [
+          p.title, p.address, p.headline, p.slug,
+          p.county, p.city, p.region, p.eircode,
+          p.status, p.listingStatus,
+          p.type, p.propertyType, p.mode, p.listingPackage,
+          listingSearchAliases(p),
+          latest.buyerName, latest.buyerEmail, latest.buyerPhone, latest.message,
+          latest.status, latest.internalNote
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        return matchesListingSearch(hay, q);
+      });
+    }
+
+    function currentFilteredGrouped(){
+      const q = safeStr($("search").value, "").toLowerCase();
+      if(!q) return state.grouped;
+
+      return state.grouped.filter(row => {
+        const latest = row.latestEnquiry || {};
+        const hay = [
+          row.title, row.slug, row.address1, row.city, row.county, row.eircode,
+          row.listingStatus, row.propertyType, row.mode, row.listingPackage,
+          listingSearchAliases(row),
+          latest.buyerName, latest.buyerEmail, latest.buyerPhone, latest.message,
+          latest.status, latest.internalNote
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        return matchesListingSearch(hay, q);
+      });
+    }
+
+    function urgencyClass(createdAt){
+      const h = hoursAgo(createdAt);
+      if (h != null && h <= 6) return "fresh";
+      if (h != null && h <= 24) return "today";
+      return "aging";
+    }
+
+    function urgencyLabel(createdAt){
+      const h = hoursAgo(createdAt);
+      if (h != null && h <= 6) return "Fresh lead";
+      if (h != null && h <= 24) return "Respond today";
+      return "Aging lead";
+    }
+
+
+    function extractSavedSearches(payload){
+      if(!payload) return [];
+      if(Array.isArray(payload.savedSearches)) return payload.savedSearches;
+      if(Array.isArray(payload.searches)) return payload.searches;
+      if(Array.isArray(payload.items)) return payload.items;
+      if(Array.isArray(payload.data)) return payload.data;
+      if(Array.isArray(payload)) return payload;
+      return [];
+    }
+
+    function getSavedSearchFilters(item){
+      if(!item) return {};
+      if(item.filters && typeof item.filters === "object") return item.filters;
+      if(item.query && typeof item.query === "object") return item.query;
+
+      const out = {};
+      [
+        "mode","q","price","beds","baths","type","propertyType","roomType","berBand",
+        "furnished","ensuite","couplesAllowed","billsIncluded","mustHaves","sort"
+      ].forEach((key) => {
+        if(item[key] !== undefined && item[key] !== null && item[key] !== "") out[key] = item[key];
+      });
+      return out;
+    }
+
+    function savedSearchId(item){
+      return item && (item.id || item.savedSearchId || item.uuid || item._id);
+    }
+
+    function savedSearchAlertsOn(item){
+      if(!item) return false;
+      if(item.emailAlertsEnabled !== undefined) return !!item.emailAlertsEnabled;
+      if(item.alertsEnabled !== undefined) return !!item.alertsEnabled;
+      if(item.alertsOn !== undefined) return !!item.alertsOn;
+      if(item.enabled !== undefined) return !!item.enabled;
+      return true;
+    }
+
+    function savedSearchName(item){
+      const filters = getSavedSearchFilters(item);
+      const explicit = safeStr(item && (item.name || item.title || item.label), "");
+      if(explicit) return explicit;
+
+      const mode = safeStr(filters.mode, "");
+      const q = safeStr(filters.q || filters.location || filters.county || filters.city, "");
+      const type = safeStr(filters.type || filters.propertyType, "");
+      const beds = safeStr(filters.beds || filters.bedrooms, "");
+
+      const modeLabel = mode === "rent" ? "Rent" : mode === "share" ? "Share" : mode === "buy" ? "Buy" : "Search";
+      const parts = [q, type ? toTitleCase(type) : "", beds ? `${beds} bed` : ""].filter(Boolean);
+      return parts.length ? `${modeLabel} · ${parts.join(" · ")}` : `${modeLabel} saved search`;
+    }
+
+    function savedSearchFilterChips(item){
+      const f = getSavedSearchFilters(item);
+      const chips = [];
+
+      function push(label, value, cls){
+        const v = safeStr(value, "");
+        if(!v) return;
+        chips.push(`<span class="chip ${cls || ""}">${escapeHtml(label ? `${label}: ${v}` : v)}</span>`);
+      }
+
+      push("Mode", f.mode ? toTitleCase(f.mode) : "", "blue");
+      push("Location", f.q || f.location || f.county || f.city, "");
+      push("Price", f.price, "");
+      push("Beds", f.beds || f.bedrooms, "");
+      push("Baths", f.baths || f.bathrooms, "");
+      push("Type", f.type ? toTitleCase(f.type) : (f.propertyType ? toTitleCase(f.propertyType) : ""), "");
+      push("Room", f.roomType ? toTitleCase(f.roomType) : "", "");
+      push("BER", f.berBand, "");
+      push("", f.furnished ? "Furnished" : "", "green");
+      push("", f.ensuite ? "Ensuite" : "", "green");
+      push("", f.couplesAllowed ? "Couples allowed" : "", "green");
+      push("", f.billsIncluded ? "Bills included" : "", "green");
+
+      if(Array.isArray(f.mustHaves)){
+        f.mustHaves.filter(Boolean).slice(0, 8).forEach(v => push("", toTitleCase(v), ""));
+      } else if(safeStr(f.mustHaves, "")){
+        push("Must-haves", f.mustHaves, "");
+      }
+
+      return chips.length ? chips.join("") : `<span class="chip">No filters saved</span>`;
+    }
+
+    function savedSearchMatchesHref(item){
+      const f = getSavedSearchFilters(item);
+      const params = new URLSearchParams();
+
+      Object.keys(f || {}).forEach((key) => {
+        const val = f[key];
+        if(val === undefined || val === null || val === "") return;
+
+        if(Array.isArray(val)){
+          if(val.length) params.set(key, val.filter(Boolean).join(","));
+          return;
+        }
+
+        params.set(key, String(val));
+      });
+
+      if(!params.get("mode")){
+        params.set("mode", "buy");
+      }
+
+      return "/properties.html?" + params.toString();
+    }
+
+    async function updateSavedSearch(item, patch){
+      const id = savedSearchId(item);
+      if(!id) throw new Error("Missing saved search ID");
+
+      const attempts = [
+        { method:"PATCH", path:`/api/auth/saved-searches/${encodeURIComponent(id)}` },
+        { method:"PATCH", path:`/api/saved-searches/${encodeURIComponent(id)}` },
+        { method:"PATCH", path:`/saved-searches/${encodeURIComponent(id)}` }
+      ];
+
+      let last = null;
+
+      for(const a of attempts){
+        const res = a.method === "PATCH" ? await apiPatch(a.path, patch) : null;
+        last = res;
+        if(res.ok) return res.json;
+      }
+
+      throw new Error((last && last.json && last.json.message) || "Could not update saved search");
+    }
+
+    async function deleteSavedSearch(item){
+      const id = savedSearchId(item);
+      if(!id) throw new Error("Missing saved search ID");
+
+      const attempts = [
+        `/api/auth/saved-searches/${encodeURIComponent(id)}`,
+        `/api/saved-searches/${encodeURIComponent(id)}`,
+        `/saved-searches/${encodeURIComponent(id)}`
+      ];
+
+      let last = null;
+
+      for(const path of attempts){
+        const res = await apiDelete(path);
+        last = res;
+        if(res.ok) return true;
+      }
+
+      throw new Error((last && last.json && last.json.message) || "Could not delete saved search");
+    }
+
+function readSavedSearchViewedMap(){
+  try{
+    const raw = localStorage.getItem(STORAGE_SAVED_SEARCH_LAST_VIEWED);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  }catch{
+    return {};
+  }
+}
+
+function writeSavedSearchViewed(id){
+  if(!id) return;
+
+  const map = readSavedSearchViewedMap();
+  map[String(id)] = new Date().toISOString();
+
+  try{
+    localStorage.setItem(STORAGE_SAVED_SEARCH_LAST_VIEWED, JSON.stringify(map));
+  }catch{}
+}
+
+function listingPublishedTime(p){
+  const t = new Date(p.publishedAt || p.createdAt || p.updatedAt || "").getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isPublicPublishedListing(p){
+  const status = safeStr(p.listingStatus || p.status || p.publicStatus, "").toUpperCase();
+  return status === "PUBLISHED";
+}
+
+function savedSearchViewedSince(item){
+  const id = savedSearchId(item);
+  const viewedMap = readSavedSearchViewedMap();
+  const stored = id ? viewedMap[String(id)] : "";
+  const fallback = item.createdAt || item.updatedAt || item.savedAt || "";
+  const t = new Date(stored || fallback || "").getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function savedSearchModeApi(item){
+  const f = getSavedSearchFilters(item);
+  const mode = safeStr(f.mode, "buy").toLowerCase();
+  if(mode === "rent") return "RENT";
+  if(mode === "share") return "SHARE";
+  return "BUY";
+}
+
+function priceBandRange(priceKey, mode){
+  const key = safeStr(priceKey, "");
+  const m = safeStr(mode, "buy").toLowerCase();
+
+  if(!key) return [null, null];
+
+  if(m === "rent"){
+    if(key === "under-1500") return [0, 1500];
+    if(key === "1500-2500") return [1500, 2500];
+    if(key === "2500-3500") return [2500, 3500];
+    if(key === "3500-plus") return [3500, null];
+  }
+
+  if(m === "share"){
+    if(key === "under-700") return [0, 700];
+    if(key === "700-1000") return [700, 1000];
+    if(key === "1000-1500") return [1000, 1500];
+    if(key === "1500-plus") return [1500, null];
+  }
+
+  if(key === "under-300k") return [0, 300000];
+  if(key === "300-500k") return [300000, 500000];
+  if(key === "500-800k") return [500000, 800000];
+  if(key === "800k-plus") return [800000, null];
+
+  return [null, null];
+}
+
+    function savedSearchMatchesProperty(item, p){
+      const f = getSavedSearchFilters(item);
+      const mode = safeStr(f.mode, "buy").toLowerCase();
+    
+      if(!isPublicPublishedListing(p)) return false;
+    
+      const listingMode = safeStr(p.mode || p.listingMode || p.transactionType, "").toUpperCase();
+      const wantedMode = savedSearchModeApi(item);
+    
+      if(listingMode && wantedMode && listingMode !== wantedMode) return false;
+    
+      const q = safeStr(f.q || f.location || f.county || f.city, "").toLowerCase();
+      if(q){
+        const hay = [
+          p.title, p.address, p.address1, p.address2, p.city, p.town,
+          p.county, p.eircode, p.description
+        ].filter(Boolean).join(" ").toLowerCase();
+    
+        if(!hay.includes(q)) return false;
+      }
+    
+      const wantedType = safeStr(f.type || f.propertyType, "").toUpperCase();
+      if(wantedType && mode !== "share"){
+        const actualType = safeStr(p.propertyType || p.type, "").toUpperCase();
+        if(actualType && actualType !== wantedType) return false;
+      }
+    
+      const bedsMin = Number(f.beds || f.bedrooms || "");
+      if(Number.isFinite(bedsMin) && bedsMin > 0){
+        const beds = Number(p.bedrooms || p.beds || "");
+        if(!Number.isFinite(beds) || beds < bedsMin) return false;
+      }
+    
+      const bathsMin = Number(f.baths || f.bathrooms || "");
+      if(Number.isFinite(bathsMin) && bathsMin > 0){
+        const baths = Number(p.bathrooms || p.baths || "");
+        if(!Number.isFinite(baths) || baths < bathsMin) return false;
+      }
+    
+      const [minPrice, maxPrice] = priceBandRange(f.price, mode);
+      const price = Number(p.price || "");
+    
+      if(minPrice !== null && (!Number.isFinite(price) || price < minPrice)) return false;
+      if(maxPrice !== null && (!Number.isFinite(price) || price > maxPrice)) return false;
+    
+      return true;
+    }
+    
+    async function fetchPublicPropertiesForSavedSearches(){
+      const modes = ["BUY", "RENT", "SHARE"];
+    
+      const results = await Promise.allSettled(
+        modes.map((mode) => apiGet("/api/properties?mode=" + encodeURIComponent(mode) + "&limit=200&page=1"))
+      );
+    
+      const out = [];
+      const seen = new Set();
+    
+      results.forEach((result) => {
+        if(result.status !== "fulfilled") return;
+        if(!result.value || !result.value.ok) return;
+    
+        extractItems(result.value.json).forEach((p) => {
+          const key = safeStr(p.slug || p.id, "");
+          if(!key || seen.has(key)) return;
+          seen.add(key);
+          out.push(p);
+        });
+      });
+    
+      return out;
+    }
+    
+    async function buildSavedSearchInsights(){
+      const publicListings = await fetchPublicPropertiesForSavedSearches();
+      const insights = {};
+    
+      (state.savedSearches || []).forEach((item) => {
+        const id = savedSearchId(item);
+        if(!id) return;
+    
+        const viewedSince = savedSearchViewedSince(item);
+        const matches = publicListings.filter((p) => savedSearchMatchesProperty(item, p));
+        const newMatches = matches.filter((p) => listingPublishedTime(p) > viewedSince);
+    
+        insights[String(id)] = {
+          matchCount: matches.length,
+          newCount: newMatches.length,
+          lastViewedAt: viewedSince
+        };
+      });
+    
+      state.savedSearchInsights = insights;
+    }
+
+    function renderSavedSearches(){
+      const panel = $("savedSearchPanel");
+      const list = $("savedSearchList");
+      const count = $("savedSearchCount");
+
+      if(!panel || !list || !count) return;
+
+      const items = state.savedSearches || [];
+      count.textContent = String(items.length || 0);
+
+      if(!items.length){
+        panel.style.display = "block";
+        list.innerHTML = `
+          <div class="empty" style="margin-top:0;">
+            <h2>No saved searches yet</h2>
+            <p>Save a search from the listings page to activate personalised property alerts.</p>
+            <div class="emptyActions">
+              <a class="btn primary" href="/properties.html">Browse listings</a>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      panel.style.display = "block";
+
+      list.innerHTML = items.map((item) => {
+        const id = savedSearchId(item);
+        const alertsOn = savedSearchAlertsOn(item);
+        const created = item.createdAt || item.created_at || item.savedAt || item.updatedAt;
+        const latest = item.updatedAt || item.lastMatchedAt || item.lastNotifiedAt || "";
+        const href = savedSearchMatchesHref(item);
+        const name = savedSearchName(item);
+        const filters = getSavedSearchFilters(item);
+        const mode = safeStr(filters.mode, "buy").toLowerCase();
+        const modeLabel = mode === "rent" ? "Rent" : mode === "share" ? "Share" : "Buy";
+        const alertFrequency = safeStr(filters.alertFrequency || item.alertFrequency, alertsOn ? "instant" : "");
+        const alertChannel = safeStr(filters.alertChannel || item.alertChannel, alertsOn ? "email" : "");
+        const insight = state.savedSearchInsights[String(id)] || { matchCount: 0, newCount: 0 };
+        const newCount = Number(insight.newCount || 0);
+        const matchCount = Number(insight.matchCount || 0);
+
+        return `
+          <div class="savedSearchCard" data-saved-search-id="${escapeHtml(id)}">
+            <div class="savedSearchHead">
+              <div class="savedSearchTitleRow">
+                <div class="savedSearchIcon">⌕</div>
+                <div style="min-width:0;">
+                  <div class="savedSearchTitle">${escapeHtml(name)}</div>
+                  <div class="savedSearchMeta">
+                    Created ${escapeHtml(formatDate(created))}
+                    ${latest ? `<br>Updated ${escapeHtml(formatDate(latest))}` : ``}
+                  </div>
+                </div>
+              </div>
+
+            <div class="savedSearchStatus">
+              <span class="statusPill ${alertsOn ? "published" : "closed"}">${alertsOn ? "Alerts ON" : "Paused"}</span>
+              <span class="statusPill ${newCount > 0 ? "today" : "closed"}">${newCount > 0 ? `${newCount} new` : `${matchCount} matches`}</span>
+              <span class="savedSearchMode">${escapeHtml(modeLabel)}</span>
+            </div>
+            </div>
+
+            <div class="savedSearchFilters">${savedSearchFilterChips(item)}</div>
+
+            <div class="savedSearchFineprint">
+              ${newCount > 0
+                ? `${newCount} new matching listing${newCount === 1 ? "" : "s"} since your last visit.`
+                : `${matchCount} current matching listing${matchCount === 1 ? "" : "s"} found.`}
+              <br>
+              ${alertsOn
+                ? `Email alerts are active${alertFrequency ? ` · ${escapeHtml(toTitleCase(alertFrequency))}` : ``}${alertChannel ? ` · ${escapeHtml(toTitleCase(alertChannel))}` : ``}.`
+                : `Alerts are paused for this saved search.`}
+            </div>
+            <input class="savedSearchNameInput js-saved-search-name" value="${escapeHtml(name)}" placeholder="Saved search name" />
+
+            <div class="savedSearchActions">
+              <a class="tinyBtn primary js-view-matches" href="${escapeHtml(href)}">View matches</a>
+              <button class="tinyBtn ${alertsOn ? "warn" : "success"} js-toggle-alerts" type="button">${alertsOn ? "Pause alerts" : "Resume alerts"}</button>
+              <button class="tinyBtn js-save-name" type="button">Save name</button>
+              <button class="tinyBtn danger js-delete-search" type="button">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      bindSavedSearchActions();
+    }
+
+    function findSavedSearchById(id){
+      return (state.savedSearches || []).find(x => String(savedSearchId(x)) === String(id));
+    }
+
+    function bindSavedSearchActions(){
+      $("savedSearchList").querySelectorAll(".savedSearchCard").forEach((card) => {
+        const id = card.getAttribute("data-saved-search-id");
+        const item = findSavedSearchById(id);
+
+        const toggleBtn = card.querySelector(".js-toggle-alerts");
+        const saveNameBtn = card.querySelector(".js-save-name");
+        const deleteBtn = card.querySelector(".js-delete-search");
+        const nameInput = card.querySelector(".js-saved-search-name");
+        const viewMatches = card.querySelector(".js-view-matches");
+
+        if(viewMatches){
+          viewMatches.addEventListener("click", () => {
+            writeSavedSearchViewed(id);
+          });
+        }
+
+        if(toggleBtn){
+          toggleBtn.addEventListener("click", async () => {
+            const current = findSavedSearchById(id);
+            if(!current) return;
+
+            const alertsOn = savedSearchAlertsOn(current);
+            const originalText = toggleBtn.textContent;
+
+            toggleBtn.disabled = true;
+            toggleBtn.textContent = "Saving…";
+
+            try{
+              await updateSavedSearch(current, {
+                emailAlertsEnabled: !alertsOn,
+                alertsEnabled: !alertsOn,
+                alertsOn: !alertsOn,
+                enabled: !alertsOn
+              });
+
+              current.emailAlertsEnabled = !alertsOn;
+              current.alertsEnabled = !alertsOn;
+              current.alertsOn = !alertsOn;
+              current.enabled = !alertsOn;
+
+              renderSavedSearches();
+              showToast(!alertsOn ? "Alerts resumed." : "Alerts paused.", "success");
+            }catch(err){
+              toggleBtn.disabled = false;
+              toggleBtn.textContent = originalText;
+              showToast(err.message || "Could not update alerts.", "error");
+            }
+          });
+        }
+
+        if(saveNameBtn){
+          saveNameBtn.addEventListener("click", async () => {
+            const current = findSavedSearchById(id);
+            if(!current) return;
+
+            const newName = safeStr(nameInput.value, "");
+            if(!newName){
+              showToast("Enter a name first.", "error");
+              return;
+            }
+
+            const originalText = saveNameBtn.textContent;
+            saveNameBtn.disabled = true;
+            saveNameBtn.textContent = "Saving…";
+
+            try{
+              await updateSavedSearch(current, { name: newName, title: newName, label: newName });
+              current.name = newName;
+              current.title = newName;
+              current.label = newName;
+              renderSavedSearches();
+              showToast("Saved search renamed.", "success");
+            }catch(err){
+              saveNameBtn.disabled = false;
+              saveNameBtn.textContent = originalText;
+              showToast(err.message || "Could not rename saved search.", "error");
+            }
+          });
+        }
+
+        if(deleteBtn){
+          deleteBtn.addEventListener("click", async () => {
+            const current = findSavedSearchById(id);
+            if(!current) return;
+
+            const ok = window.confirm("Delete this saved search and stop its alerts?");
+            if(!ok) return;
+
+            const originalText = deleteBtn.textContent;
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = "Deleting…";
+
+            try{
+              await deleteSavedSearch(current);
+              state.savedSearches = (state.savedSearches || []).filter(x => String(savedSearchId(x)) !== String(id));
+              renderSavedSearches();
+              showToast("Saved search deleted.", "success");
+            }catch(err){
+              deleteBtn.disabled = false;
+              deleteBtn.textContent = originalText;
+              showToast(err.message || "Could not delete saved search.", "error");
+            }
+          });
+        }
+      });
+    }
+
+
+    function setSellerOsTab(tab){
+      const next = tab || "overview";
+      document.body.setAttribute("data-tab", next);
+
+      document.querySelectorAll("[data-tab]").forEach((el) => {
+        if(el.classList.contains("sellerOsLink") || el.classList.contains("sellerOsTab")){
+          el.classList.toggle("active", el.getAttribute("data-tab") === next);
+        }
+      });
+
+      try{
+        localStorage.setItem("havn_seller_os_tab", next);
+      }catch(e){}
+    }
+
+    function updateUpgradeFilterBar(){
+      const bar = $("upgradeFilterBar");
+      if(!bar) return;
+      bar.classList.toggle("show", state.upgradeOnly === true);
+    }
+
+    function showFeaturedUpgradeOptions(){
+      state.upgradeOnly = true;
+      if($("search")) $("search").value = "";
+      setSellerOsTab("listings");
+      updateUpgradeFilterBar();
+      applyAllFiltersAndRender();
+
+      try{
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }catch(e){}
+    }
+
+    function clearFeaturedUpgradeOptions(){
+      state.upgradeOnly = false;
+      updateUpgradeFilterBar();
+      applyAllFiltersAndRender();
+    }
+
+function updateSellerOsCounts(){
+  const listings = state.rawItems.length || 0;
+  const leads = state.sellerEnquiries.length || 0;
+  const saved = state.savedSearches.length || 0;
+
+  ["sideListingCount", "tabListingCount"].forEach((id) => {
+    if ($(id)) $(id).textContent = String(listings);
+  });
+
+  ["sideLeadCount", "tabLeadCount"].forEach((id) => {
+    if ($(id)) $(id).textContent = String(leads);
+  });
+
+  ["sideSavedCount", "tabSavedCount"].forEach((id) => {
+    if ($(id)) $(id).textContent = String(saved);
+  });
+
+  if (ME) {
+    const name = safeStr(
+      ME.name || ME.fullName || ME.email,
+      "My Account"
+    );
+
+    const initials =
+      name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join("")
+        .toUpperCase() || "HA";
+
+    if ($("sellerUserName")) {
+      $("sellerUserName").textContent =
+        name.includes("@") ? name.split("@")[0] : name;
+    }
+
+    if ($("sellerAvatar")) {
+      $("sellerAvatar").textContent = initials;
+    }
+
+    if ($("sellerWelcomeName")) {
+      $("sellerWelcomeName").textContent =
+        name.includes("@")
+          ? name.split("@")[0]
+          : name.split(/\s+/)[0];
+    }
+  }
+}
+
+    function initSellerOsShell(){
+      document.querySelectorAll(".sellerOsLink[data-tab], .sellerOsTab[data-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.upgradeOnly = false;
+          updateUpgradeFilterBar();
+          setSellerOsTab(btn.getAttribute("data-tab"));
+          if(state.rawItems.length) applyAllFiltersAndRender();
+        });
+      });
+
+      const sideLogout = $("sellerSideLogout");
+      if(sideLogout){
+        sideLogout.addEventListener("click", () => {
+          localStorage.removeItem("token");
+          location.href = "/login.html";
+        });
+      }
+
+    let initialTab = "overview";
+    
+    try{
+      const allowedTabs = new Set([
+        "overview",
+        "listings",
+        "leads",
+        "saved",
+        "performance"
+      ]);
+    
+      const requestedTab =
+        new URLSearchParams(window.location.search).get("tab");
+    
+      if (requestedTab && allowedTabs.has(requestedTab)) {
+        initialTab = requestedTab;
+      } else {
+        initialTab =
+          localStorage.getItem("havn_seller_os_tab") || "overview";
+      }
+    }catch(e){}
+    
+    setSellerOsTab(initialTab);
+    }
+
+    window.__HAVN_SET_TAB = setSellerOsTab;
+
+
+function renderSellerStats(filteredGrouped){
+  const items = currentFilteredListings();
+
+  $("sellerStats").style.display =
+    items.length || state.rawItems.length ? "grid" : "none";
+
+  const drafts = items.filter(
+    (item) => normalizeStatus(item) === "draft"
+  ).length;
+
+  const submitted = items.filter(
+    (item) => normalizeStatus(item) === "pending"
+  ).length;
+
+  const published = items.filter(
+    (item) => normalizeStatus(item) === "published"
+  ).length;
+
+  const itemIds = new Set(
+    items.map((item) => Number(item.id)).filter(Boolean)
+  );
+
+  const totalEnquiries = state.sellerEnquiries.filter((enquiry) => {
+    const propertyId = Number(
+      enquiry?.property?.id || enquiry?.propertyId || 0
+    );
+
+    return !items.length || itemIds.has(propertyId);
+  }).length;
+
+  const totalViews = items.reduce((sum, item) => {
+    const views = Number(item?.views || 0);
+    return sum + (Number.isFinite(views) ? views : 0);
+  }, 0);
+
+  $("statListings").textContent = String(items.length);
+  $("statDrafts").textContent = String(drafts);
+  $("statSubmitted").textContent = String(submitted);
+  $("statPublished").textContent = String(published);
+  $("statEnquiries").textContent = String(totalEnquiries);
+  $("statViews").textContent = totalViews.toLocaleString("en-IE");
+
+  $("statListingsSub").textContent =
+    items.length === 1 ? "1 listing in this view" : "Across all statuses";
+
+  $("statDraftsSub").textContent =
+    drafts === 1 ? "1 listing not yet submitted" : "Not yet submitted";
+
+  $("statSubmittedSub").textContent =
+    submitted === 1 ? "1 listing awaiting review" : "Awaiting review";
+
+  $("statPublishedSub").textContent =
+    published === 1 ? "1 listing live on havn.ie" : "Live on havn.ie";
+
+  $("statEnquiriesSub").textContent =
+    totalEnquiries === 1 ? "1 buyer lead received" : "Total leads received";
+
+  $("statViewsSub").textContent =
+    totalViews === 1 ? "1 listing view" : "Across all listings";
+}
+
+    function renderLeadVolume(filteredGrouped){
+      $("sellerGrid").style.display = filteredGrouped.length || state.rawItems.length ? "grid" : "none";
+      $("trackedListings").textContent = String(filteredGrouped.length || 0);
+
+      if (!filteredGrouped.length){
+        $("leadVolumeWrap").innerHTML = `
+          <div class="empty" style="margin-top:0;">
+            <h2>No listings match this filter</h2>
+            <p>Try a broader search to see lead volume by listing.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const rows = filteredGrouped.map((row) => {
+        const address = [row.address1, row.city, row.county, row.eircode].filter(Boolean).join(", ");
+        const status = normalizeStatus(row);
+        const slug = safeStr(row.slug, "");
+        const viewHref = slug ? ("/property.html?slug=" + encodeURIComponent(slug)) : "#";
+        const latestStatus = row.latestEnquiry ? enquiryStatusLabel(row.latestEnquiry.status) : "No latest status";
+
+        const sourceProperty =
+          state.rawItems.find((p) => Number(p.id) === Number(row.propertyId)) ||
+          state.sellerProperties.find((p) => Number(p.id) === Number(row.propertyId)) ||
+          row;
+
+        const img = firstImage(sourceProperty);
+        const title = row.title || "Untitled listing";
+        const latestClass = row.latestEnquiry && normalizeEnquiryStatus(row.latestEnquiry.status) === "CONTACTED" ? "green" : (row.latestEnquiry ? "" : "gray");
+
+        return `
+          <div class="leadVolumeRow">
+            <div class="leadVolumeThumb">
+              ${img ? `<img src="${escapeHtml(img)}" alt="">` : `<div class="leadVolumeThumbFallback">⌂</div>`}
+            </div>
+
+            <div class="leadVolumeMain">
+              <h3 class="leadVolumeTitle">${escapeHtml(title)}</h3>
+              <div class="leadVolumeAddress">${escapeHtml(address || slug || "Address unavailable")}</div>
+
+              <div class="leadVolumeMeta">
+                <span class="leadVolumeMetric">👥 ${row.enquiryCount || 0} lead${(row.enquiryCount || 0) === 1 ? "" : "s"}</span>
+                <span class="leadVolumeMetric">◷ ${row.last24h || 0} in 24h</span>
+                <span class="leadVolumeMetric">↻ ${row.last72h || 0} in 72h</span>
+                <span class="leadVolumeMetric">
+                  <span class="leadVolumeDot ${latestClass}"></span>
+                  ${escapeHtml(latestStatus)}
+                </span>
+              </div>
+            </div>
+
+            <div class="leadVolumeStatus">
+              <span class="statusPill ${status}">${escapeHtml(statusLabelFromNormalized(status))}</span>
+            </div>
+
+            <div class="leadVolumeActions">
+              <button class="tinyBtn primary" type="button" onclick="window.__HAVN_OPEN_DRAWER(${Number(row.propertyId)})">View enquiries</button>
+              ${slug ? `<a class="tinyBtn" href="${viewHref}" target="_blank" rel="noopener">Open listing</a>` : `<span></span>`}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      $("leadVolumeWrap").innerHTML = `
+        <div class="leadVolumeList">
+          ${rows}
+          <div class="leadVolumeFooter">
+            <button class="tinyBtn" type="button" onclick="window.__HAVN_SET_TAB && window.__HAVN_SET_TAB('listings')">View all tracked listings →</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLatestInbox(filteredGrouped){
+      const items = filteredGrouped
+        .filter(x => x.latestEnquiry)
+        .sort((a,b) => new Date(b.latestCreatedAt || 0).getTime() - new Date(a.latestCreatedAt || 0).getTime())
+        .slice(0, 8);
+
+      $("recentLeadCount").textContent = String(items.length || 0);
+
+      if (!items.length){
+        $("latestInbox").innerHTML = `
+          <div class="empty" style="margin-top:0;">
+            <h2>No recent enquiries</h2>
+            <p>When buyers contact you through a property page, the latest leads will appear here.</p>
+          </div>
+        `;
+        return;
+      }
+
+      $("latestInbox").innerHTML = items.map((row) => {
+        const e = row.latestEnquiry || {};
+        const buyerName = safeStr(e.buyerName, "Buyer");
+        const buyerEmail = safeStr(e.buyerEmail, "");
+        const buyerPhone = safeStr(e.buyerPhone, "");
+        const address = [row.address1, row.city, row.county, row.eircode].filter(Boolean).join(", ");
+        const replySubject = encodeURIComponent(`Re: Your enquiry on HAVN.ie — ${row.title || "Property"}`);
+        const replyBody = encodeURIComponent(`Hi ${buyerName},\n\nThanks for your enquiry regarding "${row.title || "the property"}".\n\nBest regards,`);
+
+        return `
+          <div class="leadCard">
+            <div class="leadHead">
+              <div>
+                <div class="leadTitle">${escapeHtml(row.title || "Untitled listing")}</div>
+                <div class="leadMeta">
+                  ${escapeHtml(address || "Address unavailable")}<br>
+                  Buyer: <strong>${escapeHtml(buyerName)}</strong> • ${escapeHtml(buyerEmail || "—")}${buyerPhone ? ` • ${escapeHtml(buyerPhone)}` : ``}<br>
+                  Received: ${escapeHtml(formatDate(e.createdAt))}
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <span class="statusPill ${urgencyClass(e.createdAt)}">${escapeHtml(urgencyLabel(e.createdAt))}</span>
+                <span class="chip ${enquiryStatusClass(e.status)}">${escapeHtml(enquiryStatusLabel(e.status))}</span>
+              </div>
+            </div>
+
+            ${e.intent ? `<div class="chips"><span class="chip blue">${escapeHtml(e.intent)}</span></div>` : ``}
+            <div class="msgBox">${escapeHtml(safeStr(e.message, ""))}</div>
+            ${e.internalNote ? `<div class="msgBox"><strong>Internal note:</strong><br>${escapeHtml(e.internalNote)}</div>` : ``}
+
+            <div class="leadActions">
+              <button class="tinyBtn primary" type="button" onclick="window.__HAVN_OPEN_DRAWER(${Number(row.propertyId)})">View all enquiries</button>
+              ${buyerEmail ? `<a class="tinyBtn" href="mailto:${encodeURIComponent(buyerEmail)}?subject=${replySubject}&body=${replyBody}">Reply to buyer</a>` : ``}
+              ${row.slug ? `<a class="tinyBtn" href="/property.html?slug=${encodeURIComponent(row.slug)}" target="_blank" rel="noopener">Open listing</a>` : ``}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+function cardHTML(p){
+  const row =
+    state.grouped.find(
+      (item) => Number(item.propertyId) === Number(p.id)
+    ) || null;
+
+  const enquiryCount = row ? Number(row.enquiryCount || 0) : 0;
+  const latest = row ? row.latestEnquiry : null;
+
+  const status = normalizeStatus(p);
+  const statusLabel = statusLabelFromNormalized(status);
+
+  const photos = getSellerListingPhotos(p);
+  const img = photos[0] || "";
+  const photoCount = photos.length;
+
+  const title = safeStr(
+    p.title || p.address || p.headline || p.slug,
+    "Untitled listing"
+  );
+
+  const address = [
+    p.address1,
+    p.city,
+    p.county,
+    p.eircode
+  ].filter(Boolean).join(", ");
+
+  const price = eur(
+    p.price || p.askingPrice || p.listPrice
+  );
+
+  const slug = safeStr(p.slug, "");
+
+  const editHref =
+    "/property-upload.html" +
+    (p.id ? `?id=${encodeURIComponent(p.id)}` : "");
+
+  const viewHref = slug
+    ? `/property.html?slug=${encodeURIComponent(slug)}`
+    : editHref;
+
+  const activeFeatured = isActiveFeatured(p);
+  const views = Number(p.views || 0);
+
+  const updatedAt =
+    p.updatedAt ||
+    p.publishedAt ||
+    p.createdAt ||
+    null;
+
+  const expiryText = listingExpiryText(p);
+
+  const primaryHref =
+    status === "published" && slug
+      ? viewHref
+      : editHref;
+
+  const primaryLabel =
+    status === "published" && slug
+      ? "Preview"
+      : "Continue editing";
+
+  const dots = photos
+    .slice(0, 6)
+    .map((_, index) => `
+      <span
+        class="${index === 0 ? "active" : ""}"
+        data-gallery-dot="${Number(p.id)}-${index}"
+      ></span>
+    `)
+    .join("");
+
+  return `
+    <article class="sellerListingRow${activeFeatured ? " isFeatured" : ""}">
+      <div
+        class="sellerListingImage"
+        data-gallery-property="${Number(p.id)}"
+        data-gallery-index="0"
+      >
+        ${
+          img
+            ? `
+              <img
+                id="sellerGalleryImage-${Number(p.id)}"
+                src="${escapeHtml(img)}"
+                alt="${escapeHtml(title)}"
+              >
+            `
+            : `<div class="sellerListingImageFallback">⌂</div>`
+        }
+
+        ${
+          photos.length > 1
+            ? `
+              <button
+                class="sellerGalleryArrow prev"
+                type="button"
+                aria-label="Previous photo"
+                onclick="window.__HAVN_SELLER_GALLERY(${Number(p.id)}, -1, event)"
+              >‹</button>
+
+              <button
+                class="sellerGalleryArrow next"
+                type="button"
+                aria-label="Next photo"
+                onclick="window.__HAVN_SELLER_GALLERY(${Number(p.id)}, 1, event)"
+              >›</button>
+
+              <div class="sellerGalleryDots">
+                ${dots}
+              </div>
+            `
+            : ``
+        }
+
+        ${
+          photoCount
+            ? `
+              <div
+                class="sellerPhotoCount"
+                id="sellerPhotoCount-${Number(p.id)}"
+              >
+                1 / ${photoCount}
+              </div>
+            `
+            : ``
+        }
+
+        ${
+          activeFeatured
+            ? `<div class="sellerFeaturedFlag">★ Featured</div>`
+            : ``
+        }
+      </div>
+
+      <div class="sellerListingMain">
+        <div class="sellerListingTop">
+          <div class="sellerListingIdentity">
+            <h3>${escapeHtml(title)}</h3>
+
+            <div class="sellerListingAddress">
+              ${escapeHtml(address || "Address unavailable")}
+            </div>
+          </div>
+
+          <div class="sellerListingStatusBlock">
+            <span class="statusPill ${status}">
+              ${escapeHtml(statusLabel)}
+            </span>
+
+            <span class="sellerListingDate">
+              Updated ${escapeHtml(formatDateShort(updatedAt))}
+            </span>
+
+            ${
+              expiryText
+                ? `<span class="sellerListingExpiry">${escapeHtml(expiryText)}</span>`
+                : ``
+            }
+          </div>
+        </div>
+
+        <div class="sellerListingPrice">
+          ${escapeHtml(price)}
+        </div>
+
+        <div class="sellerListingMetrics">
+          <div class="sellerMetric">
+            <span class="sellerMetricIcon">◉</span>
+            <strong>${views.toLocaleString("en-IE")}</strong>
+            <small>Views</small>
+          </div>
+
+          <div class="sellerMetric">
+            <span class="sellerMetricIcon">✉</span>
+            <strong>${enquiryCount}</strong>
+            <small>Enquiries</small>
+          </div>
+
+          <div class="sellerMetric">
+            <span class="sellerMetricIcon">◷</span>
+            <strong>${row ? Number(row.last24h || 0) : 0}</strong>
+            <small>Last 24h</small>
+          </div>
+
+          <div class="sellerMetric sellerMetricWide">
+            <span class="sellerMetricIcon">●</span>
+            <strong>
+              ${
+                latest
+                  ? escapeHtml(enquiryStatusLabel(latest.status))
+                  : "No new leads"
+              }
+            </strong>
+            <small>Latest activity</small>
+          </div>
+        </div>
+
+        <div class="sellerListingActions">
+          <a
+            class="sellerActionBtn sellerActionPrimary"
+            href="${primaryHref}"
+          >
+            ${primaryLabel === "Preview" ? "◉ Preview" : "✎ Continue editing"}
+          </a>
+
+          <a
+            class="sellerActionBtn"
+            href="${editHref}"
+          >
+            ✎ Edit
+          </a>
+
+          <button
+            class="sellerActionBtn"
+            type="button"
+            onclick="window.__HAVN_OPEN_DRAWER(${Number(p.id)})"
+          >
+            ✉ Enquiries
+          </button>
+
+          ${
+            status === "published" && !activeFeatured
+              ? `
+                <button
+                  class="sellerActionBtn sellerActionFeature"
+                  type="button"
+                  onclick="window.__HAVN_FEATURE_LISTING(${Number(p.id)}, this)"
+                >
+                  ★ Feature
+                </button>
+              `
+              : ``
+          }
+
+          ${
+            activeFeatured
+              ? `
+                <span class="sellerFeaturedUntil">
+                  Featured until ${escapeHtml(formatFeaturedUntil(p.featuredUntil))}
+                </span>
+              `
+              : ``
+          }
+        </div>
+
+        ${
+          status === "published"
+            ? `
+              <details class="sellerManageDetails">
+                <summary>
+                  <span>Manage listing</span>
+                  <span class="sellerManageChevron">⌄</span>
+                </summary>
+
+                <div class="sellerListingTools">
+                  ${priceDropHTML(p, status)}
+                  ${featureButtonHTML(p, status)}
+                </div>
+              </details>
+            `
+            : ``
+        }
+      </div>
+    </article>
+  `;
+}
+
+
+    function renderListings(filteredItems){
+      updateCounts(filteredItems);
+
+      if(!filteredItems.length){
+        $("grid").style.display = "none";
+        $("empty").style.display = "block";
+
+        if(state.upgradeOnly){
+          $("empty").innerHTML = `
+            <h2>No Standard listings are ready to upgrade</h2>
+            <p>Only published Standard listings that are not currently Featured appear here.</p>
+            <div class="emptyActions">
+              <button class="btn primary" type="button" onclick="window.__HAVN_CLEAR_UPGRADES && window.__HAVN_CLEAR_UPGRADES()">Show all listings</button>
+            </div>
+          `;
+        } else {
+          $("empty").innerHTML = `
+            <h2>No listings match this view</h2>
+            <p>Create a new listing or adjust your search to see more results.</p>
+            <div class="emptyActions">
+              <a class="btn primary" href="/property-upload.html?new=1">Create listing</a>
+              <a class="btn" href="/properties.html">Browse listings</a>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      $("empty").style.display = "none";
+      $("grid").style.display = "grid";
+      $("grid").innerHTML = filteredItems.map(cardHTML).join("");
+    }
+
+    async function saveEnquiryUpdate(enquiryId, status, internalNote){
+      const res = await apiPatch(`/api/properties/mine/enquiries/${encodeURIComponent(enquiryId)}`, {
+        status,
+        internalNote
+      });
+      if (!res.ok) {
+        throw new Error((res.json && res.json.message) || res.text || "Failed to update enquiry");
+      }
+      return res.json;
+    }
+
+    function applyAllFiltersAndRender(){
+      const filteredItems = currentFilteredListings();
+      const filteredGrouped = currentFilteredGrouped();
+
+      renderSellerStats(filteredGrouped);
+      renderLeadVolume(filteredGrouped);
+      renderLatestInbox(filteredGrouped);
+      renderListings(filteredItems);
+      refreshOpenDrawer();
+    }
+
+    function updateEnquiryInState(updated){
+      const idx = state.sellerEnquiries.findIndex(x => Number(x.id) === Number(updated.id));
+      if (idx >= 0) state.sellerEnquiries[idx] = updated;
+      state.grouped = groupSellerData(
+        state.sellerProperties.length ? state.sellerProperties : state.rawItems,
+        state.sellerEnquiries
+      );
+    }
+
+    function renderDrawer(propertyId){
+      const row = state.grouped.find(x => Number(x.propertyId) === Number(propertyId));
+      state.selectedPropertyId = row ? Number(row.propertyId) : null;
+
+      if (!row){
+        $("drawerTitle").textContent = "Property enquiries";
+        $("drawerMeta").textContent = "No property selected";
+        $("drawerBody").innerHTML = `
+          <div class="empty" style="margin-top:0;">
+            <h2>No enquiry data found</h2>
+            <p>We could not find enquiry history for this listing.</p>
+          </div>
+        `;
+        openDrawer();
+        return;
+      }
+
+      const address = [row.address1, row.city, row.county, row.eircode].filter(Boolean).join(", ");
+      $("drawerTitle").textContent = row.title || "Property enquiries";
+      $("drawerMeta").textContent = address || row.slug || "—";
+
+      if (!row.enquiries.length){
+        $("drawerBody").innerHTML = `
+          <div class="empty" style="margin-top:0;">
+            <h2>No enquiries yet</h2>
+            <p>This listing has no buyer enquiries yet.</p>
+          </div>
+        `;
+        openDrawer();
+        return;
+      }
+
+      $("drawerBody").innerHTML = row.enquiries.map((e) => {
+        const buyerName = safeStr(e.buyerName, "Buyer");
+        const buyerEmail = safeStr(e.buyerEmail, "");
+        const buyerPhone = safeStr(e.buyerPhone, "");
+        const replySubject = encodeURIComponent(`Re: Your enquiry on HAVN.ie — ${row.title || "Property"}`);
+        const replyBody = encodeURIComponent(`Hi ${buyerName},\n\nThanks for your enquiry regarding "${row.title || "the property"}".\n\nBest regards,`);
+
+        return `
+          <div class="leadCard" style="margin-bottom:12px;" data-enquiry-id="${Number(e.id)}">
+            <div class="leadHead">
+              <div>
+                <div class="leadTitle">${escapeHtml(buyerName)}</div>
+                <div class="leadMeta">
+                  ${escapeHtml(buyerEmail || "—")}${buyerPhone ? ` • ${escapeHtml(buyerPhone)}` : ``}<br>
+                  Received: ${escapeHtml(formatDate(e.createdAt))}
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <span class="statusPill ${urgencyClass(e.createdAt)}">${escapeHtml(urgencyLabel(e.createdAt))}</span>
+                <span class="chip ${enquiryStatusClass(e.status)} js-live-chip">${escapeHtml(enquiryStatusLabel(e.status))}</span>
+              </div>
+            </div>
+
+            ${e.intent ? `<div class="chips"><span class="chip blue">${escapeHtml(e.intent)}</span></div>` : ``}
+            <div class="msgBox">${escapeHtml(safeStr(e.message, ""))}</div>
+
+            <label class="fieldLabel">Lead status</label>
+            <select class="selectField js-status">
+              <option value="NEW" ${normalizeEnquiryStatus(e.status)==="NEW"?"selected":""}>New</option>
+              <option value="CONTACTED" ${normalizeEnquiryStatus(e.status)==="CONTACTED"?"selected":""}>Contacted</option>
+              <option value="VIEWING_BOOKED" ${normalizeEnquiryStatus(e.status)==="VIEWING_BOOKED"?"selected":""}>Viewing booked</option>
+              <option value="OFFER_IN_PROGRESS" ${normalizeEnquiryStatus(e.status)==="OFFER_IN_PROGRESS"?"selected":""}>Offer in progress</option>
+              <option value="CLOSED" ${normalizeEnquiryStatus(e.status)==="CLOSED"?"selected":""}>Closed</option>
+              <option value="ARCHIVED" ${normalizeEnquiryStatus(e.status)==="ARCHIVED"?"selected":""}>Archived</option>
+            </select>
+
+            <label class="fieldLabel">Internal note</label>
+            <textarea class="textareaField js-note" placeholder="Add a private note for your follow-up workflow...">${escapeHtml(safeStr(e.internalNote, ""))}</textarea>
+
+            <div class="saveRow">
+              <div class="saveHint">Status and note save together.</div>
+              <div class="leadActions" style="margin-top:0;">
+                ${buyerEmail ? `<a class="tinyBtn primary" href="mailto:${encodeURIComponent(buyerEmail)}?subject=${replySubject}&body=${replyBody}">Reply to buyer</a>` : ``}
+                ${row.slug ? `<a class="tinyBtn" href="/property.html?slug=${encodeURIComponent(row.slug)}" target="_blank" rel="noopener">Open listing</a>` : ``}
+                <button class="tinyBtn js-save-status" type="button">Save status</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      bindDrawerActions();
+      openDrawer();
+    }
+
+    function bindDrawerActions(){
+      $("drawerBody").querySelectorAll(".js-save-status").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          const card = ev.currentTarget.closest("[data-enquiry-id]");
+          const enquiryId = Number(card.getAttribute("data-enquiry-id"));
+          const status = card.querySelector(".js-status").value;
+          const internalNote = card.querySelector(".js-note").value;
+          const liveChip = card.querySelector(".js-live-chip");
+
+          const originalText = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = "Saving…";
+
+          try {
+            const payload = await saveEnquiryUpdate(enquiryId, status, internalNote);
+            const updated = payload && payload.item ? payload.item : null;
+            if (updated) {
+              updateEnquiryInState(updated);
+
+              if (liveChip) {
+                liveChip.className = `chip ${enquiryStatusClass(updated.status)} js-live-chip`;
+                liveChip.textContent = enquiryStatusLabel(updated.status);
+              }
+
+              btn.textContent = "Saved";
+              btn.classList.add("success");
+
+              applyAllFiltersAndRender();
+              renderDrawer(state.selectedPropertyId);
+              showToast("Lead updated successfully");
+            } else {
+              throw new Error("Update response missing item");
+            }
+          } catch (err) {
+            showToast(err.message || "Failed to update enquiry", "error");
+          } finally {
+            setTimeout(() => {
+              btn.disabled = false;
+              btn.textContent = originalText;
+              btn.classList.remove("success");
+            }, 900);
+          }
+        });
+      });
+    }
+
+    function openDrawer(){
+      $("drawer").classList.add("open");
+      $("drawerBackdrop").classList.add("show");
+    }
+
+    function closeDrawer(){
+      $("drawer").classList.remove("open");
+      $("drawerBackdrop").classList.remove("show");
+    }
+
+    function refreshOpenDrawer(){
+      if (state.selectedPropertyId != null && $("drawer").classList.contains("open")){
+        renderDrawer(state.selectedPropertyId);
+      }
+    }
+
+    let ME = null;
+    let EMAIL_VERIFIED = false;
+    let VERIFY_POLL = null;
+    let RESEND_COOLDOWN_T = null;
+    let resendCooldownLeft = 0;
+
+    function setVerifyUI(needed){
+      $("verifyCard").style.display = needed ? "flex" : "none";
+      $("verifiedPill").style.display =
+        (!needed && EMAIL_VERIFIED) ? "inline-flex" : "none";
+    
+      const sidebarBadge = document.querySelector(".sellerOsVerifiedRow");
+      const sidebarIcon = document.querySelector(".sellerOsVerifiedIcon");
+      const sidebarText = $("sellerVerifiedSide");
+    
+      if (sidebarBadge) {
+        sidebarBadge.classList.toggle("isPending", !EMAIL_VERIFIED);
+      }
+    
+      if (sidebarIcon) {
+        sidebarIcon.textContent = EMAIL_VERIFIED ? "✓" : "!";
+      }
+    
+      if (sidebarText) {
+        sidebarText.textContent =
+          EMAIL_VERIFIED ? "Verified seller" : "Verification Pending";
+      }
+    
+      if (!needed) {
+        $("verifyMiniMsg").textContent = "";
+      }
+    }
+
+    async function fetchMe(){
+      const r = await apiGet("/api/auth/me");
+      if(!r.ok) return null;
+      const user = (r.json && r.json.user) ? r.json.user : r.json;
+      return user || null;
+    }
+
+    async function recheckVerification(){
+      const me = await fetchMe();
+      if(!me) return false;
+      ME = me;
+
+      if (String(me.role || "").toLowerCase() === "admin") {
+        EMAIL_VERIFIED = true;
+        return true;
+      }
+
+      EMAIL_VERIFIED = !!me.emailVerified;
+      return EMAIL_VERIFIED;
+    }
+
+    function startResendCooldown(seconds){
+      resendCooldownLeft = Math.max(0, Number(seconds || 0));
+      const btn = $("resendVerifyBtn");
+      const msg = $("verifyMiniMsg");
+
+      if (RESEND_COOLDOWN_T) clearInterval(RESEND_COOLDOWN_T);
+
+      btn.disabled = true;
+      msg.textContent = `Sent — wait ${resendCooldownLeft}s…`;
+
+      RESEND_COOLDOWN_T = setInterval(() => {
+        resendCooldownLeft -= 1;
+        if (resendCooldownLeft <= 0) {
+          clearInterval(RESEND_COOLDOWN_T);
+          RESEND_COOLDOWN_T = null;
+          btn.disabled = false;
+          msg.textContent = "Sent — check inbox.";
+          setTimeout(() => { msg.textContent = ""; }, 1400);
+          return;
+        }
+        msg.textContent = `Sent — wait ${resendCooldownLeft}s…`;
+      }, 1000);
+    }
+
+    async function resendVerification(){
+      const msg = $("verifyMiniMsg");
+      msg.textContent = "";
+
+      const btn = $("resendVerifyBtn");
+      btn.disabled = true;
+
+      const r = await apiPost("/api/auth/request-email-verify", {});
+      if(!r.ok){
+        btn.disabled = false;
+        msg.textContent = (r.json && r.json.message) ? r.json.message : (r.text || "Could not send verification email.");
+        return false;
+      }
+
+      startResendCooldown(30);
+      return true;
+    }
+
+    async function initVerificationUX(){
+      try{
+        $("verifyLink").href = "/verify-email.html?next=" + encodeURIComponent("/my-listings.html");
+      }catch{}
+
+      await recheckVerification();
+
+      if (!EMAIL_VERIFIED) setVerifyUI(true);
+      else setVerifyUI(false);
+
+      if (!VERIFY_POLL) {
+        VERIFY_POLL = setInterval(async () => {
+          try{
+            if (EMAIL_VERIFIED) return;
+            const ok2 = await recheckVerification();
+            if (ok2) {
+              $("verifyMiniMsg").textContent = "Verified ✅";
+              setTimeout(() => { $("verifyMiniMsg").textContent = ""; }, 1200);
+              setVerifyUI(false);
+            } else {
+              setVerifyUI(true);
+            }
+          }catch{}
+        }, 15000);
+      }
+
+      $("resendVerifyBtn").addEventListener("click", async () => {
+        await resendVerification();
+      });
+
+      $("recheckVerifyBtn").addEventListener("click", async () => {
+        const btn = $("recheckVerifyBtn");
+        btn.disabled = true;
+        $("verifyMiniMsg").textContent = "";
+        try{
+          const ok3 = await recheckVerification();
+          $("verifyMiniMsg").textContent = ok3 ? "Verified ✅" : "Not verified yet.";
+          setVerifyUI(!ok3);
+        } finally {
+          setTimeout(() => { btn.disabled = false; }, 700);
+        }
+      });
+    }
+
+    async function load(){
+      if(!token){
+        setDebug("Missing token — redirecting to login", "401");
+        location.href = "/login.html?next=/my-listings.html";
+        return;
+      }
+
+      initVerificationUX().catch(()=>{});
+
+      setDebug("Fetching listings, enquiries, and saved searches…", "…");
+
+      const [listingsRes, enquiriesRes, savedSearchesRes] = await Promise.all([
+        apiGet("/api/properties/mine"),
+        apiGet("/api/properties/mine/enquiries"),
+        apiGet("/api/auth/saved-searches")
+      ]);
+
+      if(!listingsRes.ok){
+        setDebug("API error: " + listingsRes.status + " — redirecting to login", "ERR");
+        if(listingsRes.status === 401){
+          localStorage.removeItem("token");
+          location.href = "/login.html?next=/my-listings.html";
+          return;
+        }
+        $("empty").style.display = "block";
+        $("empty").innerHTML = `
+          <h2>Could not load your listings</h2>
+          <p class="muted">API returned <strong>${listingsRes.status}</strong>. Check the debug bar above.</p>
+          <div class="emptyActions">
+            <button class="btn primary" onclick="location.reload()">Try again</button>
+            <a class="btn" href="/index.html">Home</a>
+          </div>
+        `;
+        return;
+      }
+
+      if(!enquiriesRes.ok){
+        setDebug("Listings loaded, seller inbox failed: " + enquiriesRes.status, "PARTIAL");
+      }
+
+      if(!savedSearchesRes.ok){
+        setDebug("Listings loaded, saved searches failed: " + savedSearchesRes.status, "PARTIAL");
+      }
+
+      state.rawItems = extractItems(listingsRes.json) || [];
+      state.sellerProperties = extractProperties(enquiriesRes.json) || [];
+      state.sellerEnquiries = extractEnquiries(enquiriesRes.json) || [];
+      state.savedSearches = savedSearchesRes.ok ? (extractSavedSearches(savedSearchesRes.json) || []) : [];
+      state.grouped = groupSellerData(
+        state.sellerProperties.length ? state.sellerProperties : state.rawItems,
+        state.sellerEnquiries
+      );
+
+      setDebug(`Loaded ${state.rawItems.length} listings • ${state.sellerEnquiries.length} enquiries • ${state.savedSearches.length} saved searches`, "200");
+
+        try{
+          await buildSavedSearchInsights();
+        }catch(err){
+          console.warn("Saved search insights failed:", err);
+          state.savedSearchInsights = {};
+        }
+        
+        renderSavedSearches();
+        applyAllFiltersAndRender();
+        updateSellerOsCounts();
+
+      $("search").addEventListener("input", () => applyAllFiltersAndRender());
+    }
+
+    $("refreshBtn").addEventListener("click", () => location.reload());
+    $("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      location.href = "/login.html";
+    });
+    $("closeDrawerBtn").addEventListener("click", closeDrawer);
+    $("drawerBackdrop").addEventListener("click", closeDrawer);
+
+window.__HAVN_SELLER_GALLERY = function(propertyId, direction, event){
+  if(event){
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const id = Number(propertyId);
+
+  const property =
+    state.rawItems.find((p) => Number(p.id) === id) ||
+    state.sellerProperties.find((p) => Number(p.id) === id);
+
+  if(!property) return;
+
+  const photos = getSellerListingPhotos(property);
+  if(photos.length < 2) return;
+
+  const wrap = document.querySelector(
+    `[data-gallery-property="${id}"]`
+  );
+
+  const image = document.getElementById(
+    `sellerGalleryImage-${id}`
+  );
+
+  if(!wrap || !image) return;
+
+  const current = Number(
+    wrap.getAttribute("data-gallery-index") || 0
+  );
+
+  const next =
+    (current + Number(direction) + photos.length) %
+    photos.length;
+
+  wrap.setAttribute("data-gallery-index", String(next));
+
+  image.src = photos[next];
+
+  const count = document.getElementById(
+    `sellerPhotoCount-${id}`
+  );
+
+  if(count){
+    count.textContent = `${next + 1} / ${photos.length}`;
+  }
+
+  wrap.querySelectorAll(".sellerGalleryDots span").forEach(
+    (dot, index) => {
+      dot.classList.toggle(
+        "active",
+        index === Math.min(next, 5)
+      );
+    }
+  );
+};
+
+
+    window.__HAVN_OPEN_DRAWER = function(propertyId){
+      renderDrawer(propertyId);
+    };
+
+    window.__HAVN_FEATURE_LISTING = function(propertyId, btn){
+      startFeatureCheckout(propertyId, btn);
+    };
+
+    window.__HAVN_SHOW_UPGRADES = function(){
+      showFeaturedUpgradeOptions();
+    };
+
+    window.__HAVN_CLEAR_UPGRADES = function(){
+      clearFeaturedUpgradeOptions();
+    };
+
+    window.__HAVN_UPDATE_PRICE = function(propertyId, btn){
+      updatePublishedPrice(propertyId, btn);
+    };
+
+    initSellerOsShell();
+    handleStripeReturnMessage();
+    load();
+  </script>
+</body>
+</html>

@@ -31,55 +31,6 @@ function makeToken(bytes = 32) {
   return crypto.randomBytes(bytes).toString("hex");
 }
 
-function toPositiveSafeInt(raw: any): number | null {
-  const text = String(raw ?? "").trim();
-
-  if (!/^\d+$/.test(text)) {
-    return null;
-  }
-
-  const value = Number(text);
-
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    return null;
-  }
-
-  return value;
-}
-
-function emailIsValid(email: string) {
-  return (
-    email.length <= 254 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  );
-}
-
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-
-  if (!secret) {
-    throw new Error("JWT_SECRET missing");
-  }
-
-  return secret;
-}
-
-function signAuthToken(user: { id: number; role: any; email: string }) {
-  return jwt.sign(
-    { role: user.role, email: user.email },
-    getJwtSecret(),
-    {
-      subject: String(user.id),
-      expiresIn: "2h",
-      algorithm: "HS256",
-    }
-  );
-}
-
-function validJsonObject(value: any) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 /**
  * REGISTER
  */
@@ -94,17 +45,6 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ ok: false, message: "All fields required" });
     }
 
-    if (
-      firstName.length > 100 ||
-      lastName.length > 100 ||
-      !emailIsValid(email)
-    ) {
-      return res.status(400).json({
-        ok: false,
-        message: "Please enter valid registration details",
-      });
-    }
-
     if (!passwordIsValid(password)) {
       return res.status(400).json({
         ok: false,
@@ -114,10 +54,7 @@ router.post("/register", async (req, res) => {
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      return res.status(409).json({
-        ok: false,
-        message: "An account with these details already exists",
-      });
+      return res.status(409).json({ ok: false, message: "Email in use" });
     }
 
     const hashed = await bcrypt.hash(password, 10);
@@ -151,7 +88,11 @@ router.post("/register", async (req, res) => {
       verifyUrl,
     }).catch(() => {});
 
-    const token = signAuthToken(user);
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      process.env.JWT_SECRET!,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
 
     res.json({ ok: true, token });
   } catch (err) {
@@ -167,10 +108,6 @@ router.post("/login", async (req, res) => {
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
 
-    if (!emailIsValid(email) || !password || password.length > MAX_PASSWORD_LENGTH) {
-      return res.status(401).json({ ok: false });
-    }
-
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(401).json({ ok: false });
 
@@ -185,7 +122,11 @@ router.post("/login", async (req, res) => {
       },
     }).catch(() => null);
 
-    const token = signAuthToken(user);
+    const token = jwt.sign(
+      { role: user.role, email: user.email },
+      process.env.JWT_SECRET!,
+      { subject: String(user.id), expiresIn: "2h" }
+    );
 
     res.json({ ok: true, token });
   } catch {
@@ -197,45 +138,31 @@ router.post("/login", async (req, res) => {
  * ME
  */
 router.get("/me", requireAuth, async (req: any, res) => {
-  try {
-    const userId = toPositiveSafeInt(req.user?.userId);
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      createdAt: true,
+      emailVerified: true,
+      lastLoginAt: true,
+      loginCount: true,
+      lastSearch: true,
+      lastSearchAt: true,
+      foundingOfferUsedAt: true,
+    },
+  });
 
-    if (userId === null) {
-      return res.status(401).json({
-        ok: false,
-        message: "Invalid authentication session",
-      });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        emailVerified: true,
-        lastLoginAt: true,
-        loginCount: true,
-        lastSearch: true,
-        lastSearchAt: true,
-        foundingOfferUsedAt: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ ok: false, message: "User not found" });
-    }
-
-    return res.json({
-      ok: true,
-      user,
-    });
-  } catch (err) {
-    console.error("GET /api/auth/me error", err);
-    return res.status(500).json({ ok: false });
+  if (!user) {
+    return res.status(404).json({ ok: false, message: "User not found" });
   }
+
+  res.json({
+    ok: true,
+    user,
+  });
 });
 
 /**
@@ -243,20 +170,6 @@ router.get("/me", requireAuth, async (req: any, res) => {
  */
 router.post("/last-search", requireAuth, async (req: any, res) => {
   try {
-    if (!validJsonObject(req.body)) {
-      return res.status(400).json({
-        ok: false,
-        message: "Valid search object required",
-      });
-    }
-
-    if (JSON.stringify(req.body).length > 20000) {
-      return res.status(400).json({
-        ok: false,
-        message: "Search data is too large",
-      });
-    }
-
     await prisma.user.update({
       where: { id: req.user.userId },
       data: {
@@ -282,33 +195,14 @@ router.post("/saved-searches", requireAuth, async (req: any, res) => {
     const userId = req.user.userId;
     const { name, filters } = req.body;
 
-    if (!validJsonObject(filters)) {
-      return res.status(400).json({
-        ok: false,
-        message: "Valid filters object required",
-      });
-    }
-
-    if (JSON.stringify(filters).length > 20000) {
-      return res.status(400).json({
-        ok: false,
-        message: "Saved search filters are too large",
-      });
-    }
-
-    const safeName = String(name || "My search").trim();
-
-    if (!safeName || safeName.length > 120) {
-      return res.status(400).json({
-        ok: false,
-        message: "Saved search name is invalid",
-      });
+    if (!filters) {
+      return res.status(400).json({ ok: false, message: "Filters required" });
     }
 
     const saved = await prisma.savedSearch.create({
       data: {
         userId,
-        name: safeName,
+        name: name || "My search",
         filters,
 
         // alertsEnabled controls immediate saved-search alerts when a matching
@@ -342,18 +236,9 @@ router.get("/saved-searches", requireAuth, async (req: any, res) => {
 
 router.delete("/saved-searches/:id", requireAuth, async (req: any, res) => {
   try {
-    const id = toPositiveSafeInt(req.params.id);
+    const id = Number(req.params.id);
 
-    if (id === null) {
-  	return res.status(400).json({
-    	ok: false,
-    	message: "Valid saved search ID required",
-  	});
-	}
-
-const existing = await prisma.savedSearch.findUnique({
-  where: { id },
-});
+    const existing = await prisma.savedSearch.findUnique({ where: { id } });
 
     if (!existing || existing.userId !== req.user.userId) {
       return res.status(404).json({ ok: false });
@@ -380,14 +265,11 @@ const existing = await prisma.savedSearch.findUnique({
 router.post("/saved-properties", requireAuth, async (req: any, res) => {
   try {
     const userId = req.user.userId;
-    const propertyId = toPositiveSafeInt(req.body.propertyId);
+    const propertyId = Number(req.body.propertyId);
 
-    if (propertyId === null) {
-  	return res.status(400).json({
-    	ok: false,
-    	message: "Valid propertyId required",
-  	});
-	}
+    if (!Number.isFinite(propertyId) || propertyId <= 0) {
+      return res.status(400).json({ ok: false, message: "Valid propertyId required" });
+    }
 
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
@@ -464,14 +346,11 @@ router.get("/saved-properties", requireAuth, async (req: any, res) => {
 router.delete("/saved-properties/:propertyId", requireAuth, async (req: any, res) => {
   try {
     const userId = req.user.userId;
-    const propertyId = toPositiveSafeInt(req.params.propertyId);
+    const propertyId = Number(req.params.propertyId);
 
-    if (propertyId === null) {
-  	return res.status(400).json({
-    	ok: false,
-    	message: "Valid propertyId required",
-  	});
-	}
+    if (!Number.isFinite(propertyId) || propertyId <= 0) {
+      return res.status(400).json({ ok: false, message: "Valid propertyId required" });
+    }
 
     await prisma.savedProperty.deleteMany({
       where: {
@@ -494,10 +373,6 @@ router.post("/forgot-password", async (req, res) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
 
-    if (!emailIsValid(email)) {
-      return res.json({ ok: true });
-    }
-
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.json({ ok: true });
 
@@ -512,9 +387,7 @@ router.post("/forgot-password", async (req, res) => {
       },
     });
 
-    const resetUrl =
-      `${APP_URL}/reset-password.html?token=${encodeURIComponent(token)}` +
-      `&email=${encodeURIComponent(email)}`;
+    const resetUrl = `${APP_URL}/reset-password.html?token=${token}&email=${email}`;
 
     sendPasswordResetEmail({ to: email, resetUrl }).catch(() => {});
 
@@ -594,91 +467,6 @@ router.post("/reset-password", async (req, res) => {
 /**
  * VERIFY EMAIL
  */
-/**
- * RESEND EMAIL VERIFICATION
- */
-router.post("/request-email-verify", requireAuth, async (req: any, res) => {
-  try {
-    const userId = toPositiveSafeInt(req.user?.userId);
-
-    if (userId === null) {
-  	return res.status(401).json({
-    	ok: false,
-    	message: "Invalid authentication session",
-  	});
-	}
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        emailVerified: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        ok: false,
-        message: "Account not found",
-      });
-    }
-
-    if (user.emailVerified) {
-      return res.json({
-        ok: true,
-        alreadyVerified: true,
-        message: "Your email address is already verified",
-      });
-    }
-
-    const verifyToken = makeToken(24);
-    const verifyTokenExp = new Date(Date.now() + 30 * 60 * 1000);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerifyToken: verifyToken,
-        emailVerifyTokenExp: verifyTokenExp,
-      },
-    });
-
-    const verifyUrl =
-      `${APP_URL}/verify-email.html?token=${encodeURIComponent(verifyToken)}`;
-
-    const emailResult = await sendEmailVerificationEmail({
-      to: user.email,
-      name: user.name || null,
-      verifyUrl,
-    });
-
-    if (!emailResult || (emailResult as any).error) {
-      console.error(
-        "Resend verification email was not accepted:",
-        emailResult
-      );
-
-      return res.status(502).json({
-        ok: false,
-        message: "We could not send the verification email. Please try again.",
-      });
-    }
-
-    return res.json({
-      ok: true,
-      message: "A new verification email has been sent",
-    });
-  } catch (err: any) {
-    console.error("POST /api/auth/request-email-verify error:", err);
-
-    return res.status(500).json({
-      ok: false,
-      message: "Could not send a new verification email",
-    });
-  }
-});
-
-
 router.post("/verify-email", async (req, res) => {
   try {
     const token = String(req.body?.token || "").trim();

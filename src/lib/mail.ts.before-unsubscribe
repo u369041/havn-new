@@ -41,7 +41,7 @@ export async function sendListingStatusEmail(payload: ListingStatusEmailPayload)
       <p><strong>Title:</strong> ${escapeHtml(title)}</p>
       ${payload.slug ? `<p><strong>Slug:</strong> ${escapeHtml(String(payload.slug))}</p>` : ""}
       ${payload.listingId ? `<p><strong>ID:</strong> ${escapeHtml(String(payload.listingId))}</p>` : ""}
-      ${safeHttpsUrl(payload.adminUrl) ? `<p><a href="${escapeAttr(safeHref(payload.adminUrl))}">Open in Admin</a></p>` : ""}
+      ${payload.adminUrl ? `<p><a href="${escapeAttr(payload.adminUrl)}">Open in Admin</a></p>` : ""}
       <p style="color:#64748b;font-size:12px;margin-top:18px">HAVN.ie</p>
     `;
 
@@ -52,7 +52,7 @@ export async function sendListingStatusEmail(payload: ListingStatusEmailPayload)
       html,
     });
   } catch (err) {
-    logMailFailure("sendListingStatusEmail", err);
+    console.error("sendListingStatusEmail failed:", err);
     return null;
   }
 }
@@ -102,73 +102,6 @@ const HAVN_LIGHT = "#F5F8FC";
 const HAVN_TEXT = "#0F172A";
 const HAVN_MUTED = "#64748B";
 const HAVN_BORDER = "#E2E8F0";
-const HAVN_BASE_URL = "https://havn.ie";
-const COVER_FETCH_TIMEOUT_MS = 8_000;
-const MAX_COVER_IMAGE_BYTES = 5 * 1024 * 1024;
-const CLOUDINARY_IMAGE_HOST = "res.cloudinary.com";
-
-function safeHttpsUrl(
-  value?: string | null,
-  fallback: string | null = null
-): string | null {
-  const raw = String(value || "").trim();
-  if (!raw || raw.length > 2_048) return fallback;
-
-  try {
-    const parsed = new URL(raw);
-
-    if (parsed.protocol !== "https:") return fallback;
-    if (parsed.username || parsed.password) return fallback;
-
-    return parsed.toString();
-  } catch {
-    return fallback;
-  }
-}
-
-function safeHref(value?: string | null, fallback = HAVN_BASE_URL): string {
-  return safeHttpsUrl(value, fallback) || fallback;
-}
-
-function safeCloudinaryImageUrl(value?: string | null): string | null {
-  const safeUrl = safeHttpsUrl(value);
-  if (!safeUrl) return null;
-
-  try {
-    const parsed = new URL(safeUrl);
-
-    if (parsed.hostname.toLowerCase() !== CLOUDINARY_IMAGE_HOST) {
-      return null;
-    }
-
-    if (!parsed.pathname.includes("/upload/")) {
-      return null;
-    }
-
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-function isValidEmail(value?: string | null): boolean {
-  const email = String(value || "").trim();
-
-  if (!email || email.length > 254 || /[\r\n]/.test(email)) {
-    return false;
-  }
-
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function logMailFailure(context: string, error: unknown) {
-  const errorName =
-    error instanceof Error && error.name ? error.name : "UnknownError";
-
-  console.error(`${context} failed`, {
-    errorName,
-  });
-}
 
 function formatCurrencyFromCents(value?: number | null) {
   const cents = Number(value);
@@ -226,84 +159,32 @@ function humanPackage(value?: string | null) {
 }
 
 function emailSafeCoverUrl(value?: string | null) {
-  const safeUrl = safeCloudinaryImageUrl(value);
-  if (!safeUrl) return null;
+  const url = String(value || "").trim();
+  if (!url) return null;
 
-  try {
-    const parsed = new URL(safeUrl);
-
-    parsed.pathname = parsed.pathname.replace(
+  if (url.includes("res.cloudinary.com") && url.includes("/upload/")) {
+    return url.replace(
       "/upload/",
       "/upload/f_jpg,q_auto:good,w_1200/"
     );
-
-    return parsed.toString();
-  } catch {
-    return null;
   }
+
+  return url;
 }
 
 async function buildInlineCoverAttachment(value?: string | null) {
   const url = emailSafeCoverUrl(value);
   if (!url) return null;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    COVER_FETCH_TIMEOUT_MS
-  );
-
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-      headers: {
-        Accept: "image/jpeg,image/png,image/webp",
-      },
-    });
-
+    const response = await fetch(url);
     if (!response.ok) {
-      throw new Error("CoverImageRequestFailed");
-    }
-
-    const contentType = String(
-      response.headers.get("content-type") || ""
-    )
-      .split(";")[0]
-      .trim()
-      .toLowerCase();
-
-    const allowedContentTypes = new Set([
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-    ]);
-
-    if (!allowedContentTypes.has(contentType)) {
-      throw new Error("InvalidCoverImageType");
-    }
-
-    const declaredLength = Number(
-      response.headers.get("content-length") || 0
-    );
-
-    if (
-      Number.isFinite(declaredLength) &&
-      declaredLength > MAX_COVER_IMAGE_BYTES
-    ) {
-      throw new Error("CoverImageTooLarge");
+      throw new Error(`Cover image request failed with ${response.status}`);
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
-
     if (!bytes.length) {
-      throw new Error("EmptyCoverImage");
-    }
-
-    if (bytes.length > MAX_COVER_IMAGE_BYTES) {
-      throw new Error("CoverImageTooLarge");
+      throw new Error("Cover image response was empty");
     }
 
     return {
@@ -312,26 +193,17 @@ async function buildInlineCoverAttachment(value?: string | null) {
       contentId: "havn-property-cover",
     };
   } catch (error) {
-    console.warn("Could not embed Outlook-safe listing cover", {
-      errorName:
-        error instanceof Error && error.name
-          ? error.name
-          : "UnknownError",
-    });
+    console.warn("Could not embed Outlook-safe listing cover:", error);
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
 function emailButton(label: string, url: string) {
-  const href = safeHref(url);
-
   return `
     <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
       <tr>
         <td bgcolor="${HAVN_BUTTON}" style="border-radius:10px;">
-          <a href="${escapeAttr(href)}"
+          <a href="${escapeAttr(url)}"
              style="display:inline-block;padding:14px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:10px;">
             ${escapeHtml(label)}
           </a>
@@ -342,11 +214,9 @@ function emailButton(label: string, url: string) {
 }
 
 function emailTextLink(label: string, url: string) {
-  const href = safeHref(url);
-
   return `
     <div style="margin-top:26px;text-align:center;">
-      <a href="${escapeAttr(href)}"
+      <a href="${escapeAttr(url)}"
          style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">
         ${escapeHtml(label)}
       </a>
@@ -532,7 +402,7 @@ function renderApprovedLiveEmail(args: {
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin-top:24px;">
                       <tr>
                         <td align="center">
-                          <a href="${escapeAttr(safeHref(args.publicUrl))}"
+                          <a href="${escapeAttr(args.publicUrl)}"
                              style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">
                             View My Listing
                           </a>
@@ -647,12 +517,12 @@ function renderRejectedListingEmail(args: {
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin-top:22px;">
                       <tr>
                         <td align="center">
-                          <a href="${escapeAttr(safeHref(args.editUrl))}" style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">Edit My Listing</a>
+                          <a href="${escapeAttr(args.editUrl)}" style="color:#000000;text-decoration:none;font-size:14px;font-weight:800;">Edit My Listing</a>
                         </td>
                       </tr>
                       <tr>
                         <td align="center" style="padding-top:14px;">
-                          <a href="${escapeAttr(safeHref(args.myListingsUrl))}" style="color:#000000;text-decoration:none;font-size:13px;font-weight:800;">View My Listings</a>
+                          <a href="${escapeAttr(args.myListingsUrl)}" style="color:#000000;text-decoration:none;font-size:13px;font-weight:800;">View My Listings</a>
                         </td>
                       </tr>
                     </table>
@@ -693,8 +563,6 @@ function renderHavnEmail(args: {
   coverImageUrl?: string | null;
   statusTone?: "success" | "warning" | "neutral";
 }) {
-  const safeCoverImageUrl = safeCloudinaryImageUrl(args.coverImageUrl);
-
   const tone =
     args.statusTone === "success"
       ? { bg: "#ECFDF5", border: "#A7F3D0", icon: "#059669" }
@@ -731,11 +599,11 @@ function renderHavnEmail(args: {
                 </tr>
 
                 ${
-                  safeCoverImageUrl
+                  args.coverImageUrl
                     ? `
                       <tr>
                         <td style="padding:0;line-height:0;">
-                          <img src="${escapeAttr(safeCoverImageUrl || "")}" alt="Property" width="680"
+                          <img src="${escapeAttr(args.coverImageUrl)}" alt="Property" width="680"
                                style="display:block;width:100%;height:290px;object-fit:cover;border:0;" />
                         </td>
                       </tr>
@@ -811,9 +679,6 @@ function renderHavnEmail(args: {
 
 export async function sendUserListingEmail(payload: UserListingEmailPayload) {
   try {
-    if (!isValidEmail(payload.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
     const title = payload.listingTitle || "your listing";
     const myListingsUrl =
       payload.myListingsUrl || "https://havn.ie/my-listings.html";
@@ -987,7 +852,7 @@ export async function sendUserListingEmail(payload: UserListingEmailPayload) {
       attachments: inlineCoverAttachment ? [inlineCoverAttachment] : undefined,
     });
   } catch (err) {
-    logMailFailure("sendUserListingEmail", err);
+    console.error("sendUserListingEmail failed:", err);
     return null;
   }
 }
@@ -1006,9 +871,6 @@ export type ClosedListingEmailPayload = {
 
 export async function sendClosedListingEmail(payload: ClosedListingEmailPayload) {
   try {
-    if (!isValidEmail(payload.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
     const title = payload.listingTitle || "your listing";
     const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
     const displayName = String(payload.recipientName || "").trim();
@@ -1056,7 +918,7 @@ export async function sendClosedListingEmail(payload: ClosedListingEmailPayload)
       html,
     });
   } catch (err) {
-    logMailFailure("sendClosedListingEmail", err);
+    console.error("sendClosedListingEmail failed:", err);
     return null;
   }
 }
@@ -1106,9 +968,6 @@ function listingExpiryDetails(payload: ListingExpiryEmailPayload, statusLabel: s
 
 export async function sendListingExpiresSoonEmail(payload: ListingExpiryEmailPayload) {
   try {
-    if (!isValidEmail(payload.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
     const displayName = String(payload.recipientName || "").trim();
     const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
     const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
@@ -1136,16 +995,13 @@ export async function sendListingExpiresSoonEmail(payload: ListingExpiryEmailPay
       html,
     });
   } catch (err) {
-    logMailFailure("sendListingExpiresSoonEmail", err);
+    console.error("sendListingExpiresSoonEmail failed:", err);
     return null;
   }
 }
 
 export async function sendListingExpiredEmail(payload: ListingExpiryEmailPayload) {
   try {
-    if (!isValidEmail(payload.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
     const displayName = String(payload.recipientName || "").trim();
     const greeting = displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,";
     const myListingsUrl = payload.myListingsUrl || "https://havn.ie/my-listings.html";
@@ -1172,7 +1028,7 @@ export async function sendListingExpiredEmail(payload: ListingExpiryEmailPayload
       html,
     });
   } catch (err) {
-    logMailFailure("sendListingExpiredEmail", err);
+    console.error("sendListingExpiredEmail failed:", err);
     return null;
   }
 }
@@ -1191,11 +1047,6 @@ export async function sendSavedSearchMatchEmail(args: {
   mode?: string | null;
 }) {
   try {
-    if (!isValidEmail(args.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
-
-    const propertyUrl = safeHref(args.propertyUrl);
     const price =
       typeof args.propertyPrice === "number" && Number.isFinite(args.propertyPrice)
         ? new Intl.NumberFormat("en-IE", {
@@ -1218,7 +1069,7 @@ export async function sendSavedSearchMatchEmail(args: {
         ${args.mode ? `<p style="margin:0;color:#64748b;">${escapeHtml(String(args.mode).toUpperCase())}</p>` : ""}
       </div>
 
-      <p><a href="${escapeAttr(propertyUrl)}">View property on HAVN</a></p>
+      <p><a href="${escapeAttr(args.propertyUrl)}">View property on HAVN</a></p>
 
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
       <p style="color:#64748b;font-size:12px">HAVN.ie</p>
@@ -1231,7 +1082,7 @@ export async function sendSavedSearchMatchEmail(args: {
       html,
     });
   } catch (err) {
-    logMailFailure("sendSavedSearchMatchEmail", err);
+    console.error("sendSavedSearchMatchEmail failed:", err);
     return null;
   }
 }
@@ -1256,15 +1107,6 @@ export type PropertyLeadEmailPayload = {
 
 export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
   try {
-    if (!isValidEmail(payload.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
-
-    if (!isValidEmail(payload.buyerEmail)) {
-      throw new Error("InvalidReplyToEmail");
-    }
-
-    const propertyUrl = safeHttpsUrl(payload.propertyUrl);
     const listingTitle = payload.listingTitle || "your HAVN listing";
     const intent = String(payload.intent || "QUESTION").toUpperCase();
 
@@ -1279,7 +1121,7 @@ export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
       <p><strong>Property:</strong> ${escapeHtml(listingTitle)}</p>
       ${payload.slug ? `<p><strong>Slug:</strong> ${escapeHtml(String(payload.slug))}</p>` : ""}
       ${payload.listingId ? `<p><strong>ID:</strong> ${escapeHtml(String(payload.listingId))}</p>` : ""}
-      ${propertyUrl ? `<p><a href="${escapeAttr(propertyUrl)}">View listing</a></p>` : ""}
+      ${payload.propertyUrl ? `<p><a href="${escapeAttr(payload.propertyUrl)}">View listing</a></p>` : ""}
 
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0" />
 
@@ -1303,12 +1145,12 @@ export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
       from: FROM,
       to: payload.to,
       bcc: ADMIN_NOTIFY_EMAIL,
-      replyTo: payload.buyerEmail.trim(),
+      replyTo: payload.buyerEmail,
       subject,
       html,
     });
   } catch (err) {
-    logMailFailure("sendPropertyLeadEmail", err);
+    console.error("sendPropertyLeadEmail failed:", err);
     return null;
   }
 }
@@ -1321,9 +1163,6 @@ export async function sendPropertyLeadEmail(payload: PropertyLeadEmailPayload) {
 
 export async function sendWelcomeEmail(args: { to: string; name?: string | null }) {
   try {
-    if (!isValidEmail(args.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
     const displayName = String(args.name || "").trim();
     const subject = "Welcome to HAVN.ie";
 
@@ -1353,7 +1192,7 @@ export async function sendWelcomeEmail(args: { to: string; name?: string | null 
       html,
     });
   } catch (err) {
-    logMailFailure("sendWelcomeEmail", err);
+    console.error("sendWelcomeEmail failed:", err);
     return null;
   }
 }
@@ -1370,14 +1209,6 @@ export async function sendPasswordResetEmail(args: {
   resetUrl: string;
 }) {
   try {
-    if (!isValidEmail(args.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
-
-    const resetUrl = safeHttpsUrl(args.resetUrl);
-    if (!resetUrl) {
-      throw new Error("InvalidPasswordResetUrl");
-    }
     const displayName = String(args.name || "").trim();
     const subject = "Reset your HAVN.ie password";
 
@@ -1394,7 +1225,7 @@ export async function sendPasswordResetEmail(args: {
         </div>
       `,
       ctaLabel: "Reset My Password",
-      ctaUrl: resetUrl,
+      ctaUrl: args.resetUrl,
       statusTone: "neutral",
     });
 
@@ -1405,7 +1236,7 @@ export async function sendPasswordResetEmail(args: {
       html,
     });
   } catch (err) {
-    logMailFailure("sendPasswordResetEmail", err);
+    console.error("sendPasswordResetEmail failed:", err);
     return null;
   }
 }
@@ -1422,14 +1253,6 @@ export async function sendEmailVerificationEmail(args: {
   verifyUrl: string;
 }) {
   try {
-    if (!isValidEmail(args.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
-
-    const verifyUrl = safeHttpsUrl(args.verifyUrl);
-    if (!verifyUrl) {
-      throw new Error("InvalidEmailVerificationUrl");
-    }
     const displayName = String(args.name || "").trim();
     const subject = "Verify your email for HAVN.ie";
 
@@ -1446,7 +1269,7 @@ export async function sendEmailVerificationEmail(args: {
         </div>
       `,
       ctaLabel: "Verify My Email",
-      ctaUrl: verifyUrl,
+      ctaUrl: args.verifyUrl,
       statusTone: "success",
     });
 
@@ -1457,7 +1280,7 @@ export async function sendEmailVerificationEmail(args: {
       html,
     });
   } catch (err) {
-    logMailFailure("sendEmailVerificationEmail", err);
+    console.error("sendEmailVerificationEmail failed:", err);
     return null;
   }
 }
@@ -1488,20 +1311,9 @@ export async function sendHavnWeeklyDigestEmail(args: {
   recentlyViewedCount?: number;
   matchesUrl: string;
   manageAlertsUrl?: string;
-  unsubscribeUrl?: string;
   properties: HavnWeeklyDigestProperty[];
 }) {
   try {
-    if (!isValidEmail(args.to)) {
-      throw new Error("InvalidRecipientEmail");
-    }
-
-    const matchesUrl = safeHref(args.matchesUrl);
-    const manageAlertsUrl = safeHref(
-      args.manageAlertsUrl,
-      "https://havn.ie/my-listings.html"
-    );
-    const unsubscribeUrl = safeHttpsUrl(args.unsubscribeUrl);
     const displayName = (args.name || "").trim();
     const newMatchesCount = Math.max(0, Number(args.newMatchesCount || 0));
     const featuredCount = Math.max(0, Number(args.featuredCount || 0));
@@ -1515,9 +1327,6 @@ export async function sendHavnWeeklyDigestEmail(args: {
         : "Your HAVN Weekly property update";
 
     const propertiesHtml = (args.properties || []).slice(0, 4).map((p) => {
-      const propertyUrl = safeHref(p.url);
-      const imageUrl = safeCloudinaryImageUrl(p.imageUrl);
-
       const price =
         typeof p.price === "number" && Number.isFinite(p.price)
           ? new Intl.NumberFormat("en-IE", {
@@ -1541,8 +1350,8 @@ export async function sendHavnWeeklyDigestEmail(args: {
                   <tr>
                     <td width="170" height="120" style="width:170px;height:120px;overflow:hidden;background:#e5e7eb;line-height:0;font-size:0;">
                       ${
-                        imageUrl
-                          ? `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(p.title)}" width="170" height="120" style="display:block;width:170px;height:120px;border:0;outline:none;text-decoration:none;" />`
+                        p.imageUrl
+                          ? `<img src="${escapeAttr(p.imageUrl)}" alt="${escapeAttr(p.title)}" width="170" height="120" style="display:block;width:170px;height:120px;border:0;outline:none;text-decoration:none;" />`
                           : `<div style="width:170px;height:120px;background:linear-gradient(135deg,#eef2ff,#f8fafc);"></div>`
                       }
                     </td>
@@ -1586,7 +1395,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                 }
 
                 <div style="margin-top:12px;">
-                  <a href="${escapeAttr(propertyUrl)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:12px;font-weight:800;padding:9px 14px;border-radius:8px;">
+                  <a href="${escapeAttr(p.url)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:12px;font-weight:800;padding:9px 14px;border-radius:8px;">
                     View property →
                   </a>
                 </div>
@@ -1615,7 +1424,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                           <div style="margin-top:6px;font-family:Manrope,Arial,Helvetica,sans-serif;color:rgba(255,255,255,.62);font-size:10px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;">Weekly Digest</div>
                         </td>
                         <td align="right" style="font-size:13px;">
-                          <a href="${escapeAttr(matchesUrl)}" style="color:#e0e7ff;text-decoration:underline;">View in browser</a>
+                          <a href="${escapeAttr(args.matchesUrl)}" style="color:#e0e7ff;text-decoration:underline;">View in browser</a>
                         </td>
                       </tr>
                     </table>
@@ -1631,7 +1440,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                     <p style="font-size:17px;line-height:1.55;color:#334155;margin:0 0 24px;max-width:470px;">
                       ${displayName ? `Hi ${escapeHtml(displayName)}, ` : ""}here’s your personalised weekly update with new listings that match your saved searches, featured homes, price changes and market insights.
                     </p>
-                    <a href="${escapeAttr(matchesUrl)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:900;padding:15px 22px;border-radius:9px;">
+                    <a href="${escapeAttr(args.matchesUrl)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:900;padding:15px 22px;border-radius:9px;">
                       View all matches →
                     </a>
                   </td>
@@ -1662,7 +1471,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                                 <h2 style="font-size:24px;margin:0;color:#071326;">New matches for your searches</h2>
                               </td>
                               <td align="right">
-                                <a href="${escapeAttr(matchesUrl)}" style="color:#4f46e5;font-weight:900;text-decoration:none;">View all (${newMatchesCount}) →</a>
+                                <a href="${escapeAttr(args.matchesUrl)}" style="color:#4f46e5;font-weight:900;text-decoration:none;">View all (${newMatchesCount}) →</a>
                               </td>
                             </tr>
                           </table>
@@ -1693,9 +1502,9 @@ export async function sendHavnWeeklyDigestEmail(args: {
                   <td style="padding:0 24px 24px;">
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                       <tr>
-                        ${insightCard("PRICE DROPS", `${priceDropsCount} properties with price reductions`, "Save on your next move", "View price drops →", matchesUrl)}
-                        ${insightCard("TRENDING THIS WEEK", `${trendingAreasCount || 3} areas are heating up`, "See where buyer demand is moving", "Explore areas →", matchesUrl)}
-                        ${insightCard("FEATURED HOMES", `${featuredCount} homes hand-picked for you`, "Don’t miss these", "See featured homes →", matchesUrl)}
+                        ${insightCard("PRICE DROPS", `${priceDropsCount} properties with price reductions`, "Save on your next move", "View price drops →", args.matchesUrl)}
+                        ${insightCard("TRENDING THIS WEEK", `${trendingAreasCount || 3} areas are heating up`, "See where buyer demand is moving", "Explore areas →", args.matchesUrl)}
+                        ${insightCard("FEATURED HOMES", `${featuredCount} homes hand-picked for you`, "Don’t miss these", "See featured homes →", args.matchesUrl)}
                       </tr>
                     </table>
                   </td>
@@ -1710,7 +1519,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                           <div style="font-size:14px;color:#334155;line-height:1.5;margin-top:4px;">Weekly updates for homes that match your top searches. You’re in control.</div>
                         </td>
                         <td align="right" style="padding:20px;">
-                          <a href="${escapeAttr(manageAlertsUrl)}" style="display:inline-block;border:1px solid #4f46e5;color:#4f46e5;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:9px;">Manage alerts →</a>
+                          <a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="display:inline-block;border:1px solid #4f46e5;color:#4f46e5;text-decoration:none;font-weight:900;padding:13px 18px;border-radius:9px;">Manage alerts →</a>
                         </td>
                       </tr>
                     </table>
@@ -1735,11 +1544,7 @@ export async function sendHavnWeeklyDigestEmail(args: {
                     </table>
                     <div style="border-top:1px solid rgba(255,255,255,0.14);margin-top:18px;padding-top:14px;font-size:11px;color:#94a3b8;">
                       HAVN.ie · Ireland's Property Intelligence Platform
-${
-  unsubscribeUrl
-    ? `<span style="float:right;"><a href="${escapeAttr(unsubscribeUrl)}" style="color:#cbd5e1;">Unsubscribe</a></span>`
-    : `<span style="float:right;"><a href="${escapeAttr(manageAlertsUrl)}" style="color:#cbd5e1;">Manage alerts</a></span>`
-}
+                      <span style="float:right;"><a href="${escapeAttr(args.manageAlertsUrl || "https://havn.ie/my-listings.html")}" style="color:#cbd5e1;">Unsubscribe</a></span>
                     </div>
                   </td>
                 </tr>
@@ -1756,15 +1561,9 @@ ${
       to: args.to,
       subject,
       html,
-      headers: unsubscribeUrl
-        ? {
-            "List-Unsubscribe": `<${unsubscribeUrl}>`,
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          }
-        : undefined,
     });
   } catch (err) {
-    logMailFailure("sendHavnWeeklyDigestEmail", err);
+    console.error("sendHavnWeeklyDigestEmail failed:", err);
     return null;
   }
 }
@@ -1780,15 +1579,13 @@ function metricCell(value: number, label: string, sub: string) {
 }
 
 function insightCard(label: string, title: string, sub: string, cta: string, url: string) {
-  const href = safeHref(url);
-
   return `
     <td style="width:33.333%;padding:8px;vertical-align:top;">
       <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:18px;min-height:138px;">
         <div style="font-size:11px;font-weight:900;color:#4f46e5;letter-spacing:.05em;margin-bottom:12px;">${escapeHtml(label)}</div>
         <div style="font-size:20px;line-height:1.15;font-weight:900;color:#071326;margin-bottom:8px;">${escapeHtml(title)}</div>
         <div style="font-size:13px;color:#334155;margin-bottom:14px;">${escapeHtml(sub)}</div>
-        <a href="${escapeAttr(href)}" style="color:#4f46e5;text-decoration:none;font-weight:900;font-size:13px;">${escapeHtml(cta)}</a>
+        <a href="${escapeAttr(url)}" style="color:#4f46e5;text-decoration:none;font-weight:900;font-size:13px;">${escapeHtml(cta)}</a>
       </div>
     </td>
   `;

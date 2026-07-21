@@ -1,0 +1,2526 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script defer data-domain="havn.ie" src="https://plausible.io/js/script.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>havn.ie — Browse</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=20260424-cards-fix-1">
+
+  <style>
+    .topMatchBadge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 2;
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: rgba(11, 18, 32, 0.86);
+      color: #fff;
+      border-radius: 999px;
+      padding: 6px 9px;
+      font-size: 10px;
+      font-weight: 950;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+      backdrop-filter: blur(10px);
+    }
+
+    .topMatchReason {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1e3a8a;
+      margin-bottom: 6px;
+    }
+
+    .prop-chips.match-row {
+      margin-top: 8px !important;
+    }
+
+    .prop-chips .chip.match {
+      background: rgba(241, 245, 249, 0.95) !important;
+      border-color: rgba(148, 163, 184, 0.25) !important;
+      color: #475569 !important;
+      font-weight: 800 !important;
+    }
+
+    .nearbyChipBtn {
+      border: 1px solid rgba(37, 99, 235, 0.15);
+      background: #fff;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 900;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .featuredPhotoLabels{
+      position:absolute;
+      left:12px;
+      right:12px;
+      bottom:44px;
+      z-index:6;
+      display:flex;
+      gap:6px;
+      overflow:hidden;
+      pointer-events:none;
+    }
+    
+    .featuredPhotoLabels span{
+      flex:0 0 auto;
+      max-width:96px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      padding:6px 8px;
+      border-radius:999px;
+      background:rgba(15,23,42,.82);
+      color:#fff;
+      font-size:10px;
+      font-weight:950;
+      box-shadow:0 8px 18px rgba(15,23,42,.20);
+    }
+    
+    .featuredPhotoLabels span.active{
+      background:linear-gradient(135deg,#f59e0b,#d97706);
+    }
+
+    .nearbyChipBtn:hover {
+      background: rgba(37, 99, 235, 0.08);
+    }
+
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --text: #081225;
+      --muted: #5d6b85;
+      --line: rgba(15, 23, 42, 0.10);
+      --line2: rgba(15, 23, 42, 0.07);
+      --blue: #2563eb;
+      --blue2: #0ea5e9;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.10);
+      --shadow2: 0 8px 22px rgba(15, 23, 42, 0.07);
+      --radius: 18px;
+      --radius2: 24px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -0.015em;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
+    }
+
+    .topWrap {
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 16px 18px 0;
+      position: relative;
+      z-index: 90;
+    }
+
+    .featuredGalleryWrap{
+      min-height:280px;
+    }
+    
+    .featuredMainPhoto{
+      height:280px !important;
+    }
+    
+    .featuredMiniGallery{
+      position:absolute;
+      top:12px;
+      right:10px;
+      bottom:12px;
+      z-index:7;
+      width:86px;
+      display:grid;
+      grid-template-rows:repeat(4,1fr);
+      gap:7px;
+    }
+    
+    .featuredMainPhoto{
+      width:calc(100% - 98px) !important;
+      height:280px !important;
+    }
+    
+    .featuredMiniThumb{
+      position:relative;
+      width:86px;
+      height:auto;
+      border-radius:10px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.7);
+      box-shadow:0 10px 22px rgba(15,23,42,.24);
+      background:#e5e7eb;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.70);
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: blur(18px);
+      border-radius: 18px;
+      box-shadow: var(--shadow2);
+      position: sticky;
+      top: 12px;
+      z-index: 90;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 180px;
+    }
+
+    .logo {
+      width: 44px;
+      height: auto;
+      display: block;
+      flex: 0 0 auto;
+      background: none;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .brandText {
+      font-family: "Manrope", sans-serif;
+      font-size: 21px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.045em;
+      color: #0A1A33;
+    }
+
+    .brandDotIe {
+      color: #346FB6;
+    }
+
+    .brand .tag {
+      font-family: "Manrope", sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0.18em;
+      color: #0A1A33;
+      margin-top: 2px;
+    }
+
+    .navlinks {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      flex: 1;
+      justify-content: center;
+    }
+
+    .navlinks a {
+      text-decoration: none;
+      color: #17213a;
+      font-weight: 800;
+      font-size: 12px;
+      padding: 8px 6px;
+      border-radius: 12px;
+      transition: all .15s ease;
+    }
+
+    .navlinks a:hover {
+      color: var(--text);
+      background: rgba(15, 23, 42, 0.05);
+    }
+
+    .navlinks a.active {
+      color: #0b1220;
+      background: rgba(37, 99, 235, 0.08);
+    }
+
+    .navactions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btnTop {
+      border: 1px solid rgba(37, 99, 235, 0.14);
+      background: rgba(255, 255, 255, 0.78);
+      color: #0b1220;
+      border-radius: 12px;
+      padding: 10px 13px;
+      font-weight: 850;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .15s ease;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    .btnTop:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow2);
+    }
+
+    .btnTop.primary {
+      background: linear-gradient(135deg, #315cff, #234be6);
+      color: #fff;
+      border-color: rgba(37, 99, 235, 0.28);
+      box-shadow: 0 14px 30px rgba(37, 99, 235, 0.24);
+    }
+
+    .pageShell {
+      width: 100%;
+      padding: 18px 18px 86px;
+    }
+
+    .browseHero {
+      max-width: 1600px;
+      margin: 0 auto;
+      border: 1px solid rgba(255, 255, 255, 0.70);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(37, 99, 235, 0.13), transparent 38%),
+        radial-gradient(circle at 90% 10%, rgba(14, 165, 233, 0.12), transparent 34%),
+        rgba(255, 255, 255, 0.74);
+      backdrop-filter: blur(18px);
+      border-radius: 28px;
+      box-shadow: var(--shadow2);
+      padding: 22px;
+    }
+    
+    .browseHero{
+      position:relative;
+      z-index:3000;
+    }
+    
+    .eliteLayout{
+      position:relative;
+      z-index:1;
+    }
+    
+    .suggestWrap{
+      position:relative;
+      z-index:5000;
+    }
+    
+    .suggestBox{
+      z-index:99999;
+    }    
+    
+    .browseHeroTop {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .browseKicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.08);
+      border: 1px solid rgba(37, 99, 235, 0.12);
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 900;
+      margin-bottom: 10px;
+    }
+
+    .browseHero h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.05;
+      letter-spacing: -0.045em;
+      font-weight: 850;
+      color: #071225;
+    }
+
+    .sub {
+      margin: 8px 0 0;
+      color: rgba(8, 18, 37, 0.68);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .heroStats {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .statPill {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.72);
+      border-radius: 16px;
+      padding: 10px 12px;
+      min-width: 120px;
+      box-shadow: 0 5px 14px rgba(15, 23, 42, 0.04);
+    }
+
+    .statLabel {
+      display: block;
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 850;
+      margin-bottom: 3px;
+    }
+
+    .statValue {
+      color: #0b1220;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .smartSearch {
+      display: grid;
+      grid-template-columns: 2.2fr .9fr .8fr .95fr auto;
+      gap: 10px;
+      align-items: end;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.86);
+      border-radius: 22px;
+      padding: 12px;
+      box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07);
+      position:relative;
+      z-index:5000;
+    }
+
+    .field label {
+      display: block;
+      font-size: 10px;
+      font-weight: 900;
+      color: #66728b;
+      margin: 0 0 7px;
+    }
+
+    .input,
+    .eliteSelect {
+      width: 100%;
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      background: #fff;
+      color: #0b1220;
+      border-radius: 14px;
+      min-height: 48px;
+      padding: 13px 14px;
+      outline: none;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: inherit;
+      box-shadow: 0 7px 18px rgba(15, 23, 42, 0.035);
+    }
+
+    .input:focus,
+    .eliteSelect:focus {
+      border-color: rgba(37, 99, 235, 0.42);
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+    }
+
+    .searchBtnElite {
+      min-height: 48px;
+      border: 0;
+      border-radius: 14px;
+      padding: 13px 22px;
+      background: linear-gradient(135deg, #315cff, #234be6);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 950;
+      cursor: pointer;
+      box-shadow: 0 14px 30px rgba(37, 99, 235, 0.26);
+      font-family: inherit;
+      white-space: nowrap;
+    }
+
+    .suggestWrap{
+      position:relative;
+      width:100%;
+      z-index:9999;
+    }
+
+    .suggestBox{
+      position:absolute;
+      left:0;
+      right:0;
+      top:calc(100% + 8px);
+    
+      background:#fff;
+      border:1px solid rgba(15,23,42,.12);
+      border-radius:18px;
+      box-shadow:0 18px 45px rgba(15,23,42,.14);
+    
+      padding:8px;
+    
+      z-index:99999;
+    
+      display:none;
+      max-height:280px;
+      overflow:auto;
+    }
+
+    .suggestItem {
+      width: 100%;
+      border: 0;
+      background: #fff;
+      text-align: left;
+      padding: 11px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 850;
+      color: #0b1220;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-family: inherit;
+    }
+
+    .suggestItem:hover {
+      background: rgba(37, 99, 235, 0.07);
+    }
+
+    .suggestType {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .smartActions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    .smartActionLeft,
+    .smartActionRight {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .actionChip,
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      background: rgba(255, 255, 255, 0.74);
+      color: #0f172a;
+      border-radius: 999px;
+      padding: 8px 11px;
+      font-size: 11px;
+      font-weight: 850;
+      text-decoration: none;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, 0.035);
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .actionChip.blue {
+      background: rgba(37, 99, 235, 0.09);
+      border-color: rgba(37, 99, 235, 0.16);
+      color: #1d4ed8;
+    }
+
+    .actionChip.dark {
+      background: #0b1220;
+      color: #fff;
+      border-color: #0b1220;
+    }
+
+    .hvnEmailPill {
+      margin: 14px auto 0;
+      max-width: 1440px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 999px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      box-shadow: var(--shadow2);
+    }
+
+    .hvnEmailLeft {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 240px;
+      flex: 1;
+    }
+
+    .hvnDot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.20);
+      box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.06);
+      flex: 0 0 auto;
+    }
+
+    .hvnDot.ok {
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.16);
+    }
+
+    .hvnDot.warn {
+      background: #f59e0b;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+    }
+
+    .hvnEmailTxt {
+      font-size: 12px;
+      font-weight: 950;
+      color: rgba(11, 18, 32, 0.88);
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .hvnEmailSub {
+      font-size: 12px;
+      font-weight: 800;
+      color: rgba(11, 18, 32, 0.60);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 62ch;
+    }
+
+    .hvnEmailActions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .hvnMiniBtn {
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 11px;
+      font-weight: 950;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .hvnMiniBtn.blue {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+
+    .hvnMiniBtn[disabled] {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .hvnMiniLink {
+      color: #1d4ed8;
+      font-weight: 950;
+      font-size: 12px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .hvnMiniLink:hover {
+      text-decoration: underline;
+    }
+
+    .hvnMiniMsg {
+      font-size: 12px;
+      font-weight: 900;
+      color: rgba(11, 18, 32, 0.70);
+      white-space: nowrap;
+    }
+
+    .notice {
+      max-width: 1440px;
+      margin: 14px auto 0;
+      border: 1px solid rgba(37, 99, 235, 0.12);
+      background: rgba(37, 99, 235, 0.06);
+      color: #1e3a8a;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .eliteLayout {
+      max-width: 1600px;
+      margin: 18px auto 0;
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr) 430px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .leftPanel,
+    .resultsPanel,
+    .mapPanel {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.86);
+      border-radius: 24px;
+      box-shadow: var(--shadow2);
+      z-index:1;
+    }
+
+    .leftPanel,
+    .mapPanel {
+      position: sticky;
+      top: 96px;
+      overflow: visible;
+    }
+
+    .panelHead {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+    }
+
+    .panelTitle {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 950;
+      letter-spacing: -0.025em;
+      color: #0b1220;
+    }
+
+    .panelSub {
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 750;
+      line-height: 1.35;
+    }
+
+    .filterGroup {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+
+    .filterLabel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: #334155;
+      font-weight: 950;
+      margin-bottom: 9px;
+    }
+
+    .filterHint {
+      font-size: 10px;
+      color: #94a3b8;
+      font-weight: 800;
+    }
+
+    .filterPills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .miniPill {
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      background: #fff;
+      color: #334155;
+      border-radius: 999px;
+      padding: 7px 9px;
+      font-size: 10px;
+      font-weight: 900;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .miniPill.active {
+      background: rgba(37, 99, 235, 0.09);
+      border-color: rgba(37, 99, 235, 0.20);
+      color: #1d4ed8;
+    }
+
+    .checkList {
+      display: grid;
+      gap: 8px;
+    }
+
+    .checkItem {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #334155;
+      font-weight: 800;
+    }
+
+    .checkItem input {
+      accent-color: #2563eb;
+    }
+
+    .saveSearchCard {
+      margin: 16px;
+      border: 1px solid rgba(37, 99, 235, 0.14);
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.06));
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .saveSearchCard strong {
+      display: block;
+      color: #0b1220;
+      font-size: 13px;
+      font-weight: 950;
+      margin-bottom: 5px;
+    }
+
+    .saveSearchCard span {
+      display: block;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 750;
+      line-height: 1.35;
+      margin-bottom: 10px;
+    }
+
+    .fullBtn {
+      width: 100%;
+      border: 0;
+      background: linear-gradient(135deg, #315cff, #234be6);
+      color: #fff;
+      border-radius: 13px;
+      padding: 11px 12px;
+      font-size: 12px;
+      font-weight: 950;
+      cursor: pointer;
+      font-family: inherit;
+      box-shadow: 0 12px 26px rgba(37, 99, 235, 0.22);
+    }
+
+    .resultsPanel {
+      min-width: 0;
+      padding: 16px;
+    }
+
+    .resultsTop {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .resultsTopLeft h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.15;
+      font-weight: 950;
+      letter-spacing: -0.035em;
+    }
+
+    .resultsTopLeft p {
+      margin: 5px 0 0;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .resultsTools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .softBtn {
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      background: #fff;
+      border-radius: 999px;
+      color: #334155;
+      padding: 8px 11px;
+      font-size: 11px;
+      font-weight: 900;
+      cursor: pointer;
+      font-family: inherit;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    #grid.grid {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 13px !important;
+      align-items: start !important;
+      margin-top: 12px !important;
+    }
+
+    .prop-card {
+      display: grid !important;
+      grid-template-columns: 210px minmax(0, 1fr) !important;
+      text-decoration: none !important;
+      background: #fff !important;
+      border-radius: 20px !important;
+      overflow: hidden !important;
+      border: 1px solid rgba(15, 23, 42, .08) !important;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, .065) !important;
+      min-width: 0 !important;
+      transition:
+        transform .15s ease,
+        box-shadow .15s ease,
+        border-color .15s ease,
+        background .15s ease !important;
+      color: inherit !important;
+      position: relative !important;
+    }
+
+    .prop-card.isFeatured {
+      grid-template-columns: 240px minmax(0, 1fr) !important;
+      min-height: 192px !important;
+      border: 1px solid rgba(217, 119, 6, 0.38) !important;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(251, 191, 36, 0.24), transparent 34%),
+        linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 1) 58%, rgba(255, 247, 237, 0.90)) !important;
+      box-shadow:
+        0 22px 54px rgba(245, 158, 11, 0.18),
+        0 12px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+
+    .prop-card.isFeatured::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 5px;
+      background: linear-gradient(90deg, #92400e, #f59e0b, #fde68a, #f59e0b);
+      z-index: 2;
+    }
+
+    .prop-card.isFeatured::after {
+      content: "Priority placement";
+      position: absolute;
+      right: 16px;
+      top: 14px;
+      z-index: 4;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(146, 64, 14, 0.18);
+      background: rgba(255, 255, 255, 0.82);
+      color: #92400e;
+      font-size: 10px;
+      font-weight: 1000;
+      letter-spacing: .055em;
+      text-transform: uppercase;
+      box-shadow: 0 10px 24px rgba(146, 64, 14, 0.12);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+
+    .prop-card:hover {
+      transform: translateY(-2px) !important;
+      box-shadow: 0 18px 45px rgba(15, 23, 42, .10) !important;
+      border-color: rgba(37, 99, 235, .18) !important;
+    }
+
+    .prop-card.isFeatured:hover {
+      transform: translateY(-4px) !important;
+      box-shadow:
+        0 30px 70px rgba(245, 158, 11, 0.24),
+        0 16px 38px rgba(15, 23, 42, 0.12) !important;
+      border-color: rgba(217, 119, 6, 0.58) !important;
+    }
+
+    .prop-card.isFeatured:hover .prop-thumb {
+      transform: scale(1.035);
+    }
+
+    .prop-thumb {
+      width: 100% !important;
+      height: 100% !important;
+      min-height: 158px !important;
+      max-height: none !important;
+      object-fit: cover !important;
+      display: block !important;
+      background: #e5e7eb !important;
+      transition: transform .35s ease !important;
+    }
+
+    .prop-card.isFeatured .prop-thumb {
+      min-height: 192px !important;
+    }
+
+    .prop-body {
+      padding: 15px 16px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: center !important;
+      min-width: 0 !important;
+    }
+
+    .prop-card.isFeatured .prop-body {
+      padding: 20px 20px 18px !important;
+      justify-content: center !important;
+    }
+
+    .prop-title {
+      font-size: 15px !important;
+      line-height: 1.25 !important;
+      font-weight: 900 !important;
+      margin: 0 0 6px !important;
+      color: #0b1220 !important;
+      display: -webkit-box !important;
+      -webkit-line-clamp: 2 !important;
+      -webkit-box-orient: vertical !important;
+      overflow: hidden !important;
+    }
+
+    .prop-meta {
+      font-size: 12px !important;
+      color: #64748b !important;
+      font-weight: 750 !important;
+      margin-bottom: 10px !important;
+    }
+
+
+    .prop-card.isFeatured .prop-price,
+    .prop-card.isFeatured .price {
+      font-size: 24px !important;
+      letter-spacing: -.035em !important;
+      line-height: 1.05 !important;
+      color: #0f172a !important;
+    }
+
+    .prop-card.isFeatured .prop-title {
+      font-size: 17px !important;
+      line-height: 1.23 !important;
+      letter-spacing: -.018em !important;
+    }
+
+    .prop-card.isFeatured .prop-meta {
+      color: #475569 !important;
+      font-weight: 850 !important;
+    }
+
+    .prop-card.isFeatured .prop-chips .chip {
+      background: rgba(255,255,255,.86) !important;
+      border-color: rgba(146,64,14,.16) !important;
+      box-shadow: 0 8px 18px rgba(146,64,14,.05) !important;
+    }
+
+    .featuredPremiumStrip {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(146,64,14,.12);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      color: #92400e;
+      font-size: 11px;
+      font-weight: 1000;
+    }
+
+    .featuredPremiumStrip span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(146,64,14,.12);
+    }
+
+    .prop-chips {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+
+    .prop-chips .chip {
+      font-size: 11px !important;
+      padding: 6px 9px !important;
+      border-radius: 999px !important;
+      background: rgba(37, 99, 235, .06) !important;
+      border: 1px solid rgba(37, 99, 235, .12) !important;
+      color: #0f172a !important;
+      font-weight: 900 !important;
+      box-shadow: none !important;
+    }
+
+    .mapCanvas {
+      height: 470px;
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(14, 165, 233, 0.08)),
+        radial-gradient(circle at 30% 25%, rgba(37, 99, 235, 0.16), transparent 16%),
+        radial-gradient(circle at 70% 35%, rgba(14, 165, 233, 0.16), transparent 18%),
+        radial-gradient(circle at 55% 70%, rgba(37, 99, 235, 0.11), transparent 20%),
+        #eef4ff;
+      overflow: hidden;
+    }
+
+    .mapGridLines {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+      background-size: 42px 42px;
+      opacity: .7;
+    }
+
+    .mapPin {
+      position: absolute;
+      min-width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 950;
+      box-shadow: 0 12px 26px rgba(37, 99, 235, 0.28);
+      border: 2px solid rgba(255, 255, 255, 0.92);
+    }
+
+    .pin1 { left: 23%; top: 28%; }
+    .pin2 { left: 58%; top: 34%; }
+    .pin3 { left: 43%; top: 58%; }
+    .pin4 { left: 72%; top: 67%; }
+
+    .mapControls {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      z-index: 2;
+    }
+
+    .mapToggle {
+      border: 1px solid rgba(15, 23, 42, 0.09);
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border-radius: 999px;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 900;
+      color: #0f172a;
+      box-shadow: var(--shadow2);
+    }
+
+    .insightsBox {
+      padding: 14px 16px;
+      border-top: 1px solid rgba(15, 23, 42, 0.07);
+    }
+
+    .insightGrid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+      margin-top: 10px;
+    }
+
+    .insightCard {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: #fff;
+      border-radius: 15px;
+      padding: 10px;
+    }
+
+    .insightLabel {
+      display: block;
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 850;
+      margin-bottom: 4px;
+    }
+
+    .insightValue {
+      color: #0b1220;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .bottomActionBar {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      width: min(760px, calc(100% - 32px));
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      background: rgba(255, 255, 255, 0.90);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 55px rgba(15, 23, 42, 0.17);
+      border-radius: 999px;
+      padding: 8px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .bottomActionText {
+      padding-left: 10px;
+      font-size: 12px;
+      font-weight: 850;
+      color: #334155;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bottomActionButtons {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 1180px) {
+      .eliteLayout {
+        grid-template-columns: 250px minmax(0, 1fr);
+      }
+
+      .mapPanel {
+        grid-column: 1 / -1;
+        position: relative;
+        top: auto;
+      }
+
+      .mapCanvas { height: 330px; }
+    }
+
+    @media (max-width: 900px) {
+      .navlinks { display: none; }
+      .brand .tag { display: none; }
+      .browseHeroTop { align-items: flex-start; flex-direction: column; }
+      .heroStats { justify-content: flex-start; }
+      .smartSearch { grid-template-columns: 1fr 1fr; }
+      .searchBtnElite { grid-column: 1 / -1; }
+      .eliteLayout { grid-template-columns: 1fr; }
+      .leftPanel, .mapPanel { position: relative; top: auto; }
+      .prop-card { grid-template-columns: 160px minmax(0, 1fr) !important; }
+      .prop-card.isFeatured { grid-template-columns: 180px minmax(0, 1fr) !important; }
+      .prop-card.isFeatured .prop-thumb { min-height: 172px !important; }
+      .prop-card.isFeatured .havnFavBtn { left:126px; }
+      .prop-card.isFeatured::after { display:none; }
+      .bottomActionBar { border-radius: 24px; align-items: flex-start; flex-direction: column; }
+      .bottomActionText { padding-left: 4px; white-space: normal; }
+      .bottomActionButtons { justify-content: flex-start; }
+    }
+
+    @media (max-width: 640px) {
+      .topWrap { padding: 10px 10px 0; }
+      .pageShell { padding: 12px 10px 92px; }
+      .nav { padding: 12px; }
+      .navactions .btnTop:not(.primary) { display: none; }
+      .brandText { font-size: 18px; }
+      .browseHero { padding: 16px; border-radius: 22px; }
+      .browseHero h1 { font-size: 28px; }
+      .smartSearch { grid-template-columns: 1fr; }
+      .smartActions { align-items: flex-start; flex-direction: column; }
+      .prop-card { display: block !important; }
+      .prop-card.isFeatured { min-height: 0 !important; }
+      .prop-card.isFeatured .prop-thumb { min-height: 210px !important; }
+      .prop-card.isFeatured .havnFavBtn { left:auto; right:14px; }
+      .prop-card.isFeatured::after { display:none; }
+      .prop-thumb { height: 180px !important; min-height: 180px !important; }
+      .hvnEmailSub { display: none; }
+      .hvnEmailPill { border-radius: 18px; }
+      .mapCanvas { height: 280px; }
+    }
+
+
+    /* HAVN favourites on browse cards */
+    .havnFavBtn{
+      position:absolute;
+      top:12px;
+      left:160px;
+      z-index:30;
+      width:40px;
+      height:40px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.82);
+      background:rgba(255,255,255,.96);
+      color:#0A1A33;
+      display:grid;
+      place-items:center;
+      font-size:20px;
+      font-weight:1000;
+      line-height:1;
+      cursor:pointer;
+      box-shadow:0 14px 30px rgba(15,23,42,.22);
+      backdrop-filter:blur(10px);
+      transition:transform .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
+    }
+
+    .havnFavBtn:hover{
+      transform:translateY(-1px) scale(1.06);
+      background:#fff;
+      border-color:rgba(37,99,235,.28);
+    }
+
+    .havnFavBtn.saved{
+      background:rgba(239,68,68,.96);
+      color:#fff;
+      border-color:rgba(239,68,68,.35);
+    }
+
+    .havnFavBtn[disabled]{
+      opacity:.72;
+      cursor:not-allowed;
+      transform:none;
+    }
+
+
+    .prop-card.isFeatured .havnFavBtn{
+      left:186px;
+      top:16px;
+      width:42px;
+      height:42px;
+    }
+
+    .prop-card.isFeatured .havnFavBtn.saved{
+      background:linear-gradient(135deg,#ef4444,#dc2626);
+      box-shadow:0 16px 34px rgba(239,68,68,.28);
+    }
+
+    @media (max-width:900px){
+      .havnFavBtn{
+        left:110px;
+      }
+    }
+
+    @media (max-width:640px){
+      .havnFavBtn{
+        left:auto;
+        right:12px;
+      }
+    }
+
+/* ---------- Property card photo indicators ---------- */
+
+/* ---------- Property image arrows ---------- */
+
+    .cardPhotoArrow{
+      position:absolute !important;
+      top:50% !important;
+      transform:translateY(-50%) !important;
+      z-index:40 !important;
+    
+      width:34px !important;
+      height:34px !important;
+    
+      border-radius:999px !important;
+      background:rgba(15,23,42,.58) !important;
+      color:#fff !important;
+    
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+    
+      font-size:26px !important;
+      font-weight:800 !important;
+      line-height:1 !important;
+    
+      cursor:pointer !important;
+      box-shadow:0 10px 24px rgba(15,23,42,.22) !important;
+    
+      opacity:1 !important;
+      pointer-events:auto !important;
+    }
+    
+    .cardPhotoArrow.prev{
+      left:10px !important;
+    }
+    
+    .cardPhotoArrow.next{
+      right:10px !important;
+    }
+    
+    .cardPhotoArrow:hover{
+      background:rgba(15,23,42,.82) !important;
+      transform:translateY(-50%) scale(1.08) !important;
+    }
+    
+    .prop-card:hover .cardPhotoArrow{
+      opacity:1;
+    }
+    
+    .cardPhotoArrow.prev{
+      left:10px;
+    }
+    
+    .cardPhotoArrow.next{
+      right:10px;
+    }
+    
+    .cardPhotoArrow:hover{
+      transform:translateY(-50%) scale(1.08);
+    }
+
+
+    .havnPhotoDots{
+      position:absolute;
+      left:50%;
+      bottom:12px;
+      transform:translateX(-50%);
+      z-index:20;
+    
+      display:flex;
+      gap:5px;
+    
+      padding:6px 8px;
+      border-radius:999px;
+    
+      background:rgba(15,23,42,.55);
+      backdrop-filter:blur(10px);
+      -webkit-backdrop-filter:blur(10px);
+    
+      box-shadow:0 10px 22px rgba(15,23,42,.18);
+    }
+    
+    .havnPhotoDots span{
+      width:6px;
+      height:6px;
+      border-radius:999px;
+      background:rgba(255,255,255,.55);
+      transition:all .25s ease;
+    }
+    
+    .havnPhotoDots span.active{
+      width:15px;
+      background:#ffffff;
+    }
+    
+    .havnPhotoCount{
+      position:absolute !important;
+    
+      top:auto !important;
+      left:auto !important;
+      right:12px !important;
+      bottom:12px !important;
+    
+      z-index:45 !important;
+    
+      padding:5px 9px !important;
+      border-radius:999px !important;
+    
+      background:rgba(10,26,51,.78) !important;
+      color:#fff !important;
+    
+      font-size:11px !important;
+      font-weight:900 !important;
+      line-height:1 !important;
+      letter-spacing:-0.01em !important;
+    
+      backdrop-filter:blur(10px) !important;
+      -webkit-backdrop-filter:blur(10px) !important;
+    
+      box-shadow:0 8px 18px rgba(15,23,42,.18) !important;
+    }
+
+/* ---------- Option C: HALO advanced filters layout ---------- */
+
+.haloSearchPanel{
+  margin-top:14px;
+  border:1px solid rgba(15,23,42,.08);
+  background:rgba(255,255,255,.76);
+  border-radius:24px;
+  padding:12px;
+  box-shadow:0 14px 36px rgba(15,23,42,.06);
+}
+
+.haloSearchPanel .smartSearch{
+  box-shadow:none;
+  border:0;
+  background:transparent;
+  padding:0;
+}
+
+.haloControlStrip{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px solid rgba(15,23,42,.08);
+}
+
+.haloAdvancedFilters{
+  margin:0;
+}
+
+.haloAdvancedFilters summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  width:100%;
+  padding:6px 0 10px;
+  color:#0A1A33;
+  font-size:12px;
+  font-weight:950;
+}
+
+.haloAdvancedFilters summary::-webkit-details-marker{
+  display:none;
+}
+
+.haloAdvancedTitle{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  color:#0A1A33;
+}
+
+.haloAdvancedTitle::before{
+  content:"⚙";
+  color:#346FB6;
+  font-size:13px;
+  font-weight:900;
+  line-height:1;
+}
+
+.haloAdvancedHint{
+  color:#64748b;
+  font-size:12px;
+  font-weight:800;
+}
+
+.haloAdvancedFilters summary::after{
+  content:"⌄";
+  margin-left:auto;
+  color:#64748b;
+  font-size:15px;
+  font-weight:950;
+  transform:translateY(-1px);
+}
+
+.haloAdvancedFilters[open] summary::after{
+  content:"⌃";
+}
+
+.haloAdvancedBody{
+  padding:6px 0 12px;
+  animation:havnHaloFiltersIn .18s ease both;
+}
+
+@keyframes havnHaloFiltersIn{
+  from{
+    opacity:0;
+    transform:translateY(-4px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0);
+  }
+}
+
+.haloFilterGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr 1.25fr;
+  gap:12px;
+}
+
+.haloFilterGrid .filterGroup{
+  padding:12px;
+  border:1px solid rgba(15,23,42,.08);
+  border-radius:18px;
+  background:rgba(255,255,255,.82);
+  box-shadow:0 8px 22px rgba(15,23,42,.045);
+}
+
+.haloFilterGrid .checkList.compact{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px 12px;
+}
+
+.haloControlStrip .smartActions{
+  margin-top:0;
+  padding-top:10px;
+  border-top:1px solid rgba(15,23,42,.06);
+}
+
+.haloControlStrip .actionChip{
+  padding:7px 10px;
+  font-size:11px;
+  box-shadow:none;
+}
+
+.leftPanel{
+  display:none !important;
+}
+
+.eliteLayout{
+  max-width:1600px !important;
+  grid-template-columns:minmax(0, 1fr) 430px !important;
+  gap:18px !important;
+}
+
+.resultsPanel{
+  min-width:0 !important;
+}
+
+@media (max-width:1180px){
+  .eliteLayout{
+    grid-template-columns:1fr !important;
+  }
+
+  .mapPanel{
+    grid-column:auto !important;
+  }
+
+  .haloFilterGrid{
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width:640px){
+  .haloAdvancedFilters summary{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:4px;
+  }
+
+  .haloAdvancedFilters summary::after{
+    position:absolute;
+    right:0;
+  }
+
+  .haloFilterGrid .checkList.compact{
+    grid-template-columns:1fr;
+  }
+}
+
+/* ---------- HAVN Standard Card Premium Pass 1 ---------- */
+
+.prop-card:not(.isFeatured){
+  grid-template-columns:235px minmax(0, 1fr) !important;
+  min-height:168px !important;
+  border-radius:22px !important;
+  box-shadow:0 14px 34px rgba(15,23,42,.075) !important;
+}
+
+.prop-card:not(.isFeatured) .prop-thumb{
+  min-height:178px !important;
+}
+
+.prop-card:not(.isFeatured) .prop-body{
+  padding:18px 20px !important;
+  justify-content:center !important;
+}
+
+.prop-card:not(.isFeatured) .prop-price,
+.prop-card:not(.isFeatured) .price{
+  font-size:23px !important;
+  line-height:1.05 !important;
+  letter-spacing:-.045em !important;
+  font-weight:1000 !important;
+  color:#071225 !important;
+  margin-bottom:6px !important;
+}
+
+.prop-card:not(.isFeatured) .prop-title{
+  font-size:17px !important;
+  line-height:1.2 !important;
+  font-weight:1000 !important;
+  letter-spacing:-.025em !important;
+  color:#071225 !important;
+  margin-bottom:7px !important;
+}
+
+.prop-card:not(.isFeatured) .prop-meta{
+  font-size:12px !important;
+  font-weight:850 !important;
+  color:#475569 !important;
+  margin-bottom:12px !important;
+}
+
+.prop-card:not(.isFeatured) .prop-chips{
+  gap:7px !important;
+}
+
+.prop-card:not(.isFeatured) .prop-chips .chip{
+  padding:7px 10px !important;
+  font-size:11px !important;
+  font-weight:950 !important;
+  background:rgba(37,99,235,.07) !important;
+  border-color:rgba(37,99,235,.14) !important;
+}
+
+.prop-card:not(.isFeatured):hover{
+  transform:translateY(-3px) !important;
+  box-shadow:0 20px 48px rgba(15,23,42,.11) !important;
+}
+
+.prop-card:not(.isFeatured):hover .prop-thumb{
+  transform:scale(1.025) !important;
+}
+
+  </style>
+
+<style id="havn-featured-card-v2">
+  #grid.grid{
+    gap:18px !important;
+  }
+
+  .prop-card.isFeatured{
+    display:grid !important;
+    grid-template-columns:minmax(0,590px) minmax(0,1fr) !important;
+    height:350px !important;
+    min-height:350px !important;
+    max-height:350px !important;
+    border:1px solid rgba(217,119,6,.30) !important;
+    border-radius:24px !important;
+    overflow:hidden !important;
+    background:#fff !important;
+    box-shadow:0 18px 46px rgba(15,23,42,.09) !important;
+  }
+
+  .prop-card.isFeatured::before{
+    content:"" !important;
+    position:absolute !important;
+    left:0 !important;
+    top:0 !important;
+    width:100% !important;
+    height:5px !important;
+    background:linear-gradient(90deg,#92400e,#f59e0b,#fde68a,#f59e0b) !important;
+    z-index:8 !important;
+  }
+
+  .prop-card.isFeatured::after{
+    display:none !important;
+  }
+
+  .prop-card.isFeatured .featuredEditorialGallery{
+    height:350px !important;
+    min-height:350px !important;
+    max-height:350px !important;
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) 180px !important;
+    gap:4px !important;
+    background:#0b1220 !important;
+    overflow:hidden !important;
+  }
+
+  .prop-card.isFeatured .featuredHeroPane,
+  .prop-card.isFeatured .featuredMainPhoto,
+  .prop-card.isFeatured .featuredSideStack{
+    height:350px !important;
+    min-height:350px !important;
+    max-height:350px !important;
+  }
+
+  .prop-card.isFeatured .featuredHeroPane{
+    position:relative !important;
+    overflow:hidden !important;
+  }
+
+  .prop-card.isFeatured .featuredMainPhoto{
+    width:100% !important;
+    object-fit:cover !important;
+    display:block !important;
+  }
+
+  .prop-card.isFeatured .featuredSideStack{
+    width:180px !important;
+    display:grid !important;
+    grid-template-rows:1fr 1fr 1fr !important;
+    gap:4px !important;
+  }
+
+  .prop-card.isFeatured .featuredSidePhoto{
+    position:relative !important;
+    overflow:hidden !important;
+    background:#111827 !important;
+  }
+
+  .prop-card.isFeatured .featuredSidePhoto img{
+    width:100% !important;
+    height:100% !important;
+    object-fit:cover !important;
+    display:block !important;
+  }
+
+  .prop-card.isFeatured .featuredSidePhoto span{
+    position:absolute !important;
+    right:8px !important;
+    bottom:8px !important;
+    max-width:140px !important;
+    padding:6px 9px !important;
+    border-radius:999px !important;
+    background:rgba(10,26,51,.88) !important;
+    color:#fff !important;
+    font-size:10px !important;
+    font-weight:950 !important;
+  }
+
+  .prop-card.isFeatured .featuredSidePhoto strong{
+    position:absolute !important;
+    inset:0 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    background:rgba(10,26,51,.55) !important;
+    color:#fff !important;
+    font-size:18px !important;
+    font-weight:1000 !important;
+  }
+
+  .prop-card.isFeatured .topMatchBadge{
+    top:16px !important;
+    left:16px !important;
+    z-index:30 !important;
+  }
+
+  .prop-card.isFeatured .cardPhotoArrow{
+    z-index:35 !important;
+  }
+
+  .prop-card.isFeatured .cardPhotoArrow.prev{
+    left:18px !important;
+  }
+
+  .prop-card.isFeatured .cardPhotoArrow.next{
+    right:198px !important;
+  }
+
+  .prop-card.isFeatured .havnPhotoCount{
+    right:198px !important;
+    bottom:16px !important;
+  }
+
+  .prop-card.isFeatured .havnPhotoDots{
+    bottom:16px !important;
+  }
+
+  .prop-card.isFeatured .prop-body{
+    position:relative !important;
+    height:350px !important;
+    min-height:350px !important;
+    max-height:350px !important;
+    padding:30px 30px 22px !important;
+    justify-content:flex-start !important;
+    background:
+      radial-gradient(circle at 84% 12%, rgba(245,158,11,.10), transparent 34%),
+      linear-gradient(135deg,#fff,#fffaf0) !important;
+  }
+
+  .prop-card.isFeatured .prop-body::before{
+    content:"★ FEATURED PROPERTY";
+    display:inline-flex;
+    width:max-content;
+    max-width:170px;
+    margin:0 10px 18px 0;
+    padding:8px 11px;
+    border-radius:999px;
+    background:linear-gradient(135deg,#92400e,#f59e0b);
+    color:#fff;
+    font-size:10px;
+    line-height:1;
+    font-weight:1000;
+    letter-spacing:.07em;
+    white-space:nowrap;
+  }
+
+  .prop-card.isFeatured .prop-body::after{
+    content:"PRIORITY PLACEMENT";
+    position:absolute;
+    top:30px;
+    left:210px;
+    padding:8px 11px;
+    border-radius:999px;
+    border:1px solid rgba(146,64,14,.16);
+    background:rgba(255,255,255,.92);
+    color:#92400e;
+    font-size:10px;
+    line-height:1;
+    font-weight:1000;
+    letter-spacing:.055em;
+    box-shadow:0 10px 24px rgba(146,64,14,.10);
+    white-space:nowrap;
+  }
+
+  .prop-card.isFeatured .havnFavBtn{
+    left:auto !important;
+    right:22px !important;
+    top:24px !important;
+    z-index:40 !important;
+    width:42px !important;
+    height:42px !important;
+    border-radius:999px !important;
+  }
+
+  .prop-card.isFeatured .topMatchReason{
+    color:#92400e !important;
+    font-size:12px !important;
+    font-weight:950 !important;
+    margin:0 0 8px !important;
+  }
+
+  .prop-card.isFeatured .prop-title{
+    font-size:22px !important;
+    line-height:1.15 !important;
+    font-weight:1000 !important;
+    margin:0 0 8px !important;
+  }
+
+  .prop-card.isFeatured .prop-meta{
+    font-size:13px !important;
+    font-weight:900 !important;
+    color:#475569 !important;
+    margin-bottom:14px !important;
+  }
+
+  .prop-card.isFeatured .prop-chips{
+    gap:8px !important;
+    margin-bottom:12px !important;
+  }
+
+  .prop-card.isFeatured .prop-chips .chip{
+    background:#fff !important;
+    border-color:rgba(146,64,14,.14) !important;
+    padding:7px 10px !important;
+    font-size:11px !important;
+    font-weight:950 !important;
+  }
+
+  .prop-card.isFeatured .featuredPremiumStrip{
+    margin-top:auto !important;
+    padding-top:14px !important;
+    border-top:1px solid rgba(146,64,14,.14) !important;
+    display:flex !important;
+    gap:9px !important;
+    flex-wrap:wrap !important;
+  }
+
+  .prop-card.isFeatured .featuredPremiumStrip span{
+    background:#fff !important;
+    border:1px solid rgba(146,64,14,.14) !important;
+    color:#92400e !important;
+    padding:7px 10px !important;
+    border-radius:999px !important;
+    font-size:11px !important;
+    font-weight:1000 !important;
+  }
+
+  @media(max-width:1180px){
+    .prop-card.isFeatured{
+      grid-template-columns:1fr !important;
+      height:auto !important;
+      max-height:none !important;
+    }
+
+    .prop-card.isFeatured .featuredEditorialGallery{
+      height:320px !important;
+      min-height:320px !important;
+      max-height:320px !important;
+    }
+
+    .prop-card.isFeatured .havnFavBtn{
+      right:18px !important;
+    }
+  }
+
+  @media(max-width:680px){
+    .prop-card.isFeatured{
+      display:block !important;
+      min-height:0 !important;
+    }
+
+    .prop-card.isFeatured .featuredEditorialGallery{
+      grid-template-columns:1fr !important;
+      height:260px !important;
+      min-height:260px !important;
+    }
+
+    .prop-card.isFeatured .featuredSideStack{
+      display:none !important;
+    }
+
+    .prop-card.isFeatured .cardPhotoArrow.next,
+    .prop-card.isFeatured .havnPhotoCount{
+      right:14px !important;
+    }
+
+    .prop-card.isFeatured .prop-body{
+      height:auto !important;
+      max-height:none !important;
+    }
+
+    .prop-card.isFeatured .prop-body::after{
+      display:none !important;
+    }
+  }
+</style>
+
+</head>
+
+<body>
+
+  <div class="topWrap">
+    <header class="nav">
+      <div class="brand">
+        <img src="/assets/brand/logo.svg" alt="HAVN" class="logo">
+        <div>
+          <div class="brandText">
+            havn<span class="brandDotIe">.ie</span>
+          </div>
+          <div class="tag">Find Your Haven</div>
+        </div>
+      </div>
+
+      <nav class="navlinks" aria-label="Primary">
+        <a href="/properties.html?mode=buy" data-mode="buy">Buy</a>
+        <a href="/properties.html?mode=rent" data-mode="rent">Rent</a>
+        <a href="/properties.html?mode=share" data-mode="share">Share</a>
+        <a href="/sell.html">Sell</a>
+        <a href="/agents.html">Agents</a>
+      </nav>
+
+      <div class="navactions">
+        <a class="btnTop primary" href="/properties.html">Browse listings</a>
+        <a class="btnTop" data-auth="out" href="/login.html">Login</a>
+        <a class="btnTop" data-auth="out" href="/signup.html">Sign up</a>
+        <a class="btnTop" data-auth="in" href="/dashboard.html">Dashboard</a>
+        <a class="btnTop" data-role="admin" href="/admin.html">Admin</a>
+        <a class="btnTop" data-auth="in" href="#" id="logoutBtn">Logout</a>
+      </div>
+    </header>
+  </div>
+
+  <main class="pageShell">
+
+<section class="browseHero">
+  <div class="browseHeroTop">
+    <div>
+      <div class="browseKicker">✦ Option C workspace</div>
+      <h1>Find the right property faster.</h1>
+      <p class="sub" id="subText">Published listings. Search town, county, area, Eircode or title.</p>
+    </div>
+
+    <div class="heroStats">
+      <div class="statPill">
+        <span class="statLabel">Mode</span>
+        <span class="statValue" id="modeChip">Mode: buy</span>
+      </div>
+      <div class="statPill">
+        <span class="statLabel">Live results</span>
+        <span class="statValue" id="countChip">Count: —</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="haloSearchPanel">
+    <div class="smartSearch">
+      <div class="field">
+        <label for="search">Location</label>
+        <div class="suggestWrap">
+          <input id="search" class="input" type="search"
+            placeholder="Start typing a town, county, area or Eircode…" autocomplete="off" />
+          <div class="suggestBox" id="suggestBox"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="heroPrice">Price</label>
+        <select class="eliteSelect" id="heroPrice">
+          <option>Any price</option>
+          <option>Under €300k</option>
+          <option>€300k – €500k</option>
+          <option>€500k – €800k</option>
+          <option>€800k+</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="heroBeds">Beds</label>
+        <select class="eliteSelect" id="heroBeds">
+          <option>Any beds</option>
+          <option>1+ bed</option>
+          <option>2+ beds</option>
+          <option>3+ beds</option>
+          <option>4+ beds</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="heroType">Type</label>
+        <select class="eliteSelect" id="heroType">
+          <option>Any type</option>
+          <option>House</option>
+          <option>Apartment</option>
+          <option>Site</option>
+          <option>Commercial</option>
+        </select>
+      </div>
+
+      <button class="searchBtnElite" type="button">Search</button>
+    </div>
+
+    <div class="haloControlStrip">
+      <details class="haloAdvancedFilters">
+        <summary>
+          <span class="haloAdvancedTitle">Advanced filters</span>
+          <span class="haloAdvancedHint">Refine your search with more filters</span>
+        </summary>
+
+        <div class="haloAdvancedBody">
+          <div class="haloFilterGrid">
+            <div class="filterGroup">
+              <div class="filterLabel">
+                Property type
+                <span class="filterHint">Type</span>
+              </div>
+              <div class="filterPills">
+                <button class="miniPill active" type="button">Any</button>
+                <button class="miniPill" type="button">House</button>
+                <button class="miniPill" type="button">Apartment</button>
+                <button class="miniPill" type="button">Site</button>
+              </div>
+            </div>
+
+            <div class="filterGroup">
+              <div class="filterLabel">
+                Budget
+                <span class="filterHint">Price</span>
+              </div>
+              <div class="filterPills">
+                <button class="miniPill active" type="button">Any price</button>
+                <button class="miniPill" type="button">Under €300k</button>
+                <button class="miniPill" type="button">€300k – €500k</button>
+                <button class="miniPill" type="button">€500k – €800k</button>
+                <button class="miniPill" type="button">€800k+</button>
+              </div>
+            </div>
+
+            <div class="filterGroup">
+              <div class="filterLabel">
+                Popular filters
+                <span class="filterHint">Lifestyle</span>
+              </div>
+              <div class="checkList compact">
+                <label class="checkItem"><input type="checkbox"> Parking</label>
+                <label class="checkItem"><input type="checkbox"> Garden</label>
+                <label class="checkItem"><input type="checkbox"> Good BER</label>
+                <label class="checkItem"><input type="checkbox"> New build</label>
+                <label class="checkItem"><input type="checkbox"> Near transport</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <div class="smartActions">
+        <div class="smartActionLeft">
+          <button class="actionChip blue" type="button">🔔 Live alerts</button>
+          <button class="actionChip" type="button">♡ Save search</button>
+          <button class="actionChip" type="button">✎ Draw search</button>
+          <button class="actionChip" type="button">🚗 Commute</button>
+          <button class="actionChip" type="button">📊 Insights</button>
+        </div>
+
+        <div class="smartActionRight">
+          <a class="actionChip" href="/index.html">← Back to home</a>
+          <a class="actionChip dark" href="/property-upload.html">List a property</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+    <div id="hvnEmailPillWrap" style="display:none;">
+      <div class="hvnEmailPill" aria-live="polite">
+        <div class="hvnEmailLeft">
+          <span class="hvnDot" id="hvnDot" aria-hidden="true"></span>
+          <div class="hvnEmailTxt" id="hvnTxt">—</div>
+          <div class="hvnEmailSub" id="hvnSub">—</div>
+        </div>
+        <div class="hvnEmailActions" id="hvnActions">
+          <button class="hvnMiniBtn blue" id="hvnResend" type="button">Resend email</button>
+          <button class="hvnMiniBtn" id="hvnRecheck" type="button">I've verified</button>
+          <a class="hvnMiniLink" id="hvnLink" href="/verify-email.html">Enter token</a>
+          <span class="hvnMiniMsg" id="hvnMsg"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="notice" class="notice" style="display:none;"></div>
+
+    <section class="eliteLayout">
+
+      <aside class="leftPanel">
+        <div class="panelHead">
+          <h2 class="panelTitle">Advanced filters</h2>
+          <p class="panelSub">Decision-grade filters for serious buyers.</p>
+        </div>
+
+        <div class="filterGroup">
+          <div class="filterLabel">
+            Property type
+            <span class="filterHint">Visual only</span>
+          </div>
+          <div class="filterPills">
+            <button class="miniPill active" type="button">Any</button>
+            <button class="miniPill" type="button">House</button>
+            <button class="miniPill" type="button">Apartment</button>
+            <button class="miniPill" type="button">Site</button>
+          </div>
+        </div>
+
+        <div class="filterGroup">
+          <div class="filterLabel">
+            Budget
+            <span class="filterHint">Next step</span>
+          </div>
+          <div class="filterPills">
+            <button class="miniPill" type="button">Under €300k</button>
+            <button class="miniPill" type="button">€300k–€500k</button>
+            <button class="miniPill" type="button">€500k+</button>
+          </div>
+        </div>
+
+        <div class="filterGroup">
+          <div class="filterLabel">
+            Must-haves
+            <span class="filterHint">Coming alive later</span>
+          </div>
+          <div class="checkList">
+            <label class="checkItem"><input type="checkbox"> Garden</label>
+            <label class="checkItem"><input type="checkbox"> Parking</label>
+            <label class="checkItem"><input type="checkbox"> Balcony</label>
+            <label class="checkItem"><input type="checkbox"> Near transport</label>
+            <label class="checkItem"><input type="checkbox"> Energy efficient</label>
+          </div>
+        </div>
+
+        <div class="saveSearchCard">
+          <strong>Never miss the right home.</strong>
+          <span>Save this search and get alerts when matching properties appear.</span>
+          <button class="fullBtn" type="button">Save search</button>
+        </div>
+      </aside>
+
+      <section class="resultsPanel">
+        <div class="resultsTop">
+          <div class="resultsTopLeft">
+            <h2>Property results</h2>
+            <p>Clean, ranked, scannable listings.</p>
+          </div>
+          <div class="resultsTools">
+            <button class="softBtn sortBtn" type="button">Sort: Best match</button>
+            <button class="softBtn" type="button">Compare</button>
+          </div>
+        </div>
+        <div id="grid" class="grid" aria-live="polite"></div>
+      </section>
+
+      <aside class="mapPanel">
+        <div class="panelHead">
+          <h2 class="panelTitle">Live map intelligence</h2>
+          <p class="panelSub">Map, clusters and area insight layer.</p>
+        </div>
+
+        <div class="mapCanvas">
+          <div class="mapGridLines"></div>
+          <div class="mapControls">
+            <div class="mapToggle">Search as I move</div>
+            <div class="mapToggle">Draw area</div>
+          </div>
+          <div class="mapPin pin1">12</div>
+          <div class="mapPin pin2">8</div>
+          <div class="mapPin pin3">24</div>
+          <div class="mapPin pin4">5</div>
+        </div>
+
+        <div class="insightsBox">
+          <h2 class="panelTitle">Area insights</h2>
+          <p class="panelSub">Signals that help buyers make better decisions.</p>
+          <div class="insightGrid">
+            <div class="insightCard">
+              <span class="insightLabel">Avg price</span>
+              <span class="insightValue">€485k</span>
+            </div>
+            <div class="insightCard">
+              <span class="insightLabel">New listings</span>
+              <span class="insightValue">+23%</span>
+            </div>
+            <div class="insightCard">
+              <span class="insightLabel">Price trend</span>
+              <span class="insightValue">+4.2%</span>
+            </div>
+            <div class="insightCard">
+              <span class="insightLabel">Demand</span>
+              <span class="insightValue">High</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+    </section>
+  </main>
+
+  <div class="bottomActionBar">
+    <div class="bottomActionText">Turn this search into a live buying workspace.</div>
+    <div class="bottomActionButtons">
+      <button class="softBtn" type="button">🔔 Alerts</button>
+      <button class="softBtn" type="button">♡ Save</button>
+      <button class="softBtn" type="button">⚖ Compare</button>
+      <button class="softBtn" type="button">📧 Email updates</button>
+    </div>
+  </div>
+
+    <script defer src="/havn-auth.js?v=20260506-auth-ui-fix"></script>
+    <script defer src="/locations.js?v=20260521-v1"></script>
+    <script defer src="/properties.js?v=20260702-card-performance-1"></script>
+    <script defer src="/havn-saved-searches.js?v=20260622-v1"></script>
+
+  <script>
+    (function () {
+      function capMode(mode) {
+        const m = String(mode || "").trim().toLowerCase();
+        if (m === "rent" || m === "share") return m;
+        return "buy";
+      }
+
+      let mode = "buy";
+      try {
+        const u = new URL(location.href);
+        mode = capMode(u.searchParams.get("mode") || "buy");
+      } catch {}
+
+      document.querySelectorAll("[data-mode]").forEach(a => {
+        if (capMode(a.getAttribute("data-mode")) === mode) a.classList.add("active");
+      });
+    })();
+  </script>
+
+
+
+  <script>
+    (function(){
+      "use strict";
+
+      const API = "https://api.havn.ie";
+      const savedIds = new Set();
+      let loadedSaved = false;
+
+      function token(){
+        try{return localStorage.getItem("token") || "";}catch{return "";}
+      }
+
+      function loginForNext(){
+        const next = location.pathname + location.search;
+        location.href = "/login.html?next=" + encodeURIComponent(next);
+      }
+
+      function getCardSlug(card){
+        const href = card && card.getAttribute("href");
+        if(!href) return "";
+        try{
+          const url = new URL(href, location.origin);
+          return url.searchParams.get("slug") || "";
+        }catch{
+          return "";
+        }
+      }
+
+      function getCardId(card){
+        const raw = card && (card.getAttribute("data-property-id") || card.dataset.propertyId || card.dataset.id);
+        const id = Number(raw);
+        return Number.isFinite(id) && id > 0 ? id : null;
+      }
+
+      async function fetchPropertyIdFromSlug(slug){
+        if(!slug) return null;
+        const res = await fetch(API + "/api/properties/" + encodeURIComponent(slug), {
+          headers:{"Accept":"application/json"},
+          cache:"no-store"
+        });
+        const data = await res.json().catch(() => null);
+        if(!res.ok || !data) return null;
+        const p = data.item || data.property || data.listing || data.data || data;
+        const id = Number(p && (p.id || p.propertyId || p.listingId));
+        return Number.isFinite(id) && id > 0 ? id : null;
+      }
+
+      async function loadSaved(){
+        if(loadedSaved) return;
+        loadedSaved = true;
+        const t = token();
+        if(!t) return;
+
+        try{
+          const res = await fetch(API + "/api/auth/saved-properties", {
+            headers:{
+              "Accept":"application/json",
+              "Authorization":"Bearer " + t
+            },
+            cache:"no-store"
+          });
+          const data = await res.json().catch(() => null);
+          const rows = data && Array.isArray(data.savedProperties) ? data.savedProperties : [];
+          rows.forEach(row => {
+            const id = Number(row && (row.propertyId || (row.property && row.property.id)));
+            if(Number.isFinite(id) && id > 0) savedIds.add(id);
+          });
+        }catch{}
+      }
+
+      function setButtonState(btn, saved){
+        btn.classList.toggle("saved", !!saved);
+        btn.setAttribute("aria-label", saved ? "Remove from favourites" : "Save to favourites");
+        btn.setAttribute("title", saved ? "Saved" : "Save property");
+        btn.textContent = saved ? "♥" : "♡";
+      }
+
+      async function toggleFavourite(btn, card){
+        const t = token();
+        if(!t){
+          loginForNext();
+          return;
+        }
+
+        btn.disabled = true;
+
+        try{
+          let propertyId = getCardId(card);
+          if(!propertyId){
+            propertyId = await fetchPropertyIdFromSlug(getCardSlug(card));
+            if(propertyId) card.dataset.propertyId = String(propertyId);
+          }
+
+          if(!propertyId){
+            alert("Could not save this property yet. Missing property ID.");
+            return;
+          }
+
+          const alreadySaved = savedIds.has(propertyId);
+
+          const res = await fetch(
+            API + "/api/auth/saved-properties" + (alreadySaved ? "/" + encodeURIComponent(propertyId) : ""),
+            {
+              method:alreadySaved ? "DELETE" : "POST",
+              headers:{
+                "Content-Type":"application/json",
+                "Accept":"application/json",
+                "Authorization":"Bearer " + t
+              },
+              body:alreadySaved ? undefined : JSON.stringify({propertyId})
+            }
+          );
+
+          const data = await res.json().catch(() => null);
+          if(!res.ok || !data || data.ok === false){
+            throw new Error((data && data.message) || "Could not update favourite.");
+          }
+
+          if(alreadySaved) savedIds.delete(propertyId);
+          else savedIds.add(propertyId);
+
+          document.querySelectorAll(`.prop-card[data-property-id="${String(propertyId)}"] .havnFavBtn`).forEach(other => {
+            setButtonState(other, savedIds.has(propertyId));
+          });
+          setButtonState(btn, savedIds.has(propertyId));
+        }catch(err){
+          alert((err && err.message) || "Could not update favourite.");
+        }finally{
+          btn.disabled = false;
+        }
+      }
+
+      async function enhanceCards(){
+        await loadSaved();
+
+        document.querySelectorAll(".prop-card").forEach(card => {
+          if(card.classList.contains("isFeatured") && !card.querySelector(".featuredPremiumStrip")){
+            const body = card.querySelector(".prop-body") || card;
+            const strip = document.createElement("div");
+            strip.className = "featuredPremiumStrip";
+            strip.innerHTML = "<span>★ Featured</span><span>✓ Verified</span><span>↗ Priority placement</span>";
+            body.appendChild(strip);
+          }
+
+          if(card.querySelector(".havnFavBtn")) return;
+
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "havnFavBtn";
+
+          const id = getCardId(card);
+          setButtonState(btn, id && savedIds.has(id));
+
+          btn.addEventListener("click", function(e){
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFavourite(btn, card);
+          });
+
+          card.appendChild(btn);
+        });
+      }
+
+      function boot(){
+        enhanceCards();
+
+        const grid = document.getElementById("grid");
+        const obs = new MutationObserver(() => enhanceCards());
+
+        if(grid){
+          obs.observe(grid, { childList:true, subtree:true });
+        }else{
+          obs.observe(document.body, { childList:true, subtree:true });
+        }
+
+        let tries = 0;
+        const timer = setInterval(() => {
+          tries += 1;
+          enhanceCards();
+          if(tries >= 30) clearInterval(timer);
+        }, 500);
+      }
+
+      if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+      else boot();
+    })();
+  </script>
+</body>
+</html>

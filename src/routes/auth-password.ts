@@ -12,9 +12,13 @@ const router = Router();
  */
 router.post("/forgot", async (req, res) => {
   try {
-    const email = String(req.body.email || "").trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ ok: false, message: "Email required" });
+    const email = String(req.body?.email || "").trim().toLowerCase();
+
+    if (!email || email.length > 254) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid email",
+      });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -61,11 +65,19 @@ router.post("/forgot", async (req, res) => {
  */
 router.post("/reset", async (req, res) => {
   try {
-    const token = String(req.body.token || "");
-    const password = String(req.body.password || "");
+    const token = String(req.body?.token || "").trim();
+    const password = String(req.body?.password || "");
 
-    if (!token || password.length < 8) {
-      return res.status(400).json({ ok: false, message: "Invalid request" });
+    if (
+      token.length !== 64 ||
+      !/^[a-f0-9]{64}$/i.test(token) ||
+      password.length < 8 ||
+      password.length > 128
+    ) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid request",
+      });
     }
 
     const records = await prisma.passwordResetToken.findMany({

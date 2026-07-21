@@ -33,11 +33,18 @@ router.post("/cloudinary-signature", requireAuth, (req, res) => {
       });
     }
 
-    // optional folder from frontend (defaults to havn/properties)
-    const folder =
-      typeof req.body?.folder === "string" && req.body.folder.trim()
-        ? req.body.folder.trim()
-        : "havn/properties";
+	const allowedFolders = [
+  	"havn/properties",
+	];
+
+	const requestedFolder =
+  	typeof req.body?.folder === "string"
+    	? req.body.folder.trim()
+    	: "";
+
+	const folder = allowedFolders.includes(requestedFolder)
+  	? requestedFolder
+  	: "havn/properties";
 
     const timestamp = Math.floor(Date.now() / 1000);
 

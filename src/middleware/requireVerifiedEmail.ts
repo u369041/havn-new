@@ -3,27 +3,44 @@
 /**
  * requireVerifiedEmail
  * - Must be placed AFTER requireAuth.
- * - Blocks users with emailVerified=false (admins bypass).
+ * - Blocks users with emailVerified=false.
+ * - Current admins bypass email verification.
  */
-export default async function requireVerifiedEmail(req: any, res: any, next: any) {
+export default async function requireVerifiedEmail(
+  req: any,
+  res: any,
+  next: any
+) {
   try {
     const userId = req?.user?.userId;
-    const role = req?.user?.role;
 
-    if (!userId) {
-      return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", message: "Authentication required" });
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        ok: false,
+        code: "AUTH_REQUIRED",
+        message: "Authentication required",
+      });
     }
-
-    // Admin bypass
-    if (role === "admin") return next();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { emailVerified: true },
+      select: {
+        role: true,
+        emailVerified: true,
+      },
     });
 
     if (!user) {
-      return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", message: "User not found" });
+      return res.status(401).json({
+        ok: false,
+        code: "AUTH_REQUIRED",
+        message: "User not found",
+      });
+    }
+
+    // Use the user's current database role rather than a stale JWT claim.
+    if (user.role === "admin") {
+      return next();
     }
 
     if (!user.emailVerified) {
@@ -37,6 +54,11 @@ export default async function requireVerifiedEmail(req: any, res: any, next: any
     return next();
   } catch (err) {
     console.error("requireVerifiedEmail error:", err);
-    return res.status(500).json({ ok: false, code: "SERVER_ERROR", message: "Server error" });
+
+    return res.status(500).json({
+      ok: false,
+      code: "SERVER_ERROR",
+      message: "Server error",
+    });
   }
 }

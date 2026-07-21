@@ -192,9 +192,13 @@ async function sendModerationEmail(
  */
 router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = Number(req.params.id);
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid id",
+      });
     }
 
     const payload = normalizePayload(req.body);
@@ -238,15 +242,18 @@ router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, 
     return res.status(500).json({ ok: false, message: err?.message || "Server error" });
   }
 });
-
 /**
  * POST /api/admin/properties/:id/approve
  */
 router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = Number(req.params.id);
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid id",
+      });
     }
 
     const existing = await prisma.property.findUnique({
@@ -294,9 +301,13 @@ router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req
  */
 router.post("/properties/:id/reject", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = Number(req.params.id);
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid id",
+      });
     }
 
     const payload = normalizePayload(req.body);

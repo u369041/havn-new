@@ -1,6 +1,7 @@
 ﻿import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
+import requireAdminAuth from "../middleware/adminAuth";
 import requireVerifiedEmail from "../middleware/requireVerifiedEmail";
 import {
   sendListingStatusEmail,
@@ -13,6 +14,11 @@ const router = Router();
 
 const PRICE_DROP_ACTIVE_DAYS = 14;
 const PRICE_DROP_ACTIVE_MS = PRICE_DROP_ACTIVE_DAYS * 24 * 60 * 60 * 1000;
+const VIEW_DEDUP_WINDOW_MS = 30 * 60 * 1000;
+const MAX_VIEW_DEDUP_ENTRIES = 10000;
+
+const intelligenceBuildsInProgress = new Set<number>();
+const recentPropertyViews = new Map<string, number>();
 
 router.use(
   express.text({
@@ -21,14 +27,78 @@ router.use(
   })
 );
 
-function isOwnerOrAdmin(user: any, ownerId: number) {
+function isOwner(user: any, ownerId: number) {
   if (!user) return false;
-  if (user.role === "admin") return true;
-  return user.userId === ownerId;
+
+  const userId = Number(user.userId);
+  const propertyOwnerId = Number(ownerId);
+
+  if (!Number.isFinite(userId) || !Number.isFinite(propertyOwnerId)) {
+    return false;
+  }
+
+  return userId === propertyOwnerId;
 }
 
 function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
+}
+
+function isSafeHttpUrl(raw: any): boolean {
+  const value = safeText(raw).trim();
+  if (!value) return true;
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function getViewIdentity(req: any): string {
+  const forwarded = safeText(req.headers?.["x-forwarded-for"])
+    .split(",")[0]
+    .trim();
+
+  return forwarded || safeText(req.ip).trim() || "unknown";
+}
+
+function pruneRecentPropertyViews(now: number) {
+  if (recentPropertyViews.size < MAX_VIEW_DEDUP_ENTRIES) return;
+
+  for (const [key, seenAt] of recentPropertyViews.entries()) {
+    if (now - seenAt >= VIEW_DEDUP_WINDOW_MS) {
+      recentPropertyViews.delete(key);
+    }
+  }
+
+  if (recentPropertyViews.size >= MAX_VIEW_DEDUP_ENTRIES) {
+    const oldestKeys = [...recentPropertyViews.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, Math.ceil(MAX_VIEW_DEDUP_ENTRIES * 0.1))
+      .map(([key]) => key);
+
+    for (const key of oldestKeys) {
+      recentPropertyViews.delete(key);
+    }
+  }
+}
+
+function toPositiveSafeInt(raw: any): number | null {
+  const text = String(raw ?? "").trim();
+
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+
+  const value = Number(text);
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
 }
 
 function normalizeEircode(raw: any): string | null {
@@ -1294,7 +1364,7 @@ router.get("/mine", requireAuth, async (req: any, res) => {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const where = user.role === "admin" ? {} : { userId: user.userId };
+    const where = { userId: Number(user.userId) };
 
     const items = await prisma.property.findMany({
       where,
@@ -1314,11 +1384,6 @@ router.get("/mine", requireAuth, async (req: any, res) => {
     return res.status(500).json({
       ok: false,
       message: "Server error",
-      error: err?.message || String(err),
-      code: err?.code || null,
-      meta: err?.meta || null,
-      hint:
-        "Likely Prisma/DB drift. Check Render logs for full stack. Common causes: missing column, wrong type for text[] (photos/features), or migration drift.",
     });
   }
 });
@@ -1329,8 +1394,9 @@ router.get("/mine", requireAuth, async (req: any, res) => {
  */
 router.get("/id/:id", requireAuth, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
+    const id = toPositiveSafeInt(req.params.id);
+
+    if (id === null) {
       return res.status(400).json({ ok: false, message: "Invalid id" });
     }
 
@@ -1341,7 +1407,7 @@ router.get("/id/:id", requireAuth, async (req: any, res) => {
       return res.status(404).json({ ok: false, message: "Not found" });
     }
 
-    if (!isOwnerOrAdmin(user, item.userId)) {
+    if (!isOwner(user, item.userId)) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
@@ -1364,7 +1430,7 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const propertyWhere = user.role === "admin" ? {} : { userId: user.userId };
+    const propertyWhere = { userId: Number(user.userId) };
 
     const properties = await prisma.property.findMany({
       where: propertyWhere,
@@ -1444,9 +1510,6 @@ router.get("/mine/enquiries", requireAuth, async (req: any, res) => {
     return res.status(500).json({
       ok: false,
       message: "Failed to load seller enquiries",
-      error: err?.message || String(err),
-      code: err?.code || null,
-      meta: err?.meta || null,
     });
   }
 });
@@ -1462,10 +1525,11 @@ router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any
       return res.status(401).json({ ok: false, message: "Invalid auth session" });
     }
 
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
-    }
+	const id = toPositiveSafeInt(req.params.id);
+
+	if (id === null) {
+  	return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
+	}
 
     const payload = normalizePayload(req.body);
     const nextStatus = asEnquiryStatus(payload.status);
@@ -1491,7 +1555,7 @@ router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any
       return res.status(404).json({ ok: false, message: "Enquiry not found" });
     }
 
-    if (!existing.property || !isOwnerOrAdmin(user, existing.property.userId)) {
+    if (!existing.property || !isOwner(user, existing.property.userId)) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
@@ -1528,14 +1592,8 @@ router.patch("/mine/enquiries/:id", requireAuth, express.json(), async (req: any
   }
 });
 
-router.get("/_admin", requireAuth, async (req: any, res) => {
+router.get("/_admin", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
-    const user = req.user;
-
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
     const idRaw = req.query.id;
     const slugRaw = req.query.slug;
 
@@ -1543,8 +1601,15 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
       let item: any = null;
 
       if (idRaw) {
-        const id = parseInt(String(idRaw), 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id see schema" });
+        const id = toPositiveSafeInt(idRaw);
+
+        if (id === null) {
+          return res.status(400).json({
+            ok: false,
+            message: "Invalid property id",
+          });
+        }
+
         item = await prisma.property.findUnique({ where: { id } });
       } else if (slugRaw) {
         const slug = String(slugRaw);
@@ -1618,14 +1683,8 @@ router.get("/_admin", requireAuth, async (req: any, res) => {
  * admin enquiries feed
  * MUST appear before /:slug route
  */
-router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
+router.get("/_admin/enquiries", requireAuth, requireAdminAuth, async (req: any, res) => {
   try {
-    const user = req.user;
-
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
     const page = Math.max(parseInt(String(req.query.page || "1"), 10), 1);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10), 1), 100);
     const q = safeText(req.query.q).trim();
@@ -1696,17 +1755,21 @@ router.get("/_admin/enquiries", requireAuth, async (req: any, res) => {
  * admin updates enquiry status / note
  * MUST appear before /:slug route
  */
-router.patch("/_admin/enquiries/:id", requireAuth, express.json(), async (req: any, res) => {
-  try {
-    const user = req.user;
+	router.patch(
+  	"/_admin/enquiries/:id",
+  	requireAuth,
+  	requireAdminAuth,
+  	express.json(),
+  	async (req: any, res) => {
+    	try {
 
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
+    const id = toPositiveSafeInt(req.params.id);
 
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid enquiry id" });
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid enquiry id",
+      });
     }
 
     const payload = normalizePayload(req.body);
@@ -1762,9 +1825,13 @@ router.patch("/_admin/enquiries/:id", requireAuth, express.json(), async (req: a
  */
 router.post("/:id/contact", async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    const id = toPositiveSafeInt(req.params.id);
+
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
     }
 
     const payload = normalizePayload(req.body);
@@ -1776,17 +1843,50 @@ router.post("/:id/contact", async (req: any, res) => {
     const intent = safeText(payload.intent).trim() || "GENERAL";
     const sourceUrl = safeText(payload.sourceUrl).trim();
 
-    if (!name || name.length < 2) {
-      return res.status(400).json({ ok: false, message: "Please enter your name." });
+    if (!name || name.length < 2 || name.length > 100) {
+      return res.status(400).json({
+        ok: false,
+        message: "Please enter a valid name.",
+      });
     }
 
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const emailOk =
+      email.length <= 254 &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
     if (!emailOk) {
-      return res.status(400).json({ ok: false, message: "Please enter a valid email address." });
+      return res.status(400).json({
+        ok: false,
+        message: "Please enter a valid email address.",
+      });
     }
 
-    if (!message || message.length < 8) {
-      return res.status(400).json({ ok: false, message: "Please enter a longer message." });
+    if (phone.length > 50) {
+      return res.status(400).json({
+        ok: false,
+        message: "Phone number is too long.",
+      });
+    }
+
+    if (intent.length > 50) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid enquiry type.",
+      });
+    }
+
+    if (!message || message.length < 8 || message.length > 5000) {
+      return res.status(400).json({
+        ok: false,
+        message: "Please enter a message between 8 and 5,000 characters.",
+      });
+    }
+
+    if (sourceUrl.length > 2048 || !isSafeHttpUrl(sourceUrl)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid source URL.",
+      });
     }
 
     const property = await prisma.property.findUnique({ where: { id } });
@@ -1805,18 +1905,8 @@ router.post("/:id/contact", async (req: any, res) => {
 
     console.log("HAVN_LEAD_CAPTURE", {
       propertyId: property.id,
-      propertySlug: property.slug,
-      propertyTitle: property.title,
       ownerUserId: property.userId,
-      ownerEmail,
-      lead: {
-        name,
-        email,
-        phone: phone || null,
-        message,
-        intent,
-        sourceUrl: sourceUrl || null,
-      },
+      intent,
       receivedAt: new Date().toISOString(),
     });
 
@@ -1881,10 +1971,13 @@ router.post("/:id/contact", async (req: any, res) => {
  */
 router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
+    const id = toPositiveSafeInt(req.params.id);
 
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
     }
 
     const user = req.user;
@@ -1894,7 +1987,7 @@ router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) =>
       return res.status(404).json({ ok: false, message: "Property not found" });
     }
 
-    if (!isOwnerOrAdmin(user, existing.userId)) {
+    if (!isOwner(user, existing.userId)) {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
 
@@ -1974,19 +2067,20 @@ router.patch("/:id/price", requireAuth, express.json(), async (req: any, res) =>
   }
 });
 
-router.post("/_admin/:id/analyse-photos", requireAuth, async (req: any, res) => {
-  try {
-    const user = req.user;
+router.post(
+  "/_admin/:id/analyse-photos",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const id = toPositiveSafeInt(req.params.id);
 
-    if (!user || user.role !== "admin") {
-      return res.status(403).json({ ok: false, message: "Forbidden" });
-    }
-
-    const id = parseInt(String(req.params.id), 10);
-
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
-    }
+      if (id === null) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid property id",
+        });
+      }
 
     const property = await prisma.property.findUnique({ where: { id } });
 
@@ -2031,7 +2125,7 @@ router.post("/_admin/:id/analyse-photos", requireAuth, async (req: any, res) => 
           confidence: 0,
           qualityScore: 0,
           suggestedCover: false,
-          reason: photoErr?.message || "Analysis failed",
+          reason: "Analysis failed",
           error: true,
         });
       }
@@ -2085,7 +2179,6 @@ router.post("/_admin/:id/analyse-photos", requireAuth, async (req: any, res) => 
     return res.status(500).json({
       ok: false,
       message: "Photo analysis failed",
-      error: err?.message || String(err),
     });
   }
 });
@@ -2153,10 +2246,13 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
 
 router.post("/:id/view", async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
+    const id = toPositiveSafeInt(req.params.id);
 
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
     }
 
     const property = await prisma.property.findUnique({
@@ -2168,6 +2264,17 @@ router.post("/:id/view", async (req: any, res) => {
       return res.status(404).json({ ok: false, message: "Property not found" });
     }
 
+    const now = Date.now();
+    const viewKey = `${id}:${getViewIdentity(req)}`;
+    const lastSeenAt = recentPropertyViews.get(viewKey) || 0;
+
+    if (now - lastSeenAt < VIEW_DEDUP_WINDOW_MS) {
+      return res.json({ ok: true, counted: false });
+    }
+
+    pruneRecentPropertyViews(now);
+    recentPropertyViews.set(viewKey, now);
+
     await prisma.property.update({
       where: { id },
       data: {
@@ -2177,7 +2284,7 @@ router.post("/:id/view", async (req: any, res) => {
       },
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, counted: true });
   } catch (err: any) {
     console.error("POST /api/properties/:id/view error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -2193,10 +2300,13 @@ router.post("/:id/view", async (req: any, res) => {
 
 router.get("/:id/intelligence", async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
+    const id = toPositiveSafeInt(req.params.id);
 
-    if (!Number.isFinite(id)) {
-      return res.status(400).json({ ok: false, message: "Invalid property id" });
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
     }
 
     const property = await prisma.property.findUnique({ where: { id } });
@@ -2210,16 +2320,12 @@ router.get("/:id/intelligence", async (req: any, res) => {
       ? new Date((property as any).intelligenceUpdatedAt)
       : null;
 
-       const forceRefresh =
-       String(req.query.refresh || "").toLowerCase() === "true";
-
-   const cacheFresh =
-   !forceRefresh &&
-  cached &&
-  (cached as any).version === "property-intelligence-v17" &&
-  cachedAt &&
-  !Number.isNaN(cachedAt.getTime()) &&
-  Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
+    const cacheFresh =
+      cached &&
+      (cached as any).version === "property-intelligence-v17" &&
+      cachedAt &&
+      !Number.isNaN(cachedAt.getTime()) &&
+      Date.now() - cachedAt.getTime() < 30 * 24 * 60 * 60 * 1000;
 
     if (cacheFresh) {
       return res.json({
@@ -2230,6 +2336,17 @@ router.get("/:id/intelligence", async (req: any, res) => {
       });
     }
 
+    if (intelligenceBuildsInProgress.has(id)) {
+      return res.status(202).json({
+        ok: false,
+        pending: true,
+        message: "Property intelligence is currently being generated. Please retry shortly.",
+      });
+    }
+
+    intelligenceBuildsInProgress.add(id);
+
+    try {
     const lat = Number((property as any).lat);
     const lng = Number((property as any).lng);
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -2851,6 +2968,9 @@ router.get("/:id/intelligence", async (req: any, res) => {
       intelligence: updated.intelligence,
       intelligenceUpdatedAt: updated.intelligenceUpdatedAt,
     });
+    } finally {
+      intelligenceBuildsInProgress.delete(id);
+    }
   } catch (err: any) {
     console.error("GET /api/properties/:id/intelligence error", err);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -2872,7 +2992,7 @@ router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
     }
 
     if (property.listingStatus !== "PUBLISHED") {
-      if (!user || !isOwnerOrAdmin(user, property.userId)) {
+      if (!user || !isOwner(user, property.userId)) {
         return res.status(404).json({ ok: false, error: "NOT_FOUND" });
       }
     }
@@ -2893,7 +3013,7 @@ router.get("/:slug", requireAuth.optional, async (req: any, res) => {
     if (!property) return res.status(404).json({ ok: false, message: "Not found" });
 
     if (property.listingStatus !== "PUBLISHED") {
-      if (!user || !isOwnerOrAdmin(user, property.userId)) {
+      if (!user || !isOwner(user, property.userId)) {
         return res.status(404).json({ ok: false, message: "Not found" });
       }
     }
@@ -3013,14 +3133,20 @@ router.post("/", requireAuth, async (req: any, res) => {
 
 router.patch("/:id", requireAuth, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = toPositiveSafeInt(req.params.id);
+
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
+    }
 
     const user = req.user;
     const existing = await prisma.property.findUnique({ where: { id } });
 
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-    if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (!isOwner(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus !== "DRAFT") {
       return res.status(409).json({ ok: false, message: "Only drafts can be edited." });
@@ -3185,14 +3311,20 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
 
 router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, res) => {
   try {
-    const id = parseInt(String(req.params.id), 10);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "Invalid id" });
+    const id = toPositiveSafeInt(req.params.id);
+
+    if (id === null) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid property id",
+      });
+    }
 
     const user = req.user;
     const existing = await prisma.property.findUnique({ where: { id } });
 
     if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-    if (!isOwnerOrAdmin(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (!isOwner(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
 
     if (existing.listingStatus !== "DRAFT") {
       return res.status(409).json({ ok: false, message: "Only drafts can be submitted." });

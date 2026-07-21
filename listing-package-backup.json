@@ -1,0 +1,218 @@
+[
+  {
+    "id": 114,
+    "title": "Featured  Share Test",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": true,
+    "featuredUntil": "2026-09-15T00:32:46.742Z"
+  },
+  {
+    "id": 55,
+    "title": "Classes Lake, Ballincollig, Cork",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 109,
+    "title": "Standard-Sale-Test",
+    "listingPackage": "STANDARD",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 41,
+    "title": "Victorian Redbrick Residence",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "PENDING",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:14:43.829Z"
+  },
+  {
+    "id": 87,
+    "title": "Elegant 4 Bed Detached Home in Foxrock",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-16T17:27:30.676Z"
+  },
+  {
+    "id": 47,
+    "title": "Donnybrook — Luxury Apartment",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "PENDING",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:13:42.507Z"
+  },
+  {
+    "id": 112,
+    "title": "Rent featured test",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": true,
+    "featuredUntil": "2026-08-16T17:18:21.715Z"
+  },
+  {
+    "id": 110,
+    "title": "Featured-Sale-Test",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": true,
+    "featuredUntil": "2026-09-14T22:42:51.113Z"
+  },
+  {
+    "id": 53,
+    "title": "Bonham Quay, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-06-27T15:14:36.289Z"
+  },
+  {
+    "id": 45,
+    "title": "Blackrock — Architect Designed Home",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:14:36.754Z"
+  },
+  {
+    "id": 42,
+    "title": "Shrewsbury Road, Ballsbridge, Dublin 4",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-06-21T03:14:37.835Z"
+  },
+  {
+    "id": 50,
+    "title": "Greystones — Coastal Retreat",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 51,
+    "title": "Oldtown Demesne, Naas, Co. Kildare",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-06-26T15:25:52.291Z"
+  },
+  {
+    "id": 111,
+    "title": "Rent Standard Test",
+    "listingPackage": "STANDARD",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 113,
+    "title": "Standard Share Test",
+    "listingPackage": "STANDARD",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 56,
+    "title": "Newtown Meadows, Castletroy, Limerick",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 54,
+    "title": "Maryborough Ridge, Douglas, Cork",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 91,
+    "title": "Carysfort Avenue",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-16T17:27:24.611Z"
+  },
+  {
+    "id": 58,
+    "title": "Williamstown Road, Waterford City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 57,
+    "title": "Dooradoyle Park, Dooradoyle, Limerick",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "PENDING",
+    "isFeatured": false,
+    "featuredUntil": null
+  },
+  {
+    "id": 43,
+    "title": "Clontarf - — Coastal Family Residence",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-06-21T10:42:08.757Z"
+  },
+  {
+    "id": 74,
+    "title": "Bonham Quay, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-24T17:11:25.447Z"
+  },
+  {
+    "id": 97,
+    "title": "13 Clonattin Village",
+    "listingPackage": "FEATURED",
+    "paymentStatus": "COMPLETED",
+    "isFeatured": true,
+    "featuredUntil": "2026-09-11T21:16:50.878Z"
+  },
+  {
+    "id": 52,
+    "title": "Upper Salthill Road, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-06-27T13:51:44.416Z"
+  },
+  {
+    "id": 70,
+    "title": "Bonham Quay, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:11:06.201Z"
+  },
+  {
+    "id": 71,
+    "title": "Bonham Quay, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:10:38.389Z"
+  },
+  {
+    "id": 72,
+    "title": "Bonham Quay, Galway City",
+    "listingPackage": null,
+    "paymentStatus": "UNPAID",
+    "isFeatured": true,
+    "featuredUntil": "2026-07-06T17:10:29.579Z"
+  }
+]

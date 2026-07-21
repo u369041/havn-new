@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  Int       @id @default(autoincrement())
+  name                String?
+  email               String    @unique
+  password            String
+  role                UserRole  @default(user)
+  createdAt           DateTime  @default(now())
+  emailVerified       Boolean   @default(false)
+  emailVerifyToken    String?   @unique
+  emailVerifyTokenExp DateTime?
+  lastLoginAt         DateTime?
+  loginCount          Int       @default(0)
+
+  lastSearch          Json?
+  lastSearchAt        DateTime?
+  foundingOfferUsedAt DateTime?
+
+  approvals           Property[] @relation("PropertyApprovedBy")
+  rejections          Property[] @relation("PropertyRejectedBy")
+  properties          Property[]
+  savedSearches       SavedSearch[]
+  savedProperties     SavedProperty[]
+
+  passwordResetTokens PasswordResetToken[]
+}
+
+model SavedSearch {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  name           String?
+  filters        Json
+  alertsEnabled  Boolean  @default(true)
+  alertFrequency String   @default("weekly")
+  lastDigestAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([lastDigestAt])
+}
+
+model SavedProperty {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  propertyId Int
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@index([propertyId])
+  @@index([createdAt])
+}
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  ip        String?
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Property {
+  id   Int    @id @default(autoincrement())
+  slug String @unique
+
+  title    String
+  address1 String
+  address2 String?
+  city     String
+  county   String
+  eircode  String?
+
+  mode MarketMode @default(BUY)
+
+  price          Int
+  previousPrice  Int?
+  priceDroppedAt DateTime?
+  ber            String?
+  berRating      String?
+  berNo          String?
+  bedrooms       Int?
+  bathrooms      Int?
+  size           Float?
+  sizeUnit       String?
+  features       String[]
+  description    String?
+  photos         String[]
+
+  photoMeta          Json?
+  photoMetaUpdatedAt DateTime?
+
+  rentFrequency String?
+  deposit       Int?
+  availableFrom DateTime?
+  furnished     Boolean?
+  parking       String?
+  outdoorSpace  String?
+
+  saleCondition  String?
+  yearBuilt      Int?
+  heatingType    String?
+  viewingDetails String?
+
+  leaseLength   String?
+  minimumTerm   String?
+  billsIncluded String?
+  petsAllowed   String?
+
+  roomType         String?
+  ensuite          String?
+  currentOccupants Int?
+  couplesAllowed   String?
+  ownerOccupied    String?
+
+  userId Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lat          Float?
+  lng          Float?
+  propertyType String
+  saleType     String?
+  marketStatus String?
+
+  listingStatus  ListingStatus @default(DRAFT)
+  publishedAt    DateTime?
+  archivedAt     DateTime?
+  approvedAt     DateTime?
+  approvedById   Int?
+  rejectedAt     DateTime?
+  rejectedById   Int?
+  submittedAt    DateTime?
+  rejectedReason String?
+
+  isFeatured    Boolean   @default(false)
+  featuredUntil DateTime?
+
+  listingPackage ListingPackage?
+  paymentStatus  PaymentStatus @default(UNPAID)
+
+  stripeCheckoutSessionId String? @unique
+  stripePaymentIntentId   String?
+  amountPaidCents          Int?
+  paidAt                  DateTime?
+  listingExpiresAt        DateTime?
+
+  views Int @default(0)
+
+  intelligence          Json?
+  intelligenceUpdatedAt DateTime?
+
+  approvedBy User? @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy User? @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
+  user       User  @relation(fields: [userId], references: [id])
+
+  enquiries Enquiry[]
+  savedBy   SavedProperty[]
+
+  @@index([userId])
+  @@index([listingStatus])
+  @@index([mode])
+  @@index([isFeatured])
+  @@index([featuredUntil])
+  @@index([listingPackage])
+  @@index([paymentStatus])
+  @@index([listingExpiresAt])
+}
+
+model Enquiry {
+  id              Int           @id @default(autoincrement())
+  propertyId      Int
+  buyerName       String
+  buyerEmail      String
+  buyerPhone      String?
+  message         String
+  intent          String?
+  sourceUrl       String?
+  status          EnquiryStatus @default(NEW)
+  internalNote    String?
+  statusUpdatedAt DateTime?
+  createdAt       DateTime      @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([buyerEmail])
+  @@index([createdAt])
+  @@index([status])
+}
+
+enum MarketMode {
+  BUY
+  RENT
+  SHARE
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+enum ListingStatus {
+  DRAFT
+  SUBMITTED
+  PUBLISHED
+  REJECTED
+  CLOSED
+  ARCHIVED
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  VIEWING_BOOKED
+  OFFER_IN_PROGRESS
+  CLOSED
+  ARCHIVED
+}
+
+enum ListingPackage {
+  STANDARD
+  FEATURED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}

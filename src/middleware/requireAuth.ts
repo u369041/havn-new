@@ -13,8 +13,15 @@ type AuthMiddleware = ((req: any, res: Response, next: NextFunction) => any) & {
 };
 
 function toInt(value: any): number {
-  const n = parseInt(String(value ?? ""), 10);
-  return Number.isFinite(n) ? n : NaN;
+  const text = String(value ?? "").trim();
+
+  if (!/^\d+$/.test(text)) {
+    return NaN;
+  }
+
+  const n = Number(text);
+
+  return Number.isSafeInteger(n) && n > 0 ? n : NaN;
 }
 
 function parseBearerToken(req: any): string | null {
@@ -39,7 +46,9 @@ function decodeUserFromToken(token: string): UserPayload {
     throw new Error("JWT_SECRET missing");
   }
 
-  const decoded = jwt.verify(token, secret);
+  const decoded = jwt.verify(token, secret, {
+  algorithms: ["HS256"],
+  });
   const payload: any = decoded;
 
   const rawId = payload.sub ?? payload.userId ?? payload.id;
