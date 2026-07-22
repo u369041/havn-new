@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 
 const PUBLIC_SITE_URL = "https://havn.ie";
+const API_SITE_URL = "https://api.havn.ie";
 
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8"?>';
 
@@ -36,18 +37,26 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-function absoluteUrl(pathname: string): string {
-  const baseUrl = normalizeBaseUrl(PUBLIC_SITE_URL);
+function buildAbsoluteUrl(baseUrl: string, pathname: string): string {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
   if (!pathname || pathname === "/") {
-    return `${baseUrl}/`;
+    return `${normalizedBaseUrl}/`;
   }
 
   if (/^https?:\/\//i.test(pathname)) {
     return pathname;
   }
 
-  return `${baseUrl}/${pathname.replace(/^\/+/, "")}`;
+  return `${normalizedBaseUrl}/${pathname.replace(/^\/+/, "")}`;
+}
+
+function publicUrl(pathname: string): string {
+  return buildAbsoluteUrl(PUBLIC_SITE_URL, pathname);
+}
+
+function apiUrl(pathname: string): string {
+  return buildAbsoluteUrl(API_SITE_URL, pathname);
 }
 
 function formatLastModified(value?: Date | string | null): string | null {
@@ -149,18 +158,21 @@ export async function buildSitemapIndex(): Promise<string> {
   const properties = await getPublishedProperties();
 
   const latestPropertyUpdate =
-    properties[0]?.updatedAt ?? properties[0]?.publishedAt ?? null;
+    properties[0]?.updatedAt ??
+    properties[0]?.publishedAt ??
+    properties[0]?.createdAt ??
+    null;
 
   return buildSitemapIndexXml([
     {
-      loc: absoluteUrl("/sitemaps/pages.xml"),
+      loc: apiUrl("/sitemaps/pages.xml"),
     },
     {
-      loc: absoluteUrl("/sitemaps/properties.xml"),
+      loc: apiUrl("/sitemaps/properties.xml"),
       lastmod: latestPropertyUpdate,
     },
     {
-      loc: absoluteUrl("/sitemaps/locations.xml"),
+      loc: apiUrl("/sitemaps/locations.xml"),
       lastmod: latestPropertyUpdate,
     },
   ]);
@@ -169,10 +181,10 @@ export async function buildSitemapIndex(): Promise<string> {
 export function buildPagesSitemap(): string {
   const pages: SitemapUrl[] = [
     {
-      loc: absoluteUrl("/"),
+      loc: publicUrl("/"),
     },
     {
-      loc: absoluteUrl("/properties.html"),
+      loc: publicUrl("/properties.html"),
     },
   ];
 
@@ -185,11 +197,13 @@ export async function buildPropertySitemap(): Promise<string> {
   const entries: SitemapUrl[] = properties
     .filter((property) => Boolean(property.slug?.trim()))
     .map((property) => ({
-      loc: absoluteUrl(
+      loc: publicUrl(
         `/property.html?slug=${encodeURIComponent(property.slug.trim())}`
       ),
       lastmod:
-        property.updatedAt ?? property.publishedAt ?? property.createdAt,
+        property.updatedAt ??
+        property.publishedAt ??
+        property.createdAt,
     }));
 
   return buildUrlSet(entries);
@@ -202,7 +216,9 @@ export async function buildLocationSitemap(): Promise<string> {
 
   for (const property of properties) {
     const modifiedAt =
-      property.updatedAt ?? property.publishedAt ?? property.createdAt;
+      property.updatedAt ??
+      property.publishedAt ??
+      property.createdAt;
 
     const locations = [property.city, property.county]
       .map((value) => value?.trim())
@@ -226,7 +242,7 @@ export async function buildLocationSitemap(): Promise<string> {
   const entries: SitemapUrl[] = Array.from(latestByLocation.entries())
     .sort(([slugA], [slugB]) => slugA.localeCompare(slugB))
     .map(([slug, lastmod]) => ({
-      loc: absoluteUrl(`/${slug}`),
+      loc: publicUrl(`/${slug}`),
       lastmod,
     }));
 
@@ -247,7 +263,7 @@ export function buildRobotsTxt(): string {
     "Disallow: /reset-password.html",
     "Disallow: /verify-email.html",
     "",
-    `Sitemap: ${absoluteUrl("/sitemap.xml")}`,
+    `Sitemap: ${publicUrl("/sitemap.xml")}`,
     "",
   ].join("\n");
 }
