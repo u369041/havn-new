@@ -1,0 +1,193 @@
+{
+  "generatedAt": "2026-07-22T23:57:47.001Z",
+  "sourceFile": "C:\\Users\\garry\\havn-new\\src\\geography\\data\\normalised\\cso-built-up-areas-2022.normalised.json",
+  "status": "PASS",
+  "totals": {
+    "locations": 867,
+    "counties": 26,
+    "cities": 5,
+    "towns": 862,
+    "indexable": 218,
+    "popular": 25,
+    "errors": 0,
+    "warnings": 0
+  },
+  "population": {
+    "recordsWithPopulation": 867,
+    "total": 3630501,
+    "minimum": 94,
+    "median": 628,
+    "maximum": 1263219
+  },
+  "counties": {
+    "Carlow": 17,
+    "Cavan": 19,
+    "Clare": 40,
+    "Cork": 111,
+    "Donegal": 64,
+    "Dublin": 24,
+    "Galway": 44,
+    "Kerry": 39,
+    "Kildare": 44,
+    "Kilkenny": 27,
+    "Laois": 21,
+    "Leitrim": 14,
+    "Limerick": 44,
+    "Longford": 12,
+    "Louth": 21,
+    "Mayo": 34,
+    "Meath": 33,
+    "Monaghan": 19,
+    "Offaly": 27,
+    "Roscommon": 22,
+    "Sligo": 21,
+    "Tipperary": 48,
+    "Waterford": 23,
+    "Westmeath": 21,
+    "Wexford": 45,
+    "Wicklow": 33
+  },
+  "largestSettlements": [
+    {
+      "name": "Dublin City",
+      "county": "Dublin",
+      "type": "CITY",
+      "population": 1263219,
+      "slug": "dublin-city"
+    },
+    {
+      "name": "Cork City",
+      "county": "Cork",
+      "type": "CITY",
+      "population": 222526,
+      "slug": "cork-city"
+    },
+    {
+      "name": "Limerick City",
+      "county": "Limerick",
+      "type": "CITY",
+      "population": 102287,
+      "slug": "limerick-city"
+    },
+    {
+      "name": "Galway City",
+      "county": "Galway",
+      "type": "CITY",
+      "population": 85910,
+      "slug": "galway-city"
+    },
+    {
+      "name": "Waterford City",
+      "county": "Waterford",
+      "type": "CITY",
+      "population": 60079,
+      "slug": "waterford-city"
+    },
+    {
+      "name": "Drogheda",
+      "county": "Louth",
+      "type": "TOWN",
+      "population": 44135,
+      "slug": "drogheda"
+    },
+    {
+      "name": "Dundalk",
+      "county": "Louth",
+      "type": "TOWN",
+      "population": 43112,
+      "slug": "dundalk"
+    },
+    {
+      "name": "Swords",
+      "county": "Dublin",
+      "type": "TOWN",
+      "population": 40776,
+      "slug": "swords"
+    },
+    {
+      "name": "Navan",
+      "county": "Meath",
+      "type": "TOWN",
+      "population": 33886,
+      "slug": "navan"
+    },
+    {
+      "name": "Bray",
+      "county": "Wicklow",
+      "type": "TOWN",
+      "population": 33512,
+      "slug": "bray"
+    },
+    {
+      "name": "Ennis",
+      "county": "Clare",
+      "type": "TOWN",
+      "population": 27923,
+      "slug": "ennis"
+    },
+    {
+      "name": "Carlow",
+      "county": "Carlow",
+      "type": "TOWN",
+      "population": 27351,
+      "slug": "carlow"
+    },
+    {
+      "name": "Kilkenny",
+      "county": "Kilkenny",
+      "type": "TOWN",
+      "population": 27184,
+      "slug": "kilkenny"
+    },
+    {
+      "name": "Naas",
+      "county": "Kildare",
+      "type": "TOWN",
+      "population": 26180,
+      "slug": "naas"
+    },
+    {
+      "name": "Tralee",
+      "county": "Kerry",
+      "type": "TOWN",
+      "population": 26079,
+      "slug": "tralee"
+    },
+    {
+      "name": "Newbridge",
+      "county": "Kildare",
+      "type": "TOWN",
+      "population": 24366,
+      "slug": "newbridge"
+    },
+    {
+      "name": "Balbriggan",
+      "county": "Dublin",
+      "type": "TOWN",
+      "population": 24322,
+      "slug": "balbriggan"
+    },
+    {
+      "name": "Portlaoise",
+      "county": "Laois",
+      "type": "TOWN",
+      "population": 23494,
+      "slug": "portlaoise"
+    },
+    {
+      "name": "Athlone",
+      "county": "Westmeath",
+      "type": "TOWN",
+      "population": 22869,
+      "slug": "athlone"
+    },
+    {
+      "name": "Mullingar",
+      "county": "Westmeath",
+      "type": "TOWN",
+      "population": 22667,
+      "slug": "mullingar"
+    }
+  ],
+  "anomaliesByCategory": {}
+}

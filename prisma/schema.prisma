@@ -135,7 +135,8 @@ model Property {
   couplesAllowed   String?
   ownerOccupied    String?
 
-  userId Int
+  userId     Int
+  locationId Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -179,10 +180,13 @@ model Property {
   rejectedBy User? @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
   user       User  @relation(fields: [userId], references: [id])
 
+  location Location? @relation("PropertyLocation", fields: [locationId], references: [id], onDelete: SetNull)
+
   enquiries Enquiry[]
   savedBy   SavedProperty[]
 
   @@index([userId])
+  @@index([locationId])
   @@index([listingStatus])
   @@index([mode])
   @@index([isFeatured])
@@ -214,6 +218,74 @@ model Enquiry {
   @@index([buyerEmail])
   @@index([createdAt])
   @@index([status])
+}
+
+model Location {
+  id Int @id @default(autoincrement())
+
+  slug          String @unique
+  name          String
+  canonicalName String
+  displayName   String
+
+  type LocationType
+
+  county   String?
+  parentId Int?
+
+  latitude  Float?
+  longitude Float?
+
+  aliases            String[] @default([])
+  searchTerms        String[] @default([])
+  eircodeRoutingKeys String[] @default([])
+
+  population Int?
+
+  searchable Boolean @default(true)
+  indexable  Boolean @default(false)
+  isPopular  Boolean @default(false)
+  isActive   Boolean @default(true)
+
+  seoPriority  Int @default(0)
+  displayOrder Int @default(0)
+
+  tailteId   String?
+  csoId      String?
+  osmId      String?
+  geonamesId String?
+
+  sourceData  Json?
+  boundingBox Json?
+
+  daftChecked   Boolean   @default(false)
+  daftCheckedAt DateTime?
+  daftNotes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Location[] @relation("LocationHierarchy")
+
+  properties Property[] @relation("PropertyLocation")
+
+  @@index([name])
+  @@index([canonicalName])
+  @@index([displayName])
+  @@index([type])
+  @@index([county])
+  @@index([parentId])
+  @@index([searchable])
+  @@index([indexable])
+  @@index([isPopular])
+  @@index([isActive])
+  @@index([seoPriority])
+  @@index([displayOrder])
+  @@index([tailteId])
+  @@index([csoId])
+  @@index([osmId])
+  @@index([geonamesId])
 }
 
 enum MarketMode {
@@ -256,4 +328,18 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+}
+
+enum LocationType {
+  COUNTRY
+  COUNTY
+  CITY
+  TOWN
+  VILLAGE
+  SUBURB
+  NEIGHBOURHOOD
+  LOCALITY
+  TOWNLAND
+  POSTAL_DISTRICT
+  SEARCH_REGION
 }

@@ -1,0 +1,22 @@
+import type { HavnPremiumLocationSeed } from "./types";
+
+/**
+ * Phase 2A.5 — North Wicklow and the Dublin commuter belt.
+ *
+ * Curated property-search locations covering the principal coastal,
+ * suburban, town and village markets across North and Central Wicklow.
+ */
+export const northWicklowLocations: HavnPremiumLocationSeed[] = [
+  { slug: "ashford-wicklow", name: "Ashford", canonicalName: "Ashford", displayName: "Ashford, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Ashford", "Ashford Wicklow"], searchTerms: ["Ashford", "Ashford Wicklow", "Ashford County Wicklow"], indexable: true, isPopular: true, seoPriority: 82, displayOrder: 1210 },
+  { slug: "bray-wicklow", name: "Bray", canonicalName: "Bray", displayName: "Bray, County Wicklow", type: "TOWN", county: "Wicklow", aliases: ["Bray"], searchTerms: ["Bray", "Bray Wicklow", "Bray County Wicklow"], indexable: true, isPopular: true, seoPriority: 99, displayOrder: 1220 },
+  { slug: "delgany-wicklow", name: "Delgany", canonicalName: "Delgany", displayName: "Delgany, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Delgany"], searchTerms: ["Delgany", "Delgany Wicklow", "Delgany County Wicklow", "Greystones Delgany"], indexable: true, isPopular: true, seoPriority: 94, displayOrder: 1230 },
+  { slug: "enniskerry-wicklow", name: "Enniskerry", canonicalName: "Enniskerry", displayName: "Enniskerry, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Enniskerry"], searchTerms: ["Enniskerry", "Enniskerry Wicklow", "Enniskerry County Wicklow"], indexable: true, isPopular: true, seoPriority: 92, displayOrder: 1240 },
+  { slug: "greystones-wicklow", name: "Greystones", canonicalName: "Greystones", displayName: "Greystones, County Wicklow", type: "TOWN", county: "Wicklow", aliases: ["Greystones"], searchTerms: ["Greystones", "Greystones Wicklow", "Greystones County Wicklow", "Greystones Delgany"], indexable: true, isPopular: true, seoPriority: 99, displayOrder: 1250 },
+  { slug: "kilcoole-wicklow", name: "Kilcoole", canonicalName: "Kilcoole", displayName: "Kilcoole, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Kilcoole"], searchTerms: ["Kilcoole", "Kilcoole Wicklow", "Kilcoole County Wicklow"], indexable: true, isPopular: true, seoPriority: 86, displayOrder: 1260 },
+  { slug: "kilmacanogue-wicklow", name: "Kilmacanogue", canonicalName: "Kilmacanogue", displayName: "Kilmacanogue, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Kilmacanogue", "Kilmacanoge"], searchTerms: ["Kilmacanogue", "Kilmacanoge", "Kilmacanogue Wicklow", "Kilmacanogue County Wicklow"], indexable: true, isPopular: true, seoPriority: 84, displayOrder: 1270 },
+  { slug: "newcastle-wicklow", name: "Newcastle", canonicalName: "Newcastle", displayName: "Newcastle, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Newcastle Wicklow"], searchTerms: ["Newcastle Wicklow", "Newcastle County Wicklow"], indexable: true, isPopular: true, seoPriority: 80, displayOrder: 1280 },
+  { slug: "newtownmountkennedy-wicklow", name: "Newtownmountkennedy", canonicalName: "Newtownmountkennedy", displayName: "Newtownmountkennedy, County Wicklow", type: "TOWN", county: "Wicklow", aliases: ["Newtownmountkennedy", "Newtown Mount Kennedy"], searchTerms: ["Newtownmountkennedy", "Newtown Mount Kennedy", "Newtownmountkennedy Wicklow", "Newtown Mount Kennedy Wicklow"], indexable: true, isPopular: true, seoPriority: 88, displayOrder: 1290 },
+  { slug: "rathnew-wicklow", name: "Rathnew", canonicalName: "Rathnew", displayName: "Rathnew, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Rathnew"], searchTerms: ["Rathnew", "Rathnew Wicklow", "Rathnew County Wicklow"], indexable: true, isPopular: true, seoPriority: 80, displayOrder: 1300 },
+  { slug: "roundwood-wicklow", name: "Roundwood", canonicalName: "Roundwood", displayName: "Roundwood, County Wicklow", type: "VILLAGE", county: "Wicklow", aliases: ["Roundwood"], searchTerms: ["Roundwood", "Roundwood Wicklow", "Roundwood County Wicklow"], indexable: true, isPopular: true, seoPriority: 82, displayOrder: 1310 },
+  { slug: "wicklow-town", name: "Wicklow Town", canonicalName: "Wicklow Town", displayName: "Wicklow Town, County Wicklow", type: "TOWN", county: "Wicklow", aliases: ["Wicklow Town", "Wicklow"], searchTerms: ["Wicklow Town", "Wicklow", "Wicklow Town County Wicklow"], indexable: true, isPopular: true, seoPriority: 94, displayOrder: 1320 }
+];

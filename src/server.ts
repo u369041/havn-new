@@ -11,6 +11,7 @@ import stripeRouter from "./routes/stripe";
 import adminRouter from "./routes/admin";
 import digestRouter from "./routes/digest";
 import seoRouter from "./routes/seo";
+import locationsRouter from "./routes/locations";
 
 const app = express();
 
@@ -86,7 +87,7 @@ const stripeLimiter = rateLimit({
  */
 app.use(
   "/api/stripe/webhook",
-  express.raw({ type: "application/json", limit: "1mb" })
+  express.raw({ type: "application/json", limit: "1mb" }),
 );
 
 app.use(express.json({ limit: "2mb" }));
@@ -137,9 +138,11 @@ app.use("/", seoRouter);
  */
 app.use("/api", generalApiLimiter);
 
-/* routes */
+/* public routes */
 app.use("/api/properties", propertiesRouter);
+app.use("/api/locations", locationsRouter);
 
+/* protected and rate-limited routes */
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/uploads", strictLimiter, uploadsRouter);
 app.use("/api/stripe", stripeLimiter, stripeRouter);

@@ -9,7 +9,18 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
-    "transport:build": "tsx scripts/build-transport-cache.ts"
+    "transport:build": "tsx scripts/build-transport-cache.ts",
+    "geography:seed": "tsx src/geography/seed/seedLocations.ts",
+    "geography:fetch:cso": "tsx src/geography/importers/fetchCsoBuiltUpAreas.ts",
+    "geography:normalise:cso": "tsx src/geography/importers/normaliseCsoBuiltUpAreas.ts",
+    "geography:verify:cso": "tsx src/geography/reports/verifyCsoBuiltUpAreas.ts",
+     "geography:import:cso:dry": "tsx src/geography/importers/importNormalisedLocations.ts",
+     "geography:import:cso": "tsx src/geography/importers/importNormalisedLocations.ts --write",
+     "geography:verify:db": "tsx src/geography/reports/verifyImportedLocations.ts",
+     "geography:match:properties:dry": "tsx src/geography/matchers/matchPropertyLocations.ts",
+     "geography:match:properties": "tsx src/geography/matchers/matchPropertyLocations.ts --write",
+     "geography:premium:dry": "tsx src/geography/importers/importPremiumLocations.ts",
+     "geography:premium": "tsx src/geography/importers/importPremiumLocations.ts --write"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
