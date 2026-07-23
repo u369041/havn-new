@@ -38,6 +38,7 @@ export type LocationSearchResult = {
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
 const MAX_HIERARCHY_DEPTH = 20;
+const SEARCH_DEDUPLICATION_MULTIPLIER = 4;
 
 function normaliseSearchText(value: string): string {
   return value
@@ -82,6 +83,41 @@ function toSearchResult(location: Location): LocationSearchResult {
   };
 }
 
+function locationDeduplicationKey(location: Location): string {
+  const canonicalName = normaliseSearchText(
+    location.canonicalName || location.name,
+  );
+  const county = normaliseSearchText(location.county || "");
+  const parentId = location.parentId ?? "root";
+
+  return `${canonicalName}|${county}|${parentId}`;
+}
+
+function deduplicateLocations(
+  locations: Location[],
+  limit: number,
+): LocationSearchResult[] {
+  const seen = new Set<string>();
+  const results: LocationSearchResult[] = [];
+
+  for (const location of locations) {
+    const key = locationDeduplicationKey(location);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    results.push(toSearchResult(location));
+
+    if (results.length >= limit) {
+      break;
+    }
+  }
+
+  return results;
+}
+
 export class LocationService {
   static async search(
     query: string,
@@ -95,6 +131,10 @@ export class LocationService {
 
     const limit = clampLimit(options.limit);
     const escapedQuery = escapeLikePattern(cleanedQuery);
+    const databaseTake = Math.min(
+      limit * SEARCH_DEDUPLICATION_MULTIPLIER,
+      MAX_SEARCH_LIMIT * SEARCH_DEDUPLICATION_MULTIPLIER,
+    );
 
     const conditions: Prisma.LocationWhereInput[] = [
       {
@@ -177,10 +217,10 @@ export class LocationService {
         { displayOrder: "asc" },
         { displayName: "asc" },
       ],
-      take: limit,
+      take: databaseTake,
     });
 
-    return locations.map(toSearchResult);
+    return deduplicateLocations(locations, limit);
   }
 
   static async getById(id: number): Promise<Location | null> {
@@ -322,6 +362,8 @@ export class LocationService {
       return [];
     }
 
+    const limit = 20;
+
     const locations = await prisma.location.findMany({
       where: {
         isActive: true,
@@ -391,10 +433,10 @@ export class LocationService {
         { displayOrder: "asc" },
         { displayName: "asc" },
       ],
-      take: 20,
+      take: limit * SEARCH_DEDUPLICATION_MULTIPLIER,
     });
 
-    return locations.map(toSearchResult);
+    return deduplicateLocations(locations, limit);
   }
 
   static async getPopular(
