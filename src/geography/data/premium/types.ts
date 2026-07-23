@@ -3,7 +3,15 @@ export type HavnPremiumLocationSeed = {
   name: string;
   canonicalName: string;
   displayName: string;
-  type: "SUBURB" | "LOCALITY" | "TOWN" | "VILLAGE" | "NEIGHBOURHOOD" | "POSTAL_DISTRICT" | "SEARCH_REGION";
+  type:
+    | "CITY"
+    | "SUBURB"
+    | "LOCALITY"
+    | "TOWN"
+    | "VILLAGE"
+    | "NEIGHBOURHOOD"
+    | "POSTAL_DISTRICT"
+    | "SEARCH_REGION";
   county: string;
   aliases: string[];
   searchTerms: string[];
