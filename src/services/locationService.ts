@@ -28,17 +28,43 @@ export type LocationSearchResult = {
   parentId: number | null;
   latitude: number | null;
   longitude: number | null;
-  aliases: string[];
-  eircodeRoutingKeys: string[];
   isPopular: boolean;
-  seoPriority: number;
-  displayOrder: number;
 };
 
-const DEFAULT_SEARCH_LIMIT = 20;
-const MAX_SEARCH_LIMIT = 100;
+export type PublicLocationDetail = LocationSearchResult & {
+  isActive: boolean;
+  searchable: boolean;
+};
+
+const DEFAULT_SEARCH_LIMIT = 15;
+const MAX_SEARCH_LIMIT = 20;
+const MIN_SEARCH_QUERY_LENGTH = 2;
 const MAX_HIERARCHY_DEPTH = 20;
 const SEARCH_DEDUPLICATION_MULTIPLIER = 4;
+
+const publicLocationSelect = {
+  id: true,
+  slug: true,
+  name: true,
+  canonicalName: true,
+  displayName: true,
+  type: true,
+  county: true,
+  parentId: true,
+  latitude: true,
+  longitude: true,
+  isPopular: true,
+  isActive: true,
+  searchable: true,
+
+  // Internal ranking fields only. These are never returned in the public DTO.
+  seoPriority: true,
+  displayOrder: true,
+} satisfies Prisma.LocationSelect;
+
+type SelectedPublicLocation = Prisma.LocationGetPayload<{
+  select: typeof publicLocationSelect;
+}>;
 
 function normaliseSearchText(value: string): string {
   return value
@@ -63,7 +89,9 @@ function clampLimit(limit?: number): number {
   );
 }
 
-function toSearchResult(location: Location): LocationSearchResult {
+function toSearchResult(
+  location: SelectedPublicLocation,
+): LocationSearchResult {
   return {
     id: location.id,
     slug: location.slug,
@@ -75,15 +103,23 @@ function toSearchResult(location: Location): LocationSearchResult {
     parentId: location.parentId,
     latitude: location.latitude,
     longitude: location.longitude,
-    aliases: location.aliases,
-    eircodeRoutingKeys: location.eircodeRoutingKeys,
     isPopular: location.isPopular,
-    seoPriority: location.seoPriority,
-    displayOrder: location.displayOrder,
   };
 }
 
-function locationDeduplicationKey(location: Location): string {
+function toPublicLocationDetail(
+  location: SelectedPublicLocation,
+): PublicLocationDetail {
+  return {
+    ...toSearchResult(location),
+    isActive: location.isActive,
+    searchable: location.searchable,
+  };
+}
+
+function locationDeduplicationKey(
+  location: SelectedPublicLocation,
+): string {
   const canonicalName = normaliseSearchText(
     location.canonicalName || location.name,
   );
@@ -93,8 +129,110 @@ function locationDeduplicationKey(location: Location): string {
   return `${canonicalName}|${county}|${parentId}`;
 }
 
+function getSearchMatchScore(
+  location: SelectedPublicLocation,
+  cleanedQuery: string,
+): number {
+  const name = normaliseSearchText(location.name);
+  const canonicalName = normaliseSearchText(location.canonicalName);
+  const displayName = normaliseSearchText(location.displayName);
+  const slug = normaliseSearchText(location.slug.replace(/-/g, " "));
+
+  if (name === cleanedQuery) {
+    return 500;
+  }
+
+  if (canonicalName === cleanedQuery) {
+    return 480;
+  }
+
+  if (displayName === cleanedQuery) {
+    return 460;
+  }
+
+  if (slug === cleanedQuery) {
+    return 440;
+  }
+
+  if (displayName.startsWith(`${cleanedQuery},`)) {
+    return 420;
+  }
+
+  if (name.startsWith(cleanedQuery)) {
+    return 400;
+  }
+
+  if (canonicalName.startsWith(cleanedQuery)) {
+    return 380;
+  }
+
+  if (displayName.startsWith(cleanedQuery)) {
+    return 360;
+  }
+
+  if (slug.startsWith(cleanedQuery)) {
+    return 340;
+  }
+
+  if (name.includes(cleanedQuery)) {
+    return 300;
+  }
+
+  if (canonicalName.includes(cleanedQuery)) {
+    return 280;
+  }
+
+  if (displayName.includes(cleanedQuery)) {
+    return 260;
+  }
+
+  return 0;
+}
+
+function rankLocations(
+  locations: SelectedPublicLocation[],
+  cleanedQuery: string,
+): SelectedPublicLocation[] {
+  return [...locations].sort((left, right) => {
+    const matchDifference =
+      getSearchMatchScore(right, cleanedQuery) -
+      getSearchMatchScore(left, cleanedQuery);
+
+    if (matchDifference !== 0) {
+      return matchDifference;
+    }
+
+    const popularityDifference =
+      Number(right.isPopular) - Number(left.isPopular);
+
+    if (popularityDifference !== 0) {
+      return popularityDifference;
+    }
+
+    // Lower displayOrder is the stronger editorial/business ranking.
+    const displayOrderDifference =
+      (left.displayOrder ?? Number.MAX_SAFE_INTEGER) -
+      (right.displayOrder ?? Number.MAX_SAFE_INTEGER);
+
+    if (displayOrderDifference !== 0) {
+      return displayOrderDifference;
+    }
+
+    const seoPriorityDifference =
+      (right.seoPriority ?? 0) - (left.seoPriority ?? 0);
+
+    if (seoPriorityDifference !== 0) {
+      return seoPriorityDifference;
+    }
+
+    return left.displayName.localeCompare(right.displayName, "en-IE", {
+      sensitivity: "base",
+    });
+  });
+}
+
 function deduplicateLocations(
-  locations: Location[],
+  locations: SelectedPublicLocation[],
   limit: number,
 ): LocationSearchResult[] {
   const seen = new Set<string>();
@@ -125,12 +263,13 @@ export class LocationService {
   ): Promise<LocationSearchResult[]> {
     const cleanedQuery = normaliseSearchText(query);
 
-    if (cleanedQuery.length < 1) {
+    if (cleanedQuery.length < MIN_SEARCH_QUERY_LENGTH) {
       return [];
     }
 
     const limit = clampLimit(options.limit);
     const escapedQuery = escapeLikePattern(cleanedQuery);
+
     const databaseTake = Math.min(
       limit * SEARCH_DEDUPLICATION_MULTIPLIER,
       MAX_SEARCH_LIMIT * SEARCH_DEDUPLICATION_MULTIPLIER,
@@ -211,16 +350,20 @@ export class LocationService {
       where: {
         AND: conditions,
       },
+      select: publicLocationSelect,
       orderBy: [
         { isPopular: "desc" },
-        { seoPriority: "desc" },
         { displayOrder: "asc" },
+        { seoPriority: "desc" },
         { displayName: "asc" },
       ],
       take: databaseTake,
     });
 
-    return deduplicateLocations(locations, limit);
+    return deduplicateLocations(
+      rankLocations(locations, cleanedQuery),
+      limit,
+    );
   }
 
   static async getById(id: number): Promise<Location | null> {
@@ -233,18 +376,23 @@ export class LocationService {
     });
   }
 
-  static async getBySlug(slug: string): Promise<Location | null> {
+  static async getBySlug(
+    slug: string,
+  ): Promise<PublicLocationDetail | null> {
     const cleanedSlug = slug.trim().toLocaleLowerCase("en-IE");
 
     if (!cleanedSlug) {
       return null;
     }
 
-    return prisma.location.findUnique({
+    const location = await prisma.location.findUnique({
       where: {
         slug: cleanedSlug,
       },
+      select: publicLocationSelect,
     });
+
+    return location ? toPublicLocationDetail(location) : null;
   }
 
   static async getChildren(
@@ -272,11 +420,13 @@ export class LocationService {
             }
           : {}),
       },
+      select: publicLocationSelect,
       orderBy: [
         { displayOrder: "asc" },
         { isPopular: "desc" },
         { displayName: "asc" },
       ],
+      take: MAX_SEARCH_LIMIT,
     });
 
     return children.map(toSearchResult);
@@ -358,11 +508,11 @@ export class LocationService {
   ): Promise<LocationSearchResult[]> {
     const cleanedInput = normaliseSearchText(input);
 
-    if (!cleanedInput) {
+    if (cleanedInput.length < MIN_SEARCH_QUERY_LENGTH) {
       return [];
     }
 
-    const limit = 20;
+    const limit = 10;
 
     const locations = await prisma.location.findMany({
       where: {
@@ -427,20 +577,24 @@ export class LocationService {
             : []),
         ],
       },
+      select: publicLocationSelect,
       orderBy: [
         { isPopular: "desc" },
-        { seoPriority: "desc" },
         { displayOrder: "asc" },
+        { seoPriority: "desc" },
         { displayName: "asc" },
       ],
       take: limit * SEARCH_DEDUPLICATION_MULTIPLIER,
     });
 
-    return deduplicateLocations(locations, limit);
+    return deduplicateLocations(
+      rankLocations(locations, cleanedInput),
+      limit,
+    );
   }
 
   static async getPopular(
-    limit = 20,
+    limit = DEFAULT_SEARCH_LIMIT,
     types?: LocationType[],
   ): Promise<LocationSearchResult[]> {
     const locations = await prisma.location.findMany({
@@ -456,6 +610,7 @@ export class LocationService {
             }
           : {}),
       },
+      select: publicLocationSelect,
       orderBy: [
         { displayOrder: "asc" },
         { seoPriority: "desc" },
