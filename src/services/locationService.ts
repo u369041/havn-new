@@ -28,17 +28,39 @@ export type LocationSearchResult = {
   parentId: number | null;
   latitude: number | null;
   longitude: number | null;
-  aliases: string[];
-  eircodeRoutingKeys: string[];
   isPopular: boolean;
-  seoPriority: number;
-  displayOrder: number;
 };
 
-const DEFAULT_SEARCH_LIMIT = 20;
-const MAX_SEARCH_LIMIT = 100;
+export type PublicLocationDetail = LocationSearchResult & {
+  isActive: boolean;
+  searchable: boolean;
+};
+
+const DEFAULT_SEARCH_LIMIT = 15;
+const MAX_SEARCH_LIMIT = 20;
+const MIN_SEARCH_QUERY_LENGTH = 2;
 const MAX_HIERARCHY_DEPTH = 20;
 const SEARCH_DEDUPLICATION_MULTIPLIER = 4;
+
+const publicLocationSelect = {
+  id: true,
+  slug: true,
+  name: true,
+  canonicalName: true,
+  displayName: true,
+  type: true,
+  county: true,
+  parentId: true,
+  latitude: true,
+  longitude: true,
+  isPopular: true,
+  isActive: true,
+  searchable: true,
+} satisfies Prisma.LocationSelect;
+
+type SelectedPublicLocation = Prisma.LocationGetPayload<{
+  select: typeof publicLocationSelect;
+}>;
 
 function normaliseSearchText(value: string): string {
   return value
@@ -63,7 +85,9 @@ function clampLimit(limit?: number): number {
   );
 }
 
-function toSearchResult(location: Location): LocationSearchResult {
+function toSearchResult(
+  location: SelectedPublicLocation,
+): LocationSearchResult {
   return {
     id: location.id,
     slug: location.slug,
@@ -75,15 +99,23 @@ function toSearchResult(location: Location): LocationSearchResult {
     parentId: location.parentId,
     latitude: location.latitude,
     longitude: location.longitude,
-    aliases: location.aliases,
-    eircodeRoutingKeys: location.eircodeRoutingKeys,
     isPopular: location.isPopular,
-    seoPriority: location.seoPriority,
-    displayOrder: location.displayOrder,
   };
 }
 
-function locationDeduplicationKey(location: Location): string {
+function toPublicLocationDetail(
+  location: SelectedPublicLocation,
+): PublicLocationDetail {
+  return {
+    ...toSearchResult(location),
+    isActive: location.isActive,
+    searchable: location.searchable,
+  };
+}
+
+function locationDeduplicationKey(
+  location: SelectedPublicLocation,
+): string {
   const canonicalName = normaliseSearchText(
     location.canonicalName || location.name,
   );
@@ -94,7 +126,7 @@ function locationDeduplicationKey(location: Location): string {
 }
 
 function deduplicateLocations(
-  locations: Location[],
+  locations: SelectedPublicLocation[],
   limit: number,
 ): LocationSearchResult[] {
   const seen = new Set<string>();
@@ -125,12 +157,13 @@ export class LocationService {
   ): Promise<LocationSearchResult[]> {
     const cleanedQuery = normaliseSearchText(query);
 
-    if (cleanedQuery.length < 1) {
+    if (cleanedQuery.length < MIN_SEARCH_QUERY_LENGTH) {
       return [];
     }
 
     const limit = clampLimit(options.limit);
     const escapedQuery = escapeLikePattern(cleanedQuery);
+
     const databaseTake = Math.min(
       limit * SEARCH_DEDUPLICATION_MULTIPLIER,
       MAX_SEARCH_LIMIT * SEARCH_DEDUPLICATION_MULTIPLIER,
@@ -211,6 +244,7 @@ export class LocationService {
       where: {
         AND: conditions,
       },
+      select: publicLocationSelect,
       orderBy: [
         { isPopular: "desc" },
         { seoPriority: "desc" },
@@ -233,18 +267,23 @@ export class LocationService {
     });
   }
 
-  static async getBySlug(slug: string): Promise<Location | null> {
+  static async getBySlug(
+    slug: string,
+  ): Promise<PublicLocationDetail | null> {
     const cleanedSlug = slug.trim().toLocaleLowerCase("en-IE");
 
     if (!cleanedSlug) {
       return null;
     }
 
-    return prisma.location.findUnique({
+    const location = await prisma.location.findUnique({
       where: {
         slug: cleanedSlug,
       },
+      select: publicLocationSelect,
     });
+
+    return location ? toPublicLocationDetail(location) : null;
   }
 
   static async getChildren(
@@ -272,11 +311,13 @@ export class LocationService {
             }
           : {}),
       },
+      select: publicLocationSelect,
       orderBy: [
         { displayOrder: "asc" },
         { isPopular: "desc" },
         { displayName: "asc" },
       ],
+      take: MAX_SEARCH_LIMIT,
     });
 
     return children.map(toSearchResult);
@@ -358,11 +399,11 @@ export class LocationService {
   ): Promise<LocationSearchResult[]> {
     const cleanedInput = normaliseSearchText(input);
 
-    if (!cleanedInput) {
+    if (cleanedInput.length < MIN_SEARCH_QUERY_LENGTH) {
       return [];
     }
 
-    const limit = 20;
+    const limit = 10;
 
     const locations = await prisma.location.findMany({
       where: {
@@ -427,6 +468,7 @@ export class LocationService {
             : []),
         ],
       },
+      select: publicLocationSelect,
       orderBy: [
         { isPopular: "desc" },
         { seoPriority: "desc" },
@@ -440,7 +482,7 @@ export class LocationService {
   }
 
   static async getPopular(
-    limit = 20,
+    limit = DEFAULT_SEARCH_LIMIT,
     types?: LocationType[],
   ): Promise<LocationSearchResult[]> {
     const locations = await prisma.location.findMany({
@@ -456,6 +498,7 @@ export class LocationService {
             }
           : {}),
       },
+      select: publicLocationSelect,
       orderBy: [
         { displayOrder: "asc" },
         { seoPriority: "desc" },

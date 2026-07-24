@@ -1,8 +1,24 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { LocationType } from "@prisma/client";
 import { LocationService } from "../services/locationService";
 
 const router = Router();
+
+const LOCATION_SEARCH_MIN_LENGTH = 2;
+const MAX_LOCATION_LIMIT = 20;
+
+const locationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many location requests. Please try again shortly.",
+  },
+});
+
+router.use(locationLimiter);
 
 function parseLocationTypes(value: unknown): LocationType[] | undefined {
   if (typeof value !== "string" || !value.trim()) {
@@ -35,27 +51,38 @@ function parsePositiveInteger(
     return fallback;
   }
 
-  return parsed;
+  return Math.min(parsed, MAX_LOCATION_LIMIT);
+}
+
+function setPublicLocationCache(res: {
+  setHeader: (name: string, value: string) => void;
+}): void {
+  res.setHeader(
+    "Cache-Control",
+    "public, max-age=60, stale-while-revalidate=300",
+  );
 }
 
 router.get("/search", async (req, res) => {
   try {
     const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    if (!query) {
+    if (query.length < LOCATION_SEARCH_MIN_LENGTH) {
       return res.status(400).json({
-        error: "A search query is required.",
+        error: `A search query of at least ${LOCATION_SEARCH_MIN_LENGTH} characters is required.`,
       });
     }
 
     const locations = await LocationService.search(query, {
-      limit: parsePositiveInteger(req.query.limit, 20),
+      limit: parsePositiveInteger(req.query.limit, 15),
       county:
         typeof req.query.county === "string"
           ? req.query.county.trim()
           : undefined,
       types: parseLocationTypes(req.query.types),
     });
+
+    setPublicLocationCache(res);
 
     return res.json({
       query,
@@ -74,9 +101,11 @@ router.get("/search", async (req, res) => {
 router.get("/popular", async (req, res) => {
   try {
     const locations = await LocationService.getPopular(
-      parsePositiveInteger(req.query.limit, 20),
+      parsePositiveInteger(req.query.limit, 15),
       parseLocationTypes(req.query.types),
     );
+
+    setPublicLocationCache(res);
 
     return res.json({
       count: locations.length,
@@ -96,9 +125,9 @@ router.get("/resolve", async (req, res) => {
     const input =
       typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    if (!input) {
+    if (input.length < LOCATION_SEARCH_MIN_LENGTH) {
       return res.status(400).json({
-        error: "A location value is required.",
+        error: `A location value of at least ${LOCATION_SEARCH_MIN_LENGTH} characters is required.`,
       });
     }
 
@@ -109,6 +138,8 @@ router.get("/resolve", async (req, res) => {
           : undefined,
       types: parseLocationTypes(req.query.types),
     });
+
+    setPublicLocationCache(res);
 
     return res.json({
       query: input,
@@ -135,6 +166,8 @@ router.get("/:slug/breadcrumb", async (req, res) => {
     }
 
     const breadcrumb = await LocationService.getBreadcrumb(location.id);
+
+    setPublicLocationCache(res);
 
     return res.json({
       location: {
@@ -170,6 +203,8 @@ router.get("/:slug/children", async (req, res) => {
       types: parseLocationTypes(req.query.types),
     });
 
+    setPublicLocationCache(res);
+
     return res.json({
       parent: {
         id: location.id,
@@ -198,6 +233,8 @@ router.get("/:slug", async (req, res) => {
         error: "Location not found.",
       });
     }
+
+    setPublicLocationCache(res);
 
     return res.json({ location });
   } catch (error) {
