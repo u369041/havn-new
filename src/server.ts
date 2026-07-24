@@ -12,6 +12,7 @@ import adminRouter from "./routes/admin";
 import digestRouter from "./routes/digest";
 import seoRouter from "./routes/seo";
 import locationsRouter from "./routes/locations";
+import eventsRouter from "./routes/events";
 
 const app = express();
 
@@ -79,6 +80,20 @@ const stripeLimiter = rateLimit({
   },
 });
 
+const eventsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    return res.status(429).json({
+      ok: false,
+      error: "TOO_MANY_ANALYTICS_EVENTS",
+    });
+  },
+});
+
+
 /* body */
 
 /*
@@ -141,6 +156,7 @@ app.use("/api", generalApiLimiter);
 /* public routes */
 app.use("/api/properties", propertiesRouter);
 app.use("/api/locations", locationsRouter);
+app.use("/api/events", eventsLimiter, eventsRouter);
 
 /* protected and rate-limited routes */
 app.use("/api/auth", authLimiter, authRouter);

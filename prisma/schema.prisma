@@ -24,11 +24,12 @@ model User {
   lastSearchAt        DateTime?
   foundingOfferUsedAt DateTime?
 
-  approvals       Property[]      @relation("PropertyApprovedBy")
-  rejections      Property[]      @relation("PropertyRejectedBy")
+  approvals       Property[]       @relation("PropertyApprovedBy")
+  rejections      Property[]       @relation("PropertyRejectedBy")
   properties      Property[]
   savedSearches   SavedSearch[]
   savedProperties SavedProperty[]
+  analyticsEvents AnalyticsEvent[]
 
   passwordResetTokens PasswordResetToken[]
 }
@@ -182,8 +183,9 @@ model Property {
 
   location Location? @relation("PropertyLocation", fields: [locationId], references: [id], onDelete: SetNull)
 
-  enquiries Enquiry[]
-  savedBy   SavedProperty[]
+  enquiries       Enquiry[]
+  savedBy         SavedProperty[]
+  analyticsEvents AnalyticsEvent[]
 
   @@index([userId])
   @@index([locationId])
@@ -268,7 +270,8 @@ model Location {
   parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children Location[] @relation("LocationHierarchy")
 
-  properties Property[] @relation("PropertyLocation")
+  properties      Property[]       @relation("PropertyLocation")
+  analyticsEvents AnalyticsEvent[]
 
   @@index([name])
   @@index([canonicalName])
@@ -286,6 +289,44 @@ model Location {
   @@index([csoId])
   @@index([osmId])
   @@index([geonamesId])
+}
+
+model AnalyticsEvent {
+  id        BigInt   @id @default(autoincrement())
+  createdAt DateTime @default(now())
+
+  eventType AnalyticsEventType
+
+  sessionId String
+  userId    Int?
+
+  propertyId Int?
+  locationId Int?
+
+  mode MarketMode?
+
+  path     String?
+  referrer String?
+
+  userAgent String?
+  ipHash    String?
+
+  payload Json?
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  property Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([eventType])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([propertyId])
+  @@index([locationId])
+  @@index([mode])
+  @@index([eventType, createdAt])
+  @@index([locationId, eventType, createdAt])
+  @@index([propertyId, eventType, createdAt])
 }
 
 enum MarketMode {
@@ -342,4 +383,14 @@ enum LocationType {
   TOWNLAND
   POSTAL_DISTRICT
   SEARCH_REGION
+}
+
+enum AnalyticsEventType {
+  SEARCH
+  PROPERTY_VIEW
+  PROPERTY_SAVE
+  PROPERTY_CONTACT
+  SEARCH_SAVE
+  FEATURED_CLICK
+  PROPERTY_SHARE
 }
