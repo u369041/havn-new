@@ -7,6 +7,7 @@ import {
   sendWelcomeEmail,
   sendPasswordResetEmail,
   sendEmailVerificationEmail,
+  sendEmailChangeVerificationEmail,
 } from "../lib/mail";
 import crypto from "crypto";
 
@@ -591,6 +592,115 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
+
+/**
+ * CHANGE PASSWORD
+ */
+router.post("/change-password", requireAuth, async (req: any, res) => {
+  try {
+    const userId = toPositiveSafeInt(req.user?.userId);
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (userId === null) {
+      return res.status(401).json({ ok: false, message: "Invalid authentication session" });
+    }
+
+    if (!currentPassword || !passwordIsValid(newPassword)) {
+      return res.status(400).json({
+        ok: false,
+        message: `New password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters`,
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ ok: false, message: "Choose a different new password" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(401).json({ ok: false, message: "Current password is incorrect" });
+    }
+
+    const password = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password, passwordChangedAt: new Date() },
+    });
+
+    await prisma.passwordResetToken.deleteMany({ where: { userId } });
+    return res.json({ ok: true, message: "Your password has been changed" });
+  } catch (err) {
+    console.error("POST /api/auth/change-password error", err);
+    return res.status(500).json({ ok: false, message: "Could not change password" });
+  }
+});
+
+/**
+ * REQUEST EMAIL CHANGE
+ */
+router.post("/change-email", requireAuth, async (req: any, res) => {
+  try {
+    const userId = toPositiveSafeInt(req.user?.userId);
+    const newEmail = String(req.body?.newEmail || "").trim().toLowerCase();
+    const currentPassword = String(req.body?.currentPassword || "");
+
+    if (userId === null) {
+      return res.status(401).json({ ok: false, message: "Invalid authentication session" });
+    }
+
+    if (!emailIsValid(newEmail) || !currentPassword) {
+      return res.status(400).json({ ok: false, message: "Enter a valid email and your current password" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(401).json({ ok: false, message: "Current password is incorrect" });
+    }
+
+    if (newEmail === user.email) {
+      return res.status(400).json({ ok: false, message: "That is already your account email" });
+    }
+
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ email: newEmail }, { pendingEmail: newEmail }] },
+      select: { id: true },
+    });
+    if (existing && existing.id !== user.id) {
+      return res.status(409).json({ ok: false, message: "That email address is already in use" });
+    }
+
+    const rawToken = makeToken(32);
+    const tokenHash = sha256(rawToken);
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        pendingEmail: newEmail,
+        emailChangeTokenHash: tokenHash,
+        emailChangeTokenExp: expiresAt,
+      },
+    });
+
+    const verifyUrl = `${APP_URL}/verify-email.html?token=${encodeURIComponent(rawToken)}`;
+    const emailResult = await sendEmailChangeVerificationEmail({
+      to: newEmail,
+      name: user.name || null,
+      verifyUrl,
+    });
+
+    if (!emailResult || (emailResult as any).error) {
+      return res.status(502).json({ ok: false, message: "We could not send the verification email" });
+    }
+
+    return res.json({ ok: true, message: `Verification sent to ${newEmail}` });
+  } catch (err) {
+    console.error("POST /api/auth/change-email error", err);
+    return res.status(500).json({ ok: false, message: "Could not start email change" });
+  }
+});
+
 /**
  * VERIFY EMAIL
  */
@@ -687,6 +797,38 @@ router.post("/verify-email", async (req, res) => {
       return res.status(400).json({ ok: false, message: "Invalid verification link" });
     }
 
+    const tokenHash = sha256(token);
+    const pendingUser = await prisma.user.findFirst({
+      where: {
+        emailChangeTokenHash: tokenHash,
+        emailChangeTokenExp: { gt: new Date() },
+        pendingEmail: { not: null },
+      },
+      select: { id: true, pendingEmail: true },
+    });
+
+    if (pendingUser?.pendingEmail) {
+      try {
+        await prisma.user.update({
+          where: { id: pendingUser.id },
+          data: {
+            email: pendingUser.pendingEmail,
+            emailVerified: true,
+            pendingEmail: null,
+            emailChangeTokenHash: null,
+            emailChangeTokenExp: null,
+          },
+        });
+      } catch (error: any) {
+        if (error?.code === "P2002") {
+          return res.status(409).json({ ok: false, message: "That email address is already in use" });
+        }
+        throw error;
+      }
+
+      return res.json({ ok: true, emailChanged: true });
+    }
+
     const verified = await prisma.user.updateMany({
       where: {
         emailVerifyToken: token,
@@ -707,7 +849,7 @@ router.post("/verify-email", async (req, res) => {
       });
     }
 
-    res.json({ ok: true });
+    return res.json({ ok: true });
   } catch {
     res.status(500).json({ ok: false });
   }

@@ -1462,6 +1462,57 @@ export async function sendEmailVerificationEmail(args: {
   }
 }
 
+
+/**
+ * ----------------------------
+ * EMAIL CHANGE VERIFICATION
+ * ----------------------------
+ */
+export async function sendEmailChangeVerificationEmail(args: {
+  to: string;
+  name?: string | null;
+  verifyUrl: string;
+}) {
+  try {
+    if (!isValidEmail(args.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const verifyUrl = safeHttpsUrl(args.verifyUrl);
+    if (!verifyUrl) {
+      throw new Error("InvalidEmailChangeVerificationUrl");
+    }
+
+    const displayName = String(args.name || "").trim();
+    const html = renderHavnEmail({
+      preheader: "Confirm your new HAVN.ie email address.",
+      heading: "Confirm Your New Email",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0;">You requested to use this email address for your HAVN.ie account.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;color:${HAVN_MUTED};font-size:13px;line-height:1.7;">
+          Confirming this link will replace your current sign-in email. This link expires in 30 minutes. If you did not request this change, do not confirm it.
+        </div>
+      `,
+      ctaLabel: "Confirm New Email",
+      ctaUrl: verifyUrl,
+      statusTone: "success",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: args.to,
+      subject: "Confirm your new email for HAVN.ie",
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendEmailChangeVerificationEmail", err);
+    return null;
+  }
+}
+
 /**
  * ----------------------------
  * HAVN WEEKLY DIGEST EMAIL
