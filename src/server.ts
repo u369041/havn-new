@@ -13,6 +13,7 @@ import digestRouter from "./routes/digest";
 import seoRouter from "./routes/seo";
 import locationsRouter from "./routes/locations";
 import eventsRouter from "./routes/events";
+import adminAnalyticsRouter from "./routes/adminAnalytics";
 
 const app = express();
 
@@ -158,12 +159,23 @@ app.use("/api/properties", propertiesRouter);
 app.use("/api/locations", locationsRouter);
 app.use("/api/events", eventsLimiter, eventsRouter);
 
-/* protected and rate-limited routes */
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/uploads", strictLimiter, uploadsRouter);
 app.use("/api/stripe", stripeLimiter, stripeRouter);
+
+app.use(
+  "/api/admin/analytics",
+  strictLimiter,
+  adminAnalyticsRouter,
+);
+
+app.use(
+  "/api/admin/moderation",
+  strictLimiter,
+  moderationRouter,
+);
+
 app.use("/api/admin", strictLimiter, adminRouter);
-app.use("/api/admin/moderation", strictLimiter, moderationRouter);
 app.use("/api/digest", strictLimiter, digestRouter);
 
 /* 404 */
