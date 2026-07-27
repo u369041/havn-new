@@ -166,6 +166,414 @@ function checkoutWasCompleted(session: any): boolean {
   return checkoutStatus === "complete" && acceptablePaymentStatus;
 }
 
+
+type AgentSubscriptionStatusName =
+  | "ACTIVE"
+  | "PAST_DUE"
+  | "CANCELLED"
+  | "UNPAID";
+
+function getStripeObjectId(value: any): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (
+    typeof value === "object" &&
+    "id" in value &&
+    value.id
+  ) {
+    return String(value.id);
+  }
+
+  return null;
+}
+
+function stripeTimestampToDate(
+  value: unknown
+): Date | null {
+  const seconds = Number(value);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  return new Date(seconds * 1000);
+}
+
+function mapStripeSubscriptionStatus(
+  value: unknown
+): AgentSubscriptionStatusName {
+  const status = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    status === "active" ||
+    status === "trialing"
+  ) {
+    return "ACTIVE";
+  }
+
+  if (status === "past_due") {
+    return "PAST_DUE";
+  }
+
+  if (status === "canceled") {
+    return "CANCELLED";
+  }
+
+  return "UNPAID";
+}
+
+function getSubscriptionPriceId(
+  subscription: any
+): string | null {
+  const firstItem =
+    subscription?.items?.data?.[0];
+
+  return getStripeObjectId(firstItem?.price);
+}
+
+async function findAgentProfileForSubscription(
+  subscription: any
+) {
+  const metadata = subscription?.metadata || {};
+
+  const agentProfileId = Number(
+    metadata.agentProfileId
+  );
+
+  const userId = Number(metadata.userId);
+
+  const stripeCustomerId = getStripeObjectId(
+    subscription?.customer
+  );
+
+  if (
+    Number.isSafeInteger(agentProfileId) &&
+    agentProfileId > 0
+  ) {
+    const profile =
+      await prisma.agentProfile.findUnique({
+        where: {
+          id: agentProfileId,
+        },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+        },
+      });
+
+    if (profile) {
+      return profile;
+    }
+  }
+
+  if (
+    Number.isSafeInteger(userId) &&
+    userId > 0
+  ) {
+    const profile =
+      await prisma.agentProfile.findUnique({
+        where: {
+          userId,
+        },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+        },
+      });
+
+    if (profile) {
+      return profile;
+    }
+  }
+
+  if (stripeCustomerId) {
+    return prisma.agentProfile.findUnique({
+      where: {
+        stripeCustomerId,
+      },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+      },
+    });
+  }
+
+  return null;
+}
+
+async function syncAgentSubscription(
+  subscription: any
+) {
+  const stripeSubscriptionId = String(
+    subscription?.id || ""
+  ).trim();
+
+  if (!stripeSubscriptionId) {
+    return {
+      synced: false,
+      reason: "missing_subscription_id",
+    };
+  }
+
+  const agentProfile =
+    await findAgentProfileForSubscription(
+      subscription
+    );
+
+  if (!agentProfile) {
+    console.warn(
+      "Stripe agent subscription ignored: AgentProfile not found",
+      {
+        stripeSubscriptionId,
+        stripeCustomerId:
+          getStripeObjectId(
+            subscription?.customer
+          ),
+        metadata: subscription?.metadata,
+      }
+    );
+
+    return {
+      synced: false,
+      reason: "agent_profile_not_found",
+    };
+  }
+
+  const configuredAgentPriceId = String(
+    process.env.STRIPE_AGENT_MONTHLY_PRICE_ID || ""
+  ).trim();
+
+  const stripePriceId =
+    getSubscriptionPriceId(subscription) ||
+    String(
+      subscription?.metadata?.stripePriceId ||
+        ""
+    ).trim() ||
+    null;
+
+  if (
+    configuredAgentPriceId &&
+    stripePriceId &&
+    stripePriceId !== configuredAgentPriceId
+  ) {
+    console.warn(
+      "Stripe agent subscription ignored: price mismatch",
+      {
+        agentProfileId: agentProfile.id,
+        stripeSubscriptionId,
+        stripePriceId,
+        configuredAgentPriceId,
+      }
+    );
+
+    return {
+      synced: false,
+      reason: "agent_price_mismatch",
+    };
+  }
+
+  const subscriptionStatus =
+    mapStripeSubscriptionStatus(
+      subscription?.status
+    );
+
+  const stripeCustomerId = getStripeObjectId(
+    subscription?.customer
+  );
+
+  const subscriptionStartedAt =
+    stripeTimestampToDate(
+      subscription?.start_date
+    ) ||
+    stripeTimestampToDate(
+      subscription?.created
+    );
+
+  const subscriptionCurrentPeriodEnd =
+    stripeTimestampToDate(
+      subscription?.current_period_end
+    ) ||
+    stripeTimestampToDate(
+      subscription?.items?.data?.[0]
+        ?.current_period_end
+    );
+
+  const subscriptionCancelledAt =
+    subscriptionStatus === "CANCELLED"
+      ? stripeTimestampToDate(
+          subscription?.canceled_at
+        ) || new Date()
+      : null;
+
+  await prisma.agentProfile.update({
+    where: {
+      id: agentProfile.id,
+    },
+    data: {
+      subscriptionStatus,
+      stripeCustomerId:
+        stripeCustomerId || undefined,
+      stripeSubscriptionId,
+      stripePriceId:
+        stripePriceId || undefined,
+      subscriptionStartedAt:
+        subscriptionStartedAt || undefined,
+      subscriptionCurrentPeriodEnd,
+      subscriptionCancelledAt,
+    },
+  });
+
+  console.log(
+    "Stripe agent subscription synchronised",
+    {
+      agentProfileId: agentProfile.id,
+      userId: agentProfile.userId,
+      stripeSubscriptionId,
+      stripeCustomerId,
+      stripePriceId,
+      subscriptionStatus,
+      subscriptionCurrentPeriodEnd:
+        subscriptionCurrentPeriodEnd
+          ? subscriptionCurrentPeriodEnd.toISOString()
+          : null,
+    }
+  );
+
+  return {
+    synced: true,
+    agentProfileId: agentProfile.id,
+    userId: agentProfile.userId,
+    stripeSubscriptionId,
+    subscriptionStatus,
+  };
+}
+
+async function handleAgentCheckoutCompleted(
+  session: any
+) {
+  const userId = Number(
+    session?.metadata?.userId
+  );
+
+  const agentProfileId = Number(
+    session?.metadata?.agentProfileId
+  );
+
+  if (
+    !Number.isSafeInteger(userId) ||
+    userId <= 0 ||
+    !Number.isSafeInteger(agentProfileId) ||
+    agentProfileId <= 0
+  ) {
+    return {
+      received: true,
+      ignored: true,
+      reason: "invalid_agent_metadata",
+    };
+  }
+
+  const configuredAgentPriceId = String(
+    process.env.STRIPE_AGENT_MONTHLY_PRICE_ID || ""
+  ).trim();
+
+  if (
+    !configuredAgentPriceId ||
+    String(
+      session?.metadata?.stripePriceId ||
+        ""
+    ).trim() !== configuredAgentPriceId
+  ) {
+    return {
+      received: true,
+      ignored: true,
+      reason:
+        "agent_price_configuration_mismatch",
+    };
+  }
+
+  const agentProfile =
+    await prisma.agentProfile.findUnique({
+      where: {
+        id: agentProfileId,
+      },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+      },
+    });
+
+  if (
+    !agentProfile ||
+    agentProfile.userId !== userId ||
+    agentProfile.status !== "APPROVED"
+  ) {
+    return {
+      received: true,
+      ignored: true,
+      reason: "agent_profile_not_eligible",
+    };
+  }
+
+  const stripeCustomerId =
+    getStripeObjectId(session?.customer);
+
+  const stripeSubscriptionId =
+    getStripeObjectId(
+      session?.subscription
+    );
+
+  if (!stripeSubscriptionId) {
+    return {
+      received: true,
+      ignored: true,
+      reason: "missing_subscription_id",
+    };
+  }
+
+  if (stripeCustomerId) {
+    await prisma.agentProfile.update({
+      where: {
+        id: agentProfile.id,
+      },
+      data: {
+        stripeCustomerId,
+      },
+    });
+  }
+
+  const subscription =
+    await stripe.subscriptions.retrieve(
+      stripeSubscriptionId,
+      {
+        expand: ["items.data.price"],
+      } as any
+    );
+
+  const syncResult =
+    await syncAgentSubscription(subscription);
+
+  return {
+    received: true,
+    completed: true,
+    checkoutType: "AGENT_SUBSCRIPTION",
+    stripeCustomerId,
+    stripeSubscriptionId,
+    syncResult,
+  };
+}
+
 router.get("/ping", (_req, res) => {
   res.json({
     ok: true,
@@ -534,22 +942,61 @@ router.post("/webhook", async (req: any, res) => {
     return res.status(400).send("Webhook Error");
   }
 
-  /*
-   * Stripe can send many event types to one endpoint.
-   * HAVN currently fulfils listing purchases only from a
-   * completed Checkout Session.
-   */
-  if (event.type !== "checkout.session.completed") {
-    return res.json({
-      received: true,
-      ignored: true,
-      eventType: event.type,
-    });
-  }
-
   try {
-	const session =
-  	 event.data.object as any;
+    if (
+      event.type ===
+        "customer.subscription.created" ||
+      event.type ===
+        "customer.subscription.updated" ||
+      event.type ===
+        "customer.subscription.deleted"
+    ) {
+      const subscription =
+        event.data.object as any;
+
+      const syncResult =
+        await syncAgentSubscription(
+          subscription
+        );
+
+      return res.json({
+        received: true,
+        eventType: event.type,
+        syncResult,
+      });
+    }
+
+    if (
+      event.type !==
+      "checkout.session.completed"
+    ) {
+      return res.json({
+        received: true,
+        ignored: true,
+        eventType: event.type,
+      });
+    }
+
+    const session =
+      event.data.object as any;
+
+    const checkoutType = String(
+      session?.metadata?.checkoutType || ""
+    )
+      .trim()
+      .toUpperCase();
+
+    if (
+      checkoutType ===
+      "AGENT_SUBSCRIPTION"
+    ) {
+      const result =
+        await handleAgentCheckoutCompleted(
+          session
+        );
+
+      return res.json(result);
+    }
 
     if (!checkoutWasCompleted(session)) {
       console.warn(
