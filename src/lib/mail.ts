@@ -1845,6 +1845,465 @@ function insightCard(label: string, title: string, sub: string, cta: string, url
   `;
 }
 
+/**
+ * ----------------------------
+ * PROFESSIONAL AGENT EMAILS
+ * ----------------------------
+ */
+
+export type AgentApplicationEmailPayload = {
+  to: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  companyName: string;
+  psraLicenceNumber: string;
+  phoneNumber?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  townCity?: string | null;
+  county?: string | null;
+  eircode?: string | null;
+  submittedAt?: Date | string | null;
+  reason?: string | null;
+  adminUrl?: string | null;
+  agentHubUrl?: string | null;
+};
+
+function agentDisplayName(payload: AgentApplicationEmailPayload) {
+  return [payload.firstName, payload.lastName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function agentOfficeAddress(payload: AgentApplicationEmailPayload) {
+  return [
+    payload.addressLine1,
+    payload.addressLine2,
+    payload.townCity,
+    payload.county,
+    payload.eircode,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+/**
+ * Sent to the applicant immediately after submission.
+ */
+export async function sendAgentApplicationReceivedEmail(
+  payload: AgentApplicationEmailPayload
+) {
+  try {
+    if (!isValidEmail(payload.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const displayName = agentDisplayName(payload);
+    const greeting = displayName
+      ? `Hi ${escapeHtml(displayName)},`
+      : "Hi,";
+
+    const html = renderHavnEmail({
+      preheader:
+        "Your HAVN professional agent application has been received.",
+      heading: "Your Agent Application Has Been Received",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0 0 12px;">
+          Thank you for applying for a professional agent account with <strong>HAVN.ie</strong>.
+        </p>
+        <p style="margin:0;">
+          Your application has been received and is now awaiting review by our verification team.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
+          <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:13px;">
+            Application Details
+          </div>
+
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${emailDetailRow("Company", payload.companyName)}
+            ${emailDetailRow("Applicant", displayName || null)}
+            ${emailDetailRow("PSRA Licence", payload.psraLicenceNumber)}
+            ${emailDetailRow("Phone", payload.phoneNumber || null)}
+            ${emailDetailRow("Office", agentOfficeAddress(payload) || null)}
+            ${emailDetailRow(
+              "Submitted",
+              formatDateTime(payload.submittedAt)
+            )}
+            ${emailDetailRow(
+              "Status",
+              "Pending Approval",
+              true
+            )}
+          </table>
+        </div>
+
+        <div style="margin-top:22px;padding:22px;border:1px solid #E2E8F0;border-radius:18px;background:#FFFFFF;">
+          <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:9px;">
+            What happens next?
+          </div>
+
+          <p style="margin:0;color:#334155;font-size:14px;line-height:1.7;">
+            We will review your professional details and PSRA licence information.
+            You will receive another email when your application has been approved
+            or if additional information is required.
+          </p>
+        </div>
+      `,
+      statusTone: "success",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Agent Application Has Been Received",
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAgentApplicationReceivedEmail", err);
+    return null;
+  }
+}
+
+/**
+ * Sent to the HAVN administrator when a new application arrives.
+ */
+export async function sendAdminAgentApplicationNotificationEmail(
+  payload: AgentApplicationEmailPayload
+) {
+  try {
+    const displayName = agentDisplayName(payload);
+    const adminUrl =
+      safeHttpsUrl(payload.adminUrl) ||
+      "https://havn.ie/admin.html";
+
+    const html = renderHavnEmail({
+      preheader: `New professional agent application from ${payload.companyName}.`,
+      heading: "New Professional Agent Application",
+      introHtml: `
+        <p style="margin:0 0 12px;">
+          A new professional agent application has been submitted on HAVN.ie.
+        </p>
+        <p style="margin:0;">
+          The application is awaiting moderation.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
+          <div style="font-size:17px;font-weight:900;color:${HAVN_NAVY};margin-bottom:13px;">
+            Applicant Details
+          </div>
+
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${emailDetailRow("Company", payload.companyName)}
+            ${emailDetailRow("Applicant", displayName || null)}
+            ${emailDetailRow("Email", payload.to)}
+            ${emailDetailRow("Phone", payload.phoneNumber || null)}
+            ${emailDetailRow("PSRA Licence", payload.psraLicenceNumber, true)}
+            ${emailDetailRow("Office", agentOfficeAddress(payload) || null)}
+            ${emailDetailRow(
+              "Submitted",
+              formatDateTime(payload.submittedAt)
+            )}
+            ${emailDetailRow(
+              "Status",
+              "Pending Approval",
+              true
+            )}
+          </table>
+        </div>
+      `,
+      ctaLabel: "Review Agent Application",
+      ctaUrl: adminUrl,
+      ctaStyle: "text",
+      statusTone: "warning",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: ADMIN_NOTIFY_EMAIL,
+      subject: `New Agent Application: ${payload.companyName}`,
+      html,
+    });
+  } catch (err) {
+    logMailFailure(
+      "sendAdminAgentApplicationNotificationEmail",
+      err
+    );
+    return null;
+  }
+}
+
+/**
+ * Sent to the applicant after approval.
+ */
+export async function sendAgentApprovedEmail(
+  payload: AgentApplicationEmailPayload
+) {
+  try {
+    if (!isValidEmail(payload.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const displayName = agentDisplayName(payload);
+    const greeting = displayName
+      ? `Hi ${escapeHtml(displayName)},`
+      : "Hi,";
+
+    const agentHubUrl =
+      safeHttpsUrl(payload.agentHubUrl) ||
+      "https://havn.ie/agent-hub.html";
+
+    const html = renderHavnEmail({
+      preheader:
+        "Your HAVN professional agent account has been approved.",
+      heading: "Your Professional Account Is Approved",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0 0 12px;">
+          Great news — your professional agent application for
+          <strong>${escapeHtml(payload.companyName)}</strong> has been approved.
+        </p>
+        <p style="margin:0;">
+          You can now access HAVN's professional agent tools and manage your agency listings.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid #A7F3D0;border-radius:18px;background:#ECFDF5;">
+          <div style="font-size:17px;font-weight:900;color:#047857;margin-bottom:10px;">
+            Account Approved
+          </div>
+
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${emailDetailRow("Company", payload.companyName)}
+            ${emailDetailRow("PSRA Licence", payload.psraLicenceNumber)}
+            ${emailDetailRow("Status", "Approved", true)}
+          </table>
+        </div>
+      `,
+      ctaLabel: "Open Agent Hub",
+      ctaUrl: agentHubUrl,
+      ctaStyle: "text",
+      statusTone: "success",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Professional Account Is Approved",
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAgentApprovedEmail", err);
+    return null;
+  }
+}
+
+/**
+ * Sent to the applicant after rejection.
+ */
+export async function sendAgentRejectedEmail(
+  payload: AgentApplicationEmailPayload
+) {
+  try {
+    if (!isValidEmail(payload.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const displayName = agentDisplayName(payload);
+    const greeting = displayName
+      ? `Hi ${escapeHtml(displayName)},`
+      : "Hi,";
+
+    const reason =
+      String(payload.reason || "").trim() ||
+      "We were unable to verify the information supplied with your application.";
+
+    const html = renderHavnEmail({
+      preheader:
+        "An update is available regarding your HAVN professional agent application.",
+      heading: "Agent Application Update",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0;">
+          We have completed our review of the professional agent application for
+          <strong>${escapeHtml(payload.companyName)}</strong>.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid #FECACA;border-radius:18px;background:#FFF7F7;">
+          <div style="font-size:17px;font-weight:900;color:#991B1B;margin-bottom:10px;">
+            Application Not Approved
+          </div>
+
+          <div style="color:#7F1D1D;font-size:14px;line-height:1.7;">
+            ${escapeHtml(reason)}
+          </div>
+        </div>
+
+        <div style="margin-top:22px;color:#334155;font-size:14px;line-height:1.7;">
+          Please contact
+          <a href="mailto:support@havn.ie" style="color:#000000;font-weight:800;text-decoration:none;">
+            support@havn.ie
+          </a>
+          if you believe any information requires clarification.
+        </div>
+      `,
+      statusTone: "warning",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Update on Your HAVN Agent Application",
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAgentRejectedEmail", err);
+    return null;
+  }
+}
+
+/**
+ * Sent when an approved professional account is suspended.
+ */
+export async function sendAgentSuspendedEmail(
+  payload: AgentApplicationEmailPayload
+) {
+  try {
+    if (!isValidEmail(payload.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const displayName = agentDisplayName(payload);
+    const greeting = displayName
+      ? `Hi ${escapeHtml(displayName)},`
+      : "Hi,";
+
+    const reason =
+      String(payload.reason || "").trim() ||
+      "Your professional account requires administrative review.";
+
+    const html = renderHavnEmail({
+      preheader:
+        "Your HAVN professional agent account has been suspended.",
+      heading: "Professional Account Suspended",
+      introHtml: `
+        <p style="margin:0 0 12px;">${greeting}</p>
+        <p style="margin:0;">
+          Your professional account for
+          <strong>${escapeHtml(payload.companyName)}</strong>
+          has been temporarily suspended.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid #FED7AA;border-radius:18px;background:#FFF7ED;">
+          <div style="font-size:17px;font-weight:900;color:#9A3412;margin-bottom:10px;">
+            Suspension Details
+          </div>
+
+          <div style="color:#7C2D12;font-size:14px;line-height:1.7;">
+            ${escapeHtml(reason)}
+          </div>
+        </div>
+
+        <div style="margin-top:22px;color:#334155;font-size:14px;line-height:1.7;">
+          Contact
+          <a href="mailto:support@havn.ie" style="color:#000000;font-weight:800;text-decoration:none;">
+            support@havn.ie
+          </a>
+          if you need assistance.
+        </div>
+      `,
+      statusTone: "warning",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: payload.to,
+      subject: "Your HAVN Professional Account Has Been Suspended",
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAgentSuspendedEmail", err);
+    return null;
+  }
+}
+
+/**
+ * Sent to the administrator after a moderation action.
+ */
+export async function sendAdminAgentModerationConfirmationEmail(
+  payload: AgentApplicationEmailPayload & {
+    action: "APPROVED" | "REJECTED" | "SUSPENDED" | "ARCHIVED";
+    moderatedBy?: string | null;
+    moderatedAt?: Date | string | null;
+  }
+) {
+  try {
+    const displayName = agentDisplayName(payload);
+    const action = String(payload.action).toUpperCase();
+
+    const html = renderHavnEmail({
+      preheader: `${payload.companyName} agent application was ${action.toLowerCase()}.`,
+      heading: "Agent Moderation Confirmation",
+      introHtml: `
+        <p style="margin:0;">
+          A professional agent moderation action has been completed.
+        </p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:28px;padding:22px;border:1px solid ${HAVN_BORDER};border-radius:18px;background:#ffffff;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${emailDetailRow("Company", payload.companyName)}
+            ${emailDetailRow("Applicant", displayName || null)}
+            ${emailDetailRow("Email", payload.to)}
+            ${emailDetailRow("PSRA Licence", payload.psraLicenceNumber)}
+            ${emailDetailRow("Action", action, true)}
+            ${emailDetailRow(
+              "Moderated By",
+              payload.moderatedBy || null
+            )}
+            ${emailDetailRow(
+              "Moderated",
+              formatDateTime(payload.moderatedAt)
+            )}
+            ${emailDetailRow(
+              "Reason",
+              payload.reason || null
+            )}
+          </table>
+        </div>
+      `,
+      ctaLabel: "Open Admin",
+      ctaUrl:
+        safeHttpsUrl(payload.adminUrl) ||
+        "https://havn.ie/admin.html",
+      ctaStyle: "text",
+      statusTone:
+        action === "APPROVED" ? "success" : "warning",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: ADMIN_NOTIFY_EMAIL,
+      subject: `Agent ${action}: ${payload.companyName}`,
+      html,
+    });
+  } catch (err) {
+    logMailFailure(
+      "sendAdminAgentModerationConfirmationEmail",
+      err
+    );
+    return null;
+  }
+}
+
+
 function escapeHtml(input: string) {
   return String(input || "")
     .replace(/&/g, "&amp;")
