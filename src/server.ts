@@ -16,6 +16,7 @@ import eventsRouter from "./routes/events";
 import adminAnalyticsRouter from "./routes/adminAnalytics";
 import agentsRouter from "./routes/agents";
 import professionalAppRouter from "./routes/professionalApp";
+import appRouter from "./routes/app";
 
 const app = express();
 
@@ -163,6 +164,7 @@ app.use("/api/events", eventsLimiter, eventsRouter);
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/agents", authLimiter, agentsRouter);
 app.use("/api/professional-app",strictLimiter,professionalAppRouter);
+app.use("/api/app",strictLimiter,appRouter);
 
 app.use("/api/uploads", strictLimiter, uploadsRouter);
 app.use("/api/stripe", stripeLimiter, stripeRouter);
