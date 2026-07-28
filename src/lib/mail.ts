@@ -2316,3 +2316,127 @@ function escapeHtml(input: string) {
 function escapeAttr(input: string) {
   return escapeHtml(String(input || ""));
 }
+/**
+ * ----------------------------
+ * ACCOUNT DELETION EMAILS
+ * ----------------------------
+ */
+
+export async function sendAccountDeletionScheduledEmail(args: {
+  to: string;
+  name?: string | null;
+  deletionScheduledAt: Date;
+  manageUrl: string;
+}) {
+  try {
+    if (!isValidEmail(args.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const manageUrl = safeHttpsUrl(args.manageUrl);
+    if (!manageUrl) {
+      throw new Error("InvalidManageAccountUrl");
+    }
+
+    const deletionDate = new Date(args.deletionScheduledAt);
+
+    if (Number.isNaN(deletionDate.getTime())) {
+      throw new Error("InvalidDeletionDate");
+    }
+
+    const formattedDeletionDate = new Intl.DateTimeFormat("en-IE", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "Europe/Dublin",
+    }).format(deletionDate);
+
+    const displayName = String(args.name || "").trim();
+    const subject = "Your HAVN.ie account is scheduled for deletion";
+
+    const html = renderHavnEmail({
+      preheader:
+        "Your HAVN.ie account deletion request has been received.",
+      heading: "Account Deletion Scheduled",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0;">We received your request to delete your HAVN.ie account.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;color:${HAVN_MUTED};font-size:13px;line-height:1.7;">
+          <p style="margin:0 0 12px;">
+            Your account is scheduled for permanent deletion on
+            <strong style="color:${HAVN_NAVY};">${escapeHtml(formattedDeletionDate)}</strong>.
+          </p>
+          <p style="margin:0;">
+            Nothing further will happen during the 30-day recovery period.
+            You can cancel this request at any time before the deletion date
+            by signing in and opening your account settings.
+          </p>
+        </div>
+      `,
+      ctaLabel: "Manage My Account",
+      ctaUrl: manageUrl,
+      statusTone: "neutral",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: args.to,
+      subject,
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAccountDeletionScheduledEmail", err);
+    return null;
+  }
+}
+
+export async function sendAccountDeletionCancelledEmail(args: {
+  to: string;
+  name?: string | null;
+  accountUrl: string;
+}) {
+  try {
+    if (!isValidEmail(args.to)) {
+      throw new Error("InvalidRecipientEmail");
+    }
+
+    const accountUrl = safeHttpsUrl(args.accountUrl);
+    if (!accountUrl) {
+      throw new Error("InvalidAccountUrl");
+    }
+
+    const displayName = String(args.name || "").trim();
+    const subject =
+      "Your HAVN.ie account deletion has been cancelled";
+
+    const html = renderHavnEmail({
+      preheader:
+        "Your HAVN.ie account deletion request has been cancelled.",
+      heading: "Account Deletion Cancelled",
+      introHtml: `
+        <p style="margin:0 0 12px;">${displayName ? `Hi ${escapeHtml(displayName)},` : "Hi,"}</p>
+        <p style="margin:0;">Your account deletion request has been cancelled successfully.</p>
+      `,
+      bodyHtml: `
+        <div style="margin-top:24px;padding:20px;border:1px solid ${HAVN_BORDER};border-radius:16px;background:#F8FAFC;color:${HAVN_MUTED};font-size:13px;line-height:1.7;">
+          Your HAVN.ie account remains active and no further action is required.
+        </div>
+      `,
+      ctaLabel: "Open My Account",
+      ctaUrl: accountUrl,
+      statusTone: "success",
+    });
+
+    return await resend.emails.send({
+      from: FROM,
+      to: args.to,
+      subject,
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendAccountDeletionCancelledEmail", err);
+    return null;
+  }
+}

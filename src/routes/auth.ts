@@ -8,6 +8,8 @@ import {
   sendPasswordResetEmail,
   sendEmailVerificationEmail,
   sendEmailChangeVerificationEmail,
+  sendAccountDeletionScheduledEmail,
+  sendAccountDeletionCancelledEmail,
 } from "../lib/mail";
 import crypto from "crypto";
 
@@ -542,6 +544,8 @@ router.post(
         where: { id: userId },
         select: {
           id: true,
+          name: true,
+          email: true,
           password: true,
           deletionRequestedAt: true,
           deletionScheduledAt: true,
@@ -599,6 +603,18 @@ router.post(
         },
       });
 
+      void sendAccountDeletionScheduledEmail({
+        to: user.email,
+        name: user.name,
+        deletionScheduledAt,
+        manageUrl: `${APP_URL}/app/`,
+      }).catch((error) => {
+        console.error(
+          "Account deletion scheduled email failed",
+          error
+        );
+      });
+
       return res.json({
         ok: true,
         deletionRequestedAt,
@@ -644,6 +660,8 @@ router.post(
         where: { id: userId },
         select: {
           id: true,
+          name: true,
+          email: true,
           deletionRequestedAt: true,
           deletionScheduledAt: true,
           deletedAt: true,
@@ -685,6 +703,17 @@ router.post(
           deletionScheduledAt: null,
           deletionCancelledAt,
         },
+      });
+
+      void sendAccountDeletionCancelledEmail({
+        to: user.email,
+        name: user.name,
+        accountUrl: `${APP_URL}/app/`,
+      }).catch((error) => {
+        console.error(
+          "Account deletion cancelled email failed",
+          error
+        );
       });
 
       return res.json({
