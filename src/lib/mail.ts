@@ -328,11 +328,25 @@ function emailButton(label: string, url: string) {
   const href = safeHref(url);
 
   return `
-    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px auto 0;">
+    <table
+      role="presentation"
+      cellspacing="0"
+      cellpadding="0"
+      border="0"
+      align="center"
+      style="margin:26px auto 0;border-collapse:separate;"
+    >
       <tr>
-        <td bgcolor="${HAVN_BUTTON}" style="border-radius:10px;">
-          <a href="${escapeAttr(href)}"
-             style="display:inline-block;padding:14px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;border-radius:10px;">
+        <td
+          align="center"
+          valign="middle"
+          bgcolor="${HAVN_BUTTON}"
+          style="background:${HAVN_BUTTON};border-radius:10px;mso-padding-alt:14px 24px;"
+        >
+          <a
+            href="${escapeAttr(href)}"
+            style="display:block;padding:14px 24px;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;font-weight:800;white-space:nowrap;border-radius:10px;"
+          >
             ${escapeHtml(label)}
           </a>
         </td>
