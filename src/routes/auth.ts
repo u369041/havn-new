@@ -16,6 +16,7 @@ const router = Router();
 const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
 const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 128;
+const ACCOUNT_DELETION_GRACE_DAYS = 30;
 
 function passwordIsValid(password: string) {
   return (
@@ -173,7 +174,10 @@ router.post("/login", async (req, res) => {
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(401).json({ ok: false });
+    
+    if (!user || user.deletedAt) {
+    return res.status(401).json({ ok: false });
+    }
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ ok: false });
@@ -238,6 +242,470 @@ router.get("/me", requireAuth, async (req: any, res) => {
     return res.status(500).json({ ok: false });
   }
 });
+
+/**
+ * UPDATE PROFILE
+ *
+ * Allows an authenticated user to update their display name
+ * and communication preferences.
+ *
+ * Email and password changes remain handled by their existing
+ * dedicated security endpoints.
+ */
+router.patch("/profile", requireAuth, async (req: any, res) => {
+  try {
+    const userId = toPositiveSafeInt(req.user?.userId);
+
+    if (userId === null) {
+      return res.status(401).json({
+        ok: false,
+        message: "Invalid authentication session",
+      });
+    }
+
+    if (!validJsonObject(req.body)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Valid profile data required",
+      });
+    }
+
+    const allowedFields = [
+      "name",
+      "savedSearchEmailsEnabled",
+      "listingEmailsEnabled",
+      "productEmailsEnabled",
+    ];
+
+    const suppliedFields = Object.keys(req.body);
+
+    const unsupportedFields = suppliedFields.filter(
+      (field) => !allowedFields.includes(field)
+    );
+
+    if (unsupportedFields.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Unsupported profile field",
+      });
+    }
+
+    if (suppliedFields.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "No profile changes supplied",
+      });
+    }
+
+    const data: {
+      name?: string;
+      savedSearchEmailsEnabled?: boolean;
+      listingEmailsEnabled?: boolean;
+      productEmailsEnabled?: boolean;
+    } = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "name")) {
+      const name = String(req.body.name ?? "")
+        .trim()
+        .replace(/\s+/g, " ");
+
+      if (name.length < 2 || name.length > 200) {
+        return res.status(400).json({
+          ok: false,
+          message: "Name must be between 2 and 200 characters",
+        });
+      }
+
+      data.name = name;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        req.body,
+        "savedSearchEmailsEnabled"
+      )
+    ) {
+      if (typeof req.body.savedSearchEmailsEnabled !== "boolean") {
+        return res.status(400).json({
+          ok: false,
+          message:
+            "Saved search email preference must be true or false",
+        });
+      }
+
+      data.savedSearchEmailsEnabled =
+        req.body.savedSearchEmailsEnabled;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        req.body,
+        "listingEmailsEnabled"
+      )
+    ) {
+      if (typeof req.body.listingEmailsEnabled !== "boolean") {
+        return res.status(400).json({
+          ok: false,
+          message:
+            "Listing email preference must be true or false",
+        });
+      }
+
+      data.listingEmailsEnabled =
+        req.body.listingEmailsEnabled;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        req.body,
+        "productEmailsEnabled"
+      )
+    ) {
+      if (typeof req.body.productEmailsEnabled !== "boolean") {
+        return res.status(400).json({
+          ok: false,
+          message:
+            "Product email preference must be true or false",
+        });
+      }
+
+      data.productEmailsEnabled =
+        req.body.productEmailsEnabled;
+    }
+
+    const user = await prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        emailVerified: true,
+        savedSearchEmailsEnabled: true,
+        listingEmailsEnabled: true,
+        productEmailsEnabled: true,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      account: {
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        emailVerified: user.emailVerified,
+      },
+      preferences: {
+        savedSearchEmailsEnabled:
+          user.savedSearchEmailsEnabled,
+        listingEmailsEnabled:
+          user.listingEmailsEnabled,
+        productEmailsEnabled:
+          user.productEmailsEnabled,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "PATCH /api/auth/profile error",
+      error
+    );
+
+    return res.status(500).json({
+      ok: false,
+      message: "Could not update account profile",
+    });
+  }
+});
+
+/**
+ * ============================
+ * ACCOUNT DELETION
+ * ============================
+ */
+
+/**
+ * GET /api/auth/account-deletion-status
+ *
+ * Returns the authenticated user's current deletion status.
+ */
+router.get(
+  "/account-deletion-status",
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const userId = toPositiveSafeInt(req.user?.userId);
+
+      if (userId === null) {
+        return res.status(401).json({
+          ok: false,
+          message: "Invalid authentication session",
+        });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          deletionRequestedAt: true,
+          deletionScheduledAt: true,
+          deletionCancelledAt: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          ok: false,
+          message: "Account not found",
+        });
+      }
+
+      return res.json({
+        ok: true,
+        deletion: {
+          pending:
+            user.deletionRequestedAt !== null &&
+            user.deletionScheduledAt !== null &&
+            user.deletedAt === null,
+          deletionRequestedAt: user.deletionRequestedAt,
+          deletionScheduledAt: user.deletionScheduledAt,
+          deletionCancelledAt: user.deletionCancelledAt,
+          deletedAt: user.deletedAt,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "GET /api/auth/account-deletion-status error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not load account deletion status",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/auth/delete-account
+ *
+ * Requires:
+ * {
+ *   currentPassword: string,
+ *   confirmation: "DELETE"
+ * }
+ *
+ * Schedules the account for deletion after a 30-day grace period.
+ */
+router.post(
+  "/delete-account",
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const userId = toPositiveSafeInt(req.user?.userId);
+      const currentPassword = String(
+        req.body?.currentPassword || ""
+      );
+      const confirmation = String(
+        req.body?.confirmation || ""
+      ).trim();
+
+      if (userId === null) {
+        return res.status(401).json({
+          ok: false,
+          message: "Invalid authentication session",
+        });
+      }
+
+      if (confirmation !== "DELETE") {
+        return res.status(400).json({
+          ok: false,
+          message: "Type DELETE to confirm account deletion",
+        });
+      }
+
+      if (
+        !currentPassword ||
+        currentPassword.length > MAX_PASSWORD_LENGTH
+      ) {
+        return res.status(400).json({
+          ok: false,
+          message: "Your current password is required",
+        });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          password: true,
+          deletionRequestedAt: true,
+          deletionScheduledAt: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!user || user.deletedAt) {
+        return res.status(404).json({
+          ok: false,
+          message: "Account not found",
+        });
+      }
+
+      const passwordMatches = await bcrypt.compare(
+        currentPassword,
+        user.password
+      );
+
+      if (!passwordMatches) {
+        return res.status(401).json({
+          ok: false,
+          message: "Current password is incorrect",
+        });
+      }
+
+      if (
+        user.deletionRequestedAt &&
+        user.deletionScheduledAt
+      ) {
+        return res.json({
+          ok: true,
+          alreadyScheduled: true,
+          deletionScheduledAt: user.deletionScheduledAt,
+          message: "Your account is already scheduled for deletion",
+        });
+      }
+
+      const deletionRequestedAt = new Date();
+      const deletionScheduledAt = new Date(
+        deletionRequestedAt.getTime() +
+          ACCOUNT_DELETION_GRACE_DAYS *
+            24 *
+            60 *
+            60 *
+            1000
+      );
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          deletionRequestedAt,
+          deletionScheduledAt,
+          deletionCancelledAt: null,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        deletionRequestedAt,
+        deletionScheduledAt,
+        gracePeriodDays: ACCOUNT_DELETION_GRACE_DAYS,
+        message:
+          "Your account has been scheduled for deletion. You may restore it during the next 30 days.",
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/auth/delete-account error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not schedule account deletion",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/auth/cancel-account-deletion
+ *
+ * Cancels a pending deletion during the recovery period.
+ */
+router.post(
+  "/cancel-account-deletion",
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const userId = toPositiveSafeInt(req.user?.userId);
+
+      if (userId === null) {
+        return res.status(401).json({
+          ok: false,
+          message: "Invalid authentication session",
+        });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          deletionRequestedAt: true,
+          deletionScheduledAt: true,
+          deletedAt: true,
+        },
+      });
+
+      if (!user || user.deletedAt) {
+        return res.status(404).json({
+          ok: false,
+          message: "Account not found",
+        });
+      }
+
+      if (
+        !user.deletionRequestedAt ||
+        !user.deletionScheduledAt
+      ) {
+        return res.json({
+          ok: true,
+          alreadyCancelled: true,
+          message: "Your account is not scheduled for deletion",
+        });
+      }
+
+      if (user.deletionScheduledAt.getTime() <= Date.now()) {
+        return res.status(409).json({
+          ok: false,
+          message:
+            "The account recovery period has expired",
+        });
+      }
+
+      const deletionCancelledAt = new Date();
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          deletionRequestedAt: null,
+          deletionScheduledAt: null,
+          deletionCancelledAt,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        deletionCancelledAt,
+        message:
+          "Account deletion has been cancelled and your account remains active",
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/auth/cancel-account-deletion error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not restore the account",
+      });
+    }
+  }
+);
 
 /**
  * LAST SEARCH

@@ -75,7 +75,9 @@ const getAppSession: RequestHandler = async (
         email: true,
         role: true,
         emailVerified: true,
-
+	savedSearchEmailsEnabled: true,
+	listingEmailsEnabled: true,
+	productEmailsEnabled: true,
         agentProfile: {
           select: {
             id: true,
@@ -139,6 +141,15 @@ const getAppSession: RequestHandler = async (
         emailVerified: user.emailVerified,
         isSuperAdmin,
       },
+
+      preferences: {
+       savedSearchEmailsEnabled:
+       user.savedSearchEmailsEnabled,
+       listingEmailsEnabled:
+       user.listingEmailsEnabled,
+       productEmailsEnabled:
+       user.productEmailsEnabled,
+     },
 
       professional: {
         agentProfileId:

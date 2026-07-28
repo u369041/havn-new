@@ -8,30 +8,37 @@ datasource db {
 }
 
 model User {
-  id                   Int              @id @default(autoincrement())
-  name                 String?
-  email                String           @unique
-  password             String
-  role                 UserRole         @default(user)
-  createdAt            DateTime         @default(now())
-  emailVerified        Boolean          @default(false)
-  emailVerifyToken     String?          @unique
-  emailVerifyTokenExp  DateTime?
-  lastLoginAt          DateTime?
-  loginCount           Int              @default(0)
-  lastSearch           Json?
-  lastSearchAt         DateTime?
-  foundingOfferUsedAt  DateTime?
-  pendingEmail         String?          @unique
-  emailChangeTokenHash String?          @unique
-  emailChangeTokenExp  DateTime?
-  passwordChangedAt    DateTime?
-  approvals            Property[]       @relation("PropertyApprovedBy")
-  rejections           Property[]       @relation("PropertyRejectedBy")
-  properties           Property[]
-  savedSearches        SavedSearch[]
-  savedProperties      SavedProperty[]
-  analyticsEvents      AnalyticsEvent[]
+  id                       Int              @id @default(autoincrement())
+  name                     String?
+  email                    String           @unique
+  password                 String
+  role                     UserRole         @default(user)
+  createdAt                DateTime         @default(now())
+  emailVerified            Boolean          @default(false)
+  emailVerifyToken         String?          @unique
+  emailVerifyTokenExp      DateTime?
+  lastLoginAt              DateTime?
+  loginCount               Int              @default(0)
+  lastSearch               Json?
+  lastSearchAt             DateTime?
+  foundingOfferUsedAt      DateTime?
+  pendingEmail             String?          @unique
+  emailChangeTokenHash     String?          @unique
+  emailChangeTokenExp      DateTime?
+  passwordChangedAt        DateTime?
+  savedSearchEmailsEnabled Boolean          @default(true)
+  listingEmailsEnabled     Boolean          @default(true)
+  productEmailsEnabled     Boolean          @default(false)
+  deletionRequestedAt      DateTime?
+  deletionScheduledAt      DateTime?
+  deletionCancelledAt      DateTime?
+  deletedAt                DateTime?
+  approvals                Property[]       @relation("PropertyApprovedBy")
+  rejections               Property[]       @relation("PropertyRejectedBy")
+  properties               Property[]
+  savedSearches            SavedSearch[]
+  savedProperties          SavedProperty[]
+  analyticsEvents          AnalyticsEvent[]
 
   passwordResetTokens PasswordResetToken[]
 
