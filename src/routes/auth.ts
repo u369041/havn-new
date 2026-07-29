@@ -14,7 +14,11 @@ import {
 import crypto from "crypto";
 import type { Archiver } from "archiver";
 
-const createArchiver = require("archiver") as (
+const archiverModule = require("archiver");
+
+const createArchiver = (
+  archiverModule.default ?? archiverModule
+) as (
   format: "zip",
   options?: {
     zlib?: {
