@@ -1,6 +1,7 @@
 import { Router, RequestHandler } from "express";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
+import { getAnalyticsOverview } from "../services/analytics";
 
 const router = Router();
 
@@ -75,9 +76,9 @@ const getAppSession: RequestHandler = async (
         email: true,
         role: true,
         emailVerified: true,
-	savedSearchEmailsEnabled: true,
-	listingEmailsEnabled: true,
-	productEmailsEnabled: true,
+        savedSearchEmailsEnabled: true,
+        listingEmailsEnabled: true,
+        productEmailsEnabled: true,
         agentProfile: {
           select: {
             id: true,
@@ -143,13 +144,13 @@ const getAppSession: RequestHandler = async (
       },
 
       preferences: {
-       savedSearchEmailsEnabled:
-       user.savedSearchEmailsEnabled,
-       listingEmailsEnabled:
-       user.listingEmailsEnabled,
-       productEmailsEnabled:
-       user.productEmailsEnabled,
-     },
+        savedSearchEmailsEnabled:
+          user.savedSearchEmailsEnabled,
+        listingEmailsEnabled:
+          user.listingEmailsEnabled,
+        productEmailsEnabled:
+          user.productEmailsEnabled,
+      },
 
       professional: {
         agentProfileId:
@@ -192,6 +193,34 @@ router.get(
   "/session",
   requireAuth,
   getAppSession
+);
+
+router.get(
+  "/analytics/overview",
+  requireAuth,
+  async (req: any, res) => {
+    const userId = Number(req.user?.userId);
+
+    if (
+      !Number.isSafeInteger(userId) ||
+      userId <= 0
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "INVALID_AUTHENTICATION_SESSION",
+      });
+    }
+
+    const analytics =
+      await getAnalyticsOverview({
+        userId,
+      });
+
+    return res.json({
+      ok: true,
+      ...analytics,
+    });
+  }
 );
 
 export default router;
