@@ -1,6 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import requireAuth from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
 import {
@@ -17,6 +19,26 @@ const archiver: any = require("archiver");
 const router = Router();
 
 const APP_URL = (process.env.APP_URL || "https://havn.ie").replace(/\/+$/, "");
+
+const GOOGLE_CLIENT_ID =
+  String(process.env.GOOGLE_CLIENT_ID || "").trim();
+
+const GOOGLE_CLIENT_SECRET =
+  String(process.env.GOOGLE_CLIENT_SECRET || "").trim();
+
+const GOOGLE_CALLBACK_URL =
+  String(
+    process.env.GOOGLE_CALLBACK_URL ||
+      "https://api.havn.ie/api/auth/google/callback"
+  ).trim();
+
+const GOOGLE_OAUTH_ENABLED =
+  Boolean(
+    GOOGLE_CLIENT_ID &&
+      GOOGLE_CLIENT_SECRET &&
+      GOOGLE_CALLBACK_URL
+  );
+
 const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 128;
 const ACCOUNT_DELETION_GRACE_DAYS = 30;
@@ -84,6 +106,311 @@ function signAuthToken(user: { id: number; role: any; email: string }) {
 function validJsonObject(value: any) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
+
+function makeOAuthFrontendRedirect(
+  values: Record<string, string>
+) {
+  const fragment = new URLSearchParams(values).toString();
+
+  return `${APP_URL}/oauth-callback.html#${fragment}`;
+}
+
+
+/*
+ * GOOGLE PASSPORT STRATEGY
+ */
+if (GOOGLE_OAUTH_ENABLED) {
+  passport.use(
+    "google",
+    new GoogleStrategy(
+      {
+        clientID: GOOGLE_CLIENT_ID,
+        clientSecret: GOOGLE_CLIENT_SECRET,
+        callbackURL: GOOGLE_CALLBACK_URL,
+      },
+      async (
+        _accessToken,
+        _refreshToken,
+        profile,
+        done
+      ) => {
+        try {
+          const googleId = String(profile.id || "").trim();
+
+          const googleEmail = String(
+            profile.emails?.[0]?.value || ""
+          )
+            .trim()
+            .toLowerCase();
+
+          const googleEmailVerified =
+            (profile as any)?._json?.email_verified !== false;
+
+          const displayName =
+            String(profile.displayName || "")
+              .trim()
+              .replace(/\s+/g, " ") ||
+            [
+              profile.name?.givenName,
+              profile.name?.familyName,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .trim() ||
+            null;
+
+          if (
+            !googleId ||
+            !emailIsValid(googleEmail) ||
+            !googleEmailVerified
+          ) {
+            return done(null, false, {
+              message:
+                "Google did not provide a verified email address",
+            });
+          }
+
+          const linkedUser = await prisma.user.findUnique({
+            where: {
+              googleId,
+            },
+          });
+
+          if (linkedUser) {
+            if (linkedUser.deletedAt) {
+              return done(null, false, {
+                message: "This HAVN account is unavailable",
+              });
+            }
+
+            const user = await prisma.user.update({
+              where: {
+                id: linkedUser.id,
+              },
+              data: {
+                googleEmail,
+                googleLinkedAt:
+                  linkedUser.googleLinkedAt || new Date(),
+                lastAuthProvider: "google",
+                emailVerified:
+                  linkedUser.email === googleEmail
+                    ? true
+                    : linkedUser.emailVerified,
+              },
+            });
+
+            return done(null, user);
+          }
+
+          const emailUser = await prisma.user.findUnique({
+            where: {
+              email: googleEmail,
+            },
+          });
+
+          if (emailUser) {
+            if (emailUser.deletedAt) {
+              return done(null, false, {
+                message: "This HAVN account is unavailable",
+              });
+            }
+
+            if (
+              emailUser.googleId &&
+              emailUser.googleId !== googleId
+            ) {
+              return done(null, false, {
+                message:
+                  "A different Google account is already connected",
+              });
+            }
+
+            const user = await prisma.user.update({
+              where: {
+                id: emailUser.id,
+              },
+              data: {
+                googleId,
+                googleEmail,
+                googleLinkedAt:
+                  emailUser.googleLinkedAt || new Date(),
+                lastAuthProvider: "google",
+                emailVerified: true,
+              },
+            });
+
+            return done(null, user);
+          }
+
+          const user = await prisma.user.create({
+            data: {
+              email: googleEmail,
+              password: null,
+              name: displayName,
+              emailVerified: true,
+              googleId,
+              googleEmail,
+              googleLinkedAt: new Date(),
+              lastAuthProvider: "google",
+            },
+          });
+
+          void sendWelcomeEmail({
+            to: user.email,
+            name: user.name || null,
+          }).catch((error) => {
+            console.error(
+              "Google signup welcome email failed",
+              error
+            );
+          });
+
+          return done(null, user);
+        } catch (error) {
+          console.error(
+            "Google OAuth strategy error",
+            error
+          );
+
+          return done(error as Error);
+        }
+      }
+    )
+  );
+} else {
+  console.warn(
+    "Google OAuth disabled: required environment variables are missing"
+  );
+}
+
+/**
+ * ============================
+ * GOOGLE AUTHENTICATION
+ * ============================
+ */
+
+/**
+ * GET /api/auth/google
+ *
+ * Starts the Google OAuth authentication flow.
+ */
+router.get("/google", (req, res, next) => {
+  if (!GOOGLE_OAUTH_ENABLED) {
+    return res.redirect(
+      makeOAuthFrontendRedirect({
+        error: "google_unavailable",
+      })
+    );
+  }
+
+  return passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+    prompt: "select_account",
+  })(req, res, next);
+});
+
+/**
+ * GET /api/auth/google/callback
+ *
+ * Google returns the user to this endpoint after authentication.
+ * HAVN then issues its normal JWT and redirects to the frontend.
+ */
+router.get(
+  "/google/callback",
+  (req, res, next) => {
+    if (!GOOGLE_OAUTH_ENABLED) {
+      return res.redirect(
+        makeOAuthFrontendRedirect({
+          error: "google_unavailable",
+        })
+      );
+    }
+
+    return passport.authenticate(
+      "google",
+      {
+        session: false,
+      },
+      async (
+        error: any,
+        user: any,
+        info: any
+      ) => {
+        try {
+          if (error) {
+            console.error(
+              "Google OAuth callback error",
+              error
+            );
+
+            return res.redirect(
+              makeOAuthFrontendRedirect({
+                error: "google_authentication_failed",
+              })
+            );
+          }
+
+          if (!user || user.deletedAt) {
+            console.warn(
+              "Google OAuth rejected",
+              info?.message || "No authenticated user"
+            );
+
+            return res.redirect(
+              makeOAuthFrontendRedirect({
+                error: "google_authentication_rejected",
+              })
+            );
+          }
+
+          const authenticatedUser =
+            await prisma.user.update({
+              where: {
+                id: user.id,
+              },
+              data: {
+                lastLoginAt: new Date(),
+                loginCount: {
+                  increment: 1,
+                },
+                lastAuthProvider: "google",
+              },
+              select: {
+                id: true,
+                role: true,
+                email: true,
+              },
+            });
+
+          const token =
+            signAuthToken(authenticatedUser);
+
+          return res.redirect(
+            makeOAuthFrontendRedirect({
+              provider: "google",
+              token,
+            })
+          );
+        } catch (callbackError) {
+          console.error(
+            "Google OAuth completion error",
+            callbackError
+          );
+
+          return res.redirect(
+            makeOAuthFrontendRedirect({
+              error: "google_login_failed",
+            })
+          );
+        }
+      }
+    )(req, res, next);
+  }
+);
+
+
+
 
 /**
  * REGISTER
@@ -182,8 +509,22 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ ok: false });
     }
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ ok: false });
+  if (!user.password) {
+    return res.status(401).json({
+      ok: false,
+      message:
+        "This account uses an external sign-in provider",
+    });
+  }
+
+  const match = await bcrypt.compare(
+    password,
+    user.password
+  );
+
+  if (!match) {
+    return res.status(401).json({ ok: false });
+  }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -930,6 +1271,14 @@ router.post(
         });
       }
 
+      if (!user.password) {
+        return res.status(400).json({
+          ok: false,
+          message:
+            "This account does not currently have a password",
+        });
+      }
+
       const passwordMatches = await bcrypt.compare(
         currentPassword,
         user.password
@@ -1485,7 +1834,11 @@ router.post("/change-password", requireAuth, async (req: any, res) => {
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
+    if (
+      !user ||
+      !user.password ||
+      !(await bcrypt.compare(currentPassword, user.password))
+    ) {
       return res.status(401).json({ ok: false, message: "Current password is incorrect" });
     }
 
@@ -1521,7 +1874,11 @@ router.post("/change-email", requireAuth, async (req: any, res) => {
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
+    if (
+      !user ||
+      !user.password ||
+      !(await bcrypt.compare(currentPassword, user.password))
+    ) {
       return res.status(401).json({ ok: false, message: "Current password is incorrect" });
     }
 

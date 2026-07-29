@@ -2,6 +2,7 @@
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import passport from "passport";
 
 import authRouter from "./routes/auth";
 import propertiesRouter from "./routes/properties";
@@ -142,6 +143,17 @@ const corsOptions = {
 
 app.options("*", cors(corsOptions));
 app.use(cors(corsOptions));
+
+/*
+ * Passport is used only for external OAuth handshakes.
+ * HAVN continues to use its existing JWT authentication after
+ * Google or Apple has verified the user's identity.
+ *
+ * No Passport session middleware is used.
+ */
+app.use(passport.initialize());
+
+/* health */
 
 /* health */
 app.get("/api/health", (_req, res) => {

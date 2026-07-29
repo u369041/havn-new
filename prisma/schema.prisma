@@ -11,7 +11,14 @@ model User {
   id                       Int              @id @default(autoincrement())
   name                     String?
   email                    String           @unique
-  password                 String
+  password                 String?
+  googleId                 String?          @unique
+  googleEmail              String?
+  googleLinkedAt           DateTime?
+  appleId                  String?          @unique
+  appleEmail               String?
+  appleLinkedAt            DateTime?
+  lastAuthProvider         String?
   role                     UserRole         @default(user)
   createdAt                DateTime         @default(now())
   emailVerified            Boolean          @default(false)
