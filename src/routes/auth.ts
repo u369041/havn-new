@@ -12,7 +12,16 @@ import {
   sendAccountDeletionCancelledEmail,
 } from "../lib/mail";
 import crypto from "crypto";
-import archiver from "archiver";
+import type { Archiver } from "archiver";
+
+const createArchiver = require("archiver") as (
+  format: "zip",
+  options?: {
+    zlib?: {
+      level?: number;
+    };
+  }
+) => Archiver;
 
 const router = Router();
 
@@ -702,7 +711,9 @@ router.get("/export", requireAuth, async (req: any, res) => {
     res.setHeader("Cache-Control", "no-store, private");
     res.setHeader("X-Content-Type-Options", "nosniff");
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = createArchiver("zip", {
+    zlib: { level: 9 },
+    });
 
     archive.on("warning", (error: any) => {
       if (error?.code !== "ENOENT") {
