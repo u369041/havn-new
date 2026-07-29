@@ -14,17 +14,18 @@
     "geography:fetch:cso": "tsx src/geography/importers/fetchCsoBuiltUpAreas.ts",
     "geography:normalise:cso": "tsx src/geography/importers/normaliseCsoBuiltUpAreas.ts",
     "geography:verify:cso": "tsx src/geography/reports/verifyCsoBuiltUpAreas.ts",
-     "geography:import:cso:dry": "tsx src/geography/importers/importNormalisedLocations.ts",
-     "geography:import:cso": "tsx src/geography/importers/importNormalisedLocations.ts --write",
-     "geography:verify:db": "tsx src/geography/reports/verifyImportedLocations.ts",
-     "geography:match:properties:dry": "tsx src/geography/matchers/matchPropertyLocations.ts",
-     "geography:match:properties": "tsx src/geography/matchers/matchPropertyLocations.ts --write",
-     "geography:premium:dry": "tsx src/geography/importers/importPremiumLocations.ts",
-     "geography:premium": "tsx src/geography/importers/importPremiumLocations.ts --write"
+    "geography:import:cso:dry": "tsx src/geography/importers/importNormalisedLocations.ts",
+    "geography:import:cso": "tsx src/geography/importers/importNormalisedLocations.ts --write",
+    "geography:verify:db": "tsx src/geography/reports/verifyImportedLocations.ts",
+    "geography:match:properties:dry": "tsx src/geography/matchers/matchPropertyLocations.ts",
+    "geography:match:properties": "tsx src/geography/matchers/matchPropertyLocations.ts --write",
+    "geography:premium:dry": "tsx src/geography/importers/importPremiumLocations.ts",
+    "geography:premium": "tsx src/geography/importers/importPremiumLocations.ts --write"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
     "adm-zip": "^0.5.17",
+    "archiver": "^8.0.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^8.0.0",
     "@types/bcrypt": "^5.0.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",

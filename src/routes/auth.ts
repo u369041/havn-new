@@ -12,6 +12,7 @@ import {
   sendAccountDeletionCancelledEmail,
 } from "../lib/mail";
 import crypto from "crypto";
+import archiver from "archiver";
 
 const router = Router();
 
@@ -420,6 +421,373 @@ router.patch("/profile", requireAuth, async (req: any, res) => {
       ok: false,
       message: "Could not update account profile",
     });
+  }
+});
+
+
+/**
+ * GET /api/auth/export
+ *
+ * Streams a ZIP archive containing the authenticated user's HAVN account data.
+ * Authentication secrets, reset tokens, verification tokens, payment identifiers,
+ * internal moderation notes and other security-sensitive fields are deliberately excluded.
+ */
+router.get("/export", requireAuth, async (req: any, res) => {
+  try {
+    const userId = toPositiveSafeInt(req.user?.userId);
+
+    if (userId === null) {
+      return res.status(401).json({
+        ok: false,
+        message: "Invalid authentication session",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        emailVerified: true,
+        lastLoginAt: true,
+        loginCount: true,
+        lastSearch: true,
+        lastSearchAt: true,
+        foundingOfferUsedAt: true,
+        savedSearchEmailsEnabled: true,
+        listingEmailsEnabled: true,
+        productEmailsEnabled: true,
+        deletionRequestedAt: true,
+        deletionScheduledAt: true,
+        deletionCancelledAt: true,
+        agentProfile: {
+          select: {
+            firstName: true,
+            lastName: true,
+            companyName: true,
+            addressLine1: true,
+            addressLine2: true,
+            townCity: true,
+            county: true,
+            eircode: true,
+            phoneNumber: true,
+            psraLicenceNumber: true,
+            status: true,
+            declarationAcceptedAt: true,
+            psraVerified: true,
+            submittedAt: true,
+            approvedAt: true,
+            rejectedAt: true,
+            rejectedReason: true,
+            suspendedAt: true,
+            suspensionReason: true,
+            archivedAt: true,
+            createdAt: true,
+            updatedAt: true,
+            subscriptionStatus: true,
+            subscriptionStartedAt: true,
+            subscriptionCurrentPeriodEnd: true,
+            subscriptionCancelledAt: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        ok: false,
+        message: "Account not found",
+      });
+    }
+
+    const [listings, savedSearches, savedProperties, enquiries, analyticsEvents] =
+      await Promise.all([
+        prisma.property.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            address1: true,
+            address2: true,
+            city: true,
+            county: true,
+            eircode: true,
+            price: true,
+            ber: true,
+            berNo: true,
+            bedrooms: true,
+            bathrooms: true,
+            propertyType: true,
+            saleType: true,
+            marketStatus: true,
+            mode: true,
+            features: true,
+            description: true,
+            photos: true,
+            lat: true,
+            lng: true,
+            listingStatus: true,
+            createdAt: true,
+            updatedAt: true,
+            submittedAt: true,
+            publishedAt: true,
+            archivedAt: true,
+            rejectedAt: true,
+            rejectedReason: true,
+            availableFrom: true,
+            berRating: true,
+            deposit: true,
+            furnished: true,
+            outdoorSpace: true,
+            parking: true,
+            rentFrequency: true,
+            size: true,
+            sizeUnit: true,
+            featuredUntil: true,
+            isFeatured: true,
+            views: true,
+            billsIncluded: true,
+            couplesAllowed: true,
+            currentOccupants: true,
+            ensuite: true,
+            heatingType: true,
+            leaseLength: true,
+            minimumTerm: true,
+            petsAllowed: true,
+            roomType: true,
+            saleCondition: true,
+            viewingDetails: true,
+            yearBuilt: true,
+            previousPrice: true,
+            priceDroppedAt: true,
+            ownerOccupied: true,
+            listingPackage: true,
+            paymentStatus: true,
+            amountPaidCents: true,
+            paidAt: true,
+            listingExpiresAt: true,
+          },
+        }),
+        prisma.savedSearch.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            filters: true,
+            createdAt: true,
+            updatedAt: true,
+            alertFrequency: true,
+            alertsEnabled: true,
+            lastDigestAt: true,
+          },
+        }),
+        prisma.savedProperty.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            propertyId: true,
+            createdAt: true,
+            property: {
+              select: {
+                slug: true,
+                title: true,
+                address1: true,
+                address2: true,
+                city: true,
+                county: true,
+                eircode: true,
+                price: true,
+                mode: true,
+                propertyType: true,
+                listingStatus: true,
+              },
+            },
+          },
+        }),
+        prisma.enquiry.findMany({
+          where: { property: { userId } },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            propertyId: true,
+            buyerName: true,
+            buyerEmail: true,
+            buyerPhone: true,
+            message: true,
+            intent: true,
+            sourceUrl: true,
+            createdAt: true,
+            status: true,
+            statusUpdatedAt: true,
+            property: {
+              select: {
+                slug: true,
+                title: true,
+                address1: true,
+                address2: true,
+                city: true,
+                county: true,
+                eircode: true,
+              },
+            },
+          },
+        }),
+        prisma.analyticsEvent.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          take: 10000,
+          select: {
+            id: true,
+            eventType: true,
+            path: true,
+            referrer: true,
+            payload: true,
+            propertyId: true,
+            locationId: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+    const generatedAt = new Date();
+    const dateStamp = generatedAt.toISOString().slice(0, 10);
+    const archiveName = `HAVN-Account-Export-${dateStamp}.zip`;
+    const json = (value: unknown) =>
+      JSON.stringify(
+        value,
+        (_key, item) =>
+          typeof item === "bigint" ? item.toString() : item,
+        2
+      );
+
+    const manifest = {
+      product: "HAVN.ie",
+      exportVersion: 1,
+      generatedAt: generatedAt.toISOString(),
+      accountId: user.id,
+      files: [
+        "README.txt",
+        "manifest.json",
+        "account.json",
+        "preferences.json",
+        "agent-profile.json",
+        "listings.json",
+        "saved-searches.json",
+        "saved-properties.json",
+        "enquiries.json",
+        "activity.json",
+      ],
+      exclusions: [
+        "Passwords and password hashes",
+        "JWTs and authentication sessions",
+        "Email verification and password-reset tokens",
+        "Stripe customer, subscription, checkout and payment-intent identifiers",
+        "Internal moderation and enquiry notes",
+      ],
+    };
+
+    res.status(200);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${archiveName}"`
+    );
+    res.setHeader("Cache-Control", "no-store, private");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    archive.on("warning", (error: any) => {
+      if (error?.code !== "ENOENT") {
+        console.error("Account export archive warning", error);
+      }
+    });
+
+    archive.on("error", (error: Error) => {
+      console.error("Account export archive error", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          ok: false,
+          message: "Could not generate account export",
+        });
+      } else {
+        res.destroy(error);
+      }
+    });
+
+    archive.pipe(res);
+
+    archive.append(
+      [
+        "HAVN.ie Account Data Export",
+        "===========================",
+        "",
+        `Generated: ${generatedAt.toISOString()}`,
+        `Account ID: ${user.id}`,
+        "",
+        "This archive contains the personal and account information associated with your HAVN account.",
+        "Security credentials, authentication tokens, payment-provider identifiers and internal notes are not included.",
+        "",
+        "Open manifest.json for an index of the included files.",
+        "",
+      ].join("\n"),
+      { name: "README.txt" }
+    );
+
+    archive.append(json(manifest), { name: "manifest.json" });
+    archive.append(
+      json({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt,
+        emailVerified: user.emailVerified,
+        lastLoginAt: user.lastLoginAt,
+        loginCount: user.loginCount,
+        lastSearch: user.lastSearch,
+        lastSearchAt: user.lastSearchAt,
+        foundingOfferUsedAt: user.foundingOfferUsedAt,
+        deletionRequestedAt: user.deletionRequestedAt,
+        deletionScheduledAt: user.deletionScheduledAt,
+        deletionCancelledAt: user.deletionCancelledAt,
+      }),
+      { name: "account.json" }
+    );
+    archive.append(
+      json({
+        savedSearchEmailsEnabled: user.savedSearchEmailsEnabled,
+        listingEmailsEnabled: user.listingEmailsEnabled,
+        productEmailsEnabled: user.productEmailsEnabled,
+      }),
+      { name: "preferences.json" }
+    );
+    archive.append(json(user.agentProfile), { name: "agent-profile.json" });
+    archive.append(json(listings), { name: "listings.json" });
+    archive.append(json(savedSearches), { name: "saved-searches.json" });
+    archive.append(json(savedProperties), { name: "saved-properties.json" });
+    archive.append(json(enquiries), { name: "enquiries.json" });
+    archive.append(json(analyticsEvents), { name: "activity.json" });
+
+    await archive.finalize();
+  } catch (error) {
+    console.error("GET /api/auth/export error", error);
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        ok: false,
+        message: "Could not generate account export",
+      });
+    }
+
+    return res.end();
   }
 });
 
