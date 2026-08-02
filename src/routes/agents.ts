@@ -1,14 +1,19 @@
+
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import Stripe from "stripe";
 import requireAuth from "../middleware/requireAuth";
+import requireAdminAuth from "../middleware/adminAuth";
 import { prisma } from "../lib/prisma";
 import {
   sendAgentApplicationReceivedEmail,
   sendAdminAgentApplicationNotificationEmail,
   sendEmailVerificationEmail,
+  sendAgentApprovedEmail,
+  sendAgentRejectedEmail,
+  sendAdminAgentModerationConfirmationEmail,
 } from "../lib/mail";
 
 const router = Router();
@@ -26,7 +31,17 @@ const STRIPE_AGENT_MONTHLY_PRICE_ID = String(
   process.env.STRIPE_AGENT_MONTHLY_PRICE_ID || ""
 ).trim();
 
-const stripe = new Stripe(STRIPE_SECRET_KEY);
+const stripe = STRIPE_SECRET_KEY
+  ? new Stripe(STRIPE_SECRET_KEY)
+  : null;
+
+function getStripeClient() {
+  if (!stripe) {
+    throw new Error("STRIPE_SECRET_KEY is missing");
+  }
+
+  return stripe;
+}
 
 const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 128;
@@ -631,6 +646,435 @@ router.get("/me", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * GET /api/agents/admin/applications
+ *
+ * Lists professional agent applications for the admin control centre.
+ * Optional query parameter: ?status=PENDING_APPROVAL|APPROVED|REJECTED|SUSPENDED|ARCHIVED
+ */
+router.get(
+  "/admin/applications",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const requestedStatus = String(req.query?.status || "")
+        .trim()
+        .toUpperCase();
+
+      const allowedStatuses = new Set([
+        "PENDING_APPROVAL",
+        "APPROVED",
+        "REJECTED",
+        "SUSPENDED",
+        "ARCHIVED",
+      ]);
+
+      if (requestedStatus && !allowedStatuses.has(requestedStatus)) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid agent application status",
+        });
+      }
+
+      const applications = await prisma.agentProfile.findMany({
+        where: requestedStatus
+          ? { status: requestedStatus as any }
+          : undefined,
+        orderBy: [
+          { status: "asc" },
+          { submittedAt: "desc" },
+        ],
+        select: {
+          id: true,
+          userId: true,
+          firstName: true,
+          lastName: true,
+          companyName: true,
+          addressLine1: true,
+          addressLine2: true,
+          townCity: true,
+          county: true,
+          eircode: true,
+          phoneNumber: true,
+          psraLicenceNumber: true,
+          status: true,
+          declarationAcceptedAt: true,
+          psraVerified: true,
+          submittedAt: true,
+          approvedAt: true,
+          rejectedAt: true,
+          rejectedReason: true,
+          suspendedAt: true,
+          suspensionReason: true,
+          archivedAt: true,
+          internalNote: true,
+          subscriptionStatus: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+              emailVerified: true,
+              createdAt: true,
+              lastLoginAt: true,
+            },
+          },
+          approvedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          rejectedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          suspendedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      const counts = await prisma.agentProfile.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      });
+
+      return res.json({
+        ok: true,
+        applications,
+        counts: counts.reduce<Record<string, number>>((acc, row) => {
+          acc[String(row.status)] = row._count._all;
+          return acc;
+        }, {}),
+      });
+    } catch (error) {
+      console.error("GET /api/agents/admin/applications error", error);
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not load professional agent applications",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/agents/admin/applications/:id/approve
+ *
+ * Approves a pending application, verifies the PSRA record and grants
+ * the associated user the professional agent role in one transaction.
+ */
+router.post(
+  "/admin/applications/:id/approve",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const applicationId = toPositiveSafeInt(req.params?.id);
+      const adminUserId = toPositiveSafeInt(req.user?.userId);
+      const internalNote = optionalText(req.body?.internalNote, 2000);
+
+      if (applicationId === null || adminUserId === null) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid application or administrator account",
+        });
+      }
+
+      const existing = await prisma.agentProfile.findUnique({
+        where: { id: applicationId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: "Agent application not found",
+        });
+      }
+
+      if (existing.status !== "PENDING_APPROVAL") {
+        return res.status(409).json({
+          ok: false,
+          message: "Only pending agent applications can be approved",
+        });
+      }
+
+      const moderatedAt = new Date();
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const application = await tx.agentProfile.update({
+          where: { id: applicationId },
+          data: {
+            status: "APPROVED",
+            psraVerified: true,
+            approvedAt: moderatedAt,
+            approvedById: adminUserId,
+            rejectedAt: null,
+            rejectedById: null,
+            rejectedReason: null,
+            suspendedAt: null,
+            suspendedById: null,
+            suspensionReason: null,
+            archivedAt: null,
+            internalNote,
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                emailVerified: true,
+              },
+            },
+          },
+        });
+
+        await tx.user.update({
+          where: { id: existing.userId },
+          data: { role: "agent" },
+        });
+
+        return application;
+      });
+
+      const adminUser = await prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { name: true, email: true },
+      });
+
+      const mailPayload = {
+        to: existing.user.email,
+        firstName: existing.firstName,
+        lastName: existing.lastName,
+        companyName: existing.companyName,
+        psraLicenceNumber: existing.psraLicenceNumber,
+        phoneNumber: existing.phoneNumber,
+        addressLine1: existing.addressLine1,
+        addressLine2: existing.addressLine2,
+        townCity: existing.townCity,
+        county: existing.county,
+        eircode: existing.eircode,
+        submittedAt: existing.submittedAt,
+        adminUrl: `${APP_URL}/admin.html`,
+        agentHubUrl: `${APP_URL}/app/#/agent`,
+      };
+
+      void Promise.allSettled([
+        sendAgentApprovedEmail(mailPayload),
+        sendAdminAgentModerationConfirmationEmail({
+          ...mailPayload,
+          action: "APPROVED",
+          moderatedBy: adminUser?.name || adminUser?.email || null,
+          moderatedAt,
+        }),
+      ]);
+
+      return res.json({
+        ok: true,
+        application: {
+          ...updated,
+          user: {
+            ...updated.user,
+            role: "agent",
+          },
+        },
+        message: "Agent application approved successfully",
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/agents/admin/applications/:id/approve error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not approve the agent application",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/agents/admin/applications/:id/reject
+ *
+ * Rejects a pending application. A clear reason is mandatory and the
+ * associated user remains a standard user.
+ */
+router.post(
+  "/admin/applications/:id/reject",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const applicationId = toPositiveSafeInt(req.params?.id);
+      const adminUserId = toPositiveSafeInt(req.user?.userId);
+      const reason = requiredText(req.body?.reason, 2000);
+      const internalNote = optionalText(req.body?.internalNote, 2000);
+
+      if (applicationId === null || adminUserId === null) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid application or administrator account",
+        });
+      }
+
+      if (!reason) {
+        return res.status(400).json({
+          ok: false,
+          message: "A rejection reason is required",
+        });
+      }
+
+      const existing = await prisma.agentProfile.findUnique({
+        where: { id: applicationId },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: "Agent application not found",
+        });
+      }
+
+      if (existing.status !== "PENDING_APPROVAL") {
+        return res.status(409).json({
+          ok: false,
+          message: "Only pending agent applications can be rejected",
+        });
+      }
+
+      const moderatedAt = new Date();
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const application = await tx.agentProfile.update({
+          where: { id: applicationId },
+          data: {
+            status: "REJECTED",
+            psraVerified: false,
+            rejectedAt: moderatedAt,
+            rejectedById: adminUserId,
+            rejectedReason: reason,
+            approvedAt: null,
+            approvedById: null,
+            suspendedAt: null,
+            suspendedById: null,
+            suspensionReason: null,
+            archivedAt: null,
+            internalNote,
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                emailVerified: true,
+              },
+            },
+          },
+        });
+
+        await tx.user.update({
+          where: { id: existing.userId },
+          data: { role: "user" },
+        });
+
+        return application;
+      });
+
+      const adminUser = await prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { name: true, email: true },
+      });
+
+      const mailPayload = {
+        to: existing.user.email,
+        firstName: existing.firstName,
+        lastName: existing.lastName,
+        companyName: existing.companyName,
+        psraLicenceNumber: existing.psraLicenceNumber,
+        phoneNumber: existing.phoneNumber,
+        addressLine1: existing.addressLine1,
+        addressLine2: existing.addressLine2,
+        townCity: existing.townCity,
+        county: existing.county,
+        eircode: existing.eircode,
+        submittedAt: existing.submittedAt,
+        reason,
+        adminUrl: `${APP_URL}/admin.html`,
+      };
+
+      void Promise.allSettled([
+        sendAgentRejectedEmail(mailPayload),
+        sendAdminAgentModerationConfirmationEmail({
+          ...mailPayload,
+          action: "REJECTED",
+          moderatedBy: adminUser?.name || adminUser?.email || null,
+          moderatedAt,
+        }),
+      ]);
+
+      return res.json({
+        ok: true,
+        application: {
+          ...updated,
+          user: {
+            ...updated.user,
+            role: "user",
+          },
+        },
+        message: "Agent application rejected",
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/agents/admin/applications/:id/reject error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not reject the agent application",
+      });
+    }
+  }
+);
+
+/**
  * POST /api/agents/subscription/checkout
  *
  * Creates a Stripe Checkout Session for the approved agent's
@@ -800,7 +1244,7 @@ router.post(
       }
 
       const session =
-        await stripe.checkout.sessions.create(
+        await getStripeClient().checkout.sessions.create(
           checkoutParameters
         );
 
@@ -916,7 +1360,7 @@ router.post(
       }
 
       const portalSession =
-        await stripe.billingPortal.sessions.create({
+        await getStripeClient().billingPortal.sessions.create({
           customer:
             agentProfile.stripeCustomerId,
           return_url:
