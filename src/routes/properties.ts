@@ -3309,71 +3309,211 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
   }
 });
 
-router.post("/:id/submit", requireAuth, requireVerifiedEmail, async (req: any, res) => {
+router.post("/:id/submit", requireAuth, requireVerifiedEmail, express.json(), async (req: any, res) => {
   try {
     const id = toPositiveSafeInt(req.params.id);
+    const userId = toPositiveSafeInt(req.user?.userId);
 
-    if (id === null) {
+    if (id === null || userId === null) {
       return res.status(400).json({
         ok: false,
-        message: "Invalid property id",
+        message: "Invalid property or authentication session",
       });
     }
 
-    const user = req.user;
-    const existing = await prisma.property.findUnique({ where: { id } });
+    const payload = normalizePayload(req.body);
+    const requestedPackage = safeText(payload.package)
+      .trim()
+      .toUpperCase();
 
-    if (!existing) return res.status(404).json({ ok: false, message: "Not found" });
-    if (!isOwner(user, existing.userId)) return res.status(403).json({ ok: false, message: "Forbidden" });
+    if (
+      requestedPackage !== "STANDARD" &&
+      requestedPackage !== "FEATURED"
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_LISTING_PACKAGE",
+        message: "Package must be STANDARD or FEATURED",
+      });
+    }
+
+    const [account, existing] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          emailVerified: true,
+          agentProfile: {
+            select: {
+              id: true,
+              status: true,
+              subscriptionStatus: true,
+            },
+          },
+        },
+      }),
+      prisma.property.findUnique({
+        where: { id },
+      }),
+    ]);
+
+    if (!account) {
+      return res.status(401).json({
+        ok: false,
+        message: "Account not found",
+      });
+    }
+
+    if (!existing) {
+      return res.status(404).json({
+        ok: false,
+        message: "Property not found",
+      });
+    }
+
+    if (!isOwner(req.user, existing.userId)) {
+      return res.status(403).json({
+        ok: false,
+        message: "Forbidden",
+      });
+    }
 
     if (existing.listingStatus !== "DRAFT") {
-      return res.status(409).json({ ok: false, message: "Only drafts can be submitted." });
+      return res.status(409).json({
+        ok: false,
+        message: "Only drafts can be submitted.",
+      });
     }
+
+    const isEligibleProfessionalAgent =
+      account.role === "agent" &&
+      account.emailVerified === true &&
+      account.agentProfile?.status === "APPROVED" &&
+      account.agentProfile?.subscriptionStatus === "ACTIVE";
+
+    if (!isEligibleProfessionalAgent) {
+      return res.status(403).json({
+        ok: false,
+        error: "PROFESSIONAL_MEMBERSHIP_REQUIRED",
+        message:
+          "An active HAVN Professional membership is required to submit a listing without per-listing payment.",
+      });
+    }
+
+    const now = new Date();
+    const listingExpiresAt = new Date(now);
+    listingExpiresAt.setUTCDate(
+      listingExpiresAt.getUTCDate() + 60
+    );
+
+    const isFeatured =
+      requestedPackage === "FEATURED";
 
     const updated = await prisma.property.update({
       where: { id },
       data: {
+        listingPackage: requestedPackage,
+        paymentStatus: "INCLUDED",
+        amountPaidCents: 0,
+        paidAt: null,
+        stripeCheckoutSessionId: null,
+        stripePaymentIntentId: null,
+
         listingStatus: "SUBMITTED",
-        submittedAt: new Date(),
+        submittedAt: now,
+
+        listingExpiresAt,
+        expiryWarningSentAt: null,
+        expiredEmailSentAt: null,
+
+        isFeatured,
+        featuredUntil: isFeatured
+          ? listingExpiresAt
+          : null,
+
+        rejectedAt: null,
+        rejectedById: null,
+        rejectedReason: null,
       },
     });
 
     try {
       await sendListingStatusEmail({
         status: "SUBMITTED",
-        listingTitle: updated.title || "Untitled listing",
+        listingTitle:
+          updated.title || "Untitled listing",
         slug: updated.slug,
         listingId: updated.id,
-        adminUrl: "https://havn.ie/admin.html",
+        adminUrl:
+          "https://havn.ie/app/#/admin",
       });
     } catch (e) {
-      console.warn("Admin submitted email failed (non-fatal):", e);
+      console.warn(
+        "Admin submitted email failed (non-fatal):",
+        e
+      );
     }
 
     try {
-      const to =
-        user?.email ||
-        (user?.userId ? await getUserEmailById(user.userId) : null) ||
-        (existing?.userId ? await getUserEmailById(existing.userId) : null);
-
-      if (to) {
-        await sendUserListingEmail({
-          to,
-          event: "SUBMITTED",
-          listingTitle: updated.title || "Untitled listing",
-          slug: updated.slug,
-          listingId: updated.id,
-          myListingsUrl: "https://havn.ie/my-listings.html",
-        });
-      }
+      await sendUserListingEmail({
+        to: account.email,
+        recipientName: account.name,
+        event: "SUBMITTED",
+        listingTitle:
+          updated.title || "Untitled listing",
+        slug: updated.slug,
+        listingId: updated.id,
+        coverImageUrl:
+          Array.isArray(updated.photos) &&
+          updated.photos.length
+            ? updated.photos[0]
+            : null,
+        propertyAddress: [
+          updated.address1,
+          updated.address2,
+          updated.city,
+          updated.county,
+          updated.eircode,
+        ]
+          .map((value) =>
+            String(value || "").trim()
+          )
+          .filter(Boolean)
+          .join(", "),
+        propertyMode: String(updated.mode),
+        listingPackage: requestedPackage,
+        durationDays: 60,
+        amountPaidCents: 0,
+        submittedAt: now,
+        price: updated.price,
+        myListingsUrl:
+          "https://havn.ie/app/#/listings",
+      });
     } catch (e) {
-      console.warn("Submit email failed (non-fatal):", e);
+      console.warn(
+        "Submit email failed (non-fatal):",
+        e
+      );
     }
 
-    return res.json({ ok: true, item: updated });
+    return res.json({
+      ok: true,
+      includedWithMembership: true,
+      item: updated,
+    });
   } catch (err: any) {
-    console.error("POST /properties/:id/submit error", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
+    console.error(
+      "POST /properties/:id/submit error",
+      err
+    );
+
+    return res.status(500).json({
+      ok: false,
+      message: "Server error",
+    });
   }
 });
 

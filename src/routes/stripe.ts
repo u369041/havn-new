@@ -15,7 +15,17 @@ if (!stripeSecretKey) {
   console.error("STRIPE_SECRET_KEY is missing");
 }
 
-const stripe = new Stripe(stripeSecretKey);
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey)
+  : null;
+
+function getStripeClient() {
+  if (!stripe) {
+    throw new Error("STRIPE_SECRET_KEY is missing");
+  }
+
+  return stripe;
+}
 
 type PropertyMode = "BUY" | "RENT" | "SHARE";
 type ListingPackageName = "STANDARD" | "FEATURED";
@@ -554,7 +564,7 @@ async function handleAgentCheckoutCompleted(
   }
 
   const subscription =
-    await stripe.subscriptions.retrieve(
+    await getStripeClient().subscriptions.retrieve(
       stripeSubscriptionId,
       {
         expand: ["items.data.price"],
@@ -834,7 +844,7 @@ router.post(
         },
       };
 
-      const session = await stripe.checkout.sessions.create(
+      const session = await getStripeClient().checkout.sessions.create(
         checkoutParameters
       );
 
@@ -928,7 +938,7 @@ router.post("/webhook", async (req: any, res) => {
   let event: any;
 
   try {
-    event = stripe.webhooks.constructEvent(
+    event = getStripeClient().webhooks.constructEvent(
       req.body,
       signature,
       stripeWebhookSecret
