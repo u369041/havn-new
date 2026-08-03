@@ -879,7 +879,7 @@ router.post(
         eircode: existing.eircode,
         submittedAt: existing.submittedAt,
         adminUrl: `${APP_URL}/admin.html`,
-        agentHubUrl: `${APP_URL}/app/#/agent`,
+        agentHubUrl: `${APP_URL}/agents.html?approved=1`,
       };
 
       void Promise.allSettled([
@@ -1203,12 +1203,11 @@ router.post(
           client_reference_id: String(user.id),
 
           success_url:
-            `${APP_URL}/agent-dashboard.html` +
-            "?subscription=success" +
-            "&session_id={CHECKOUT_SESSION_ID}",
+            `${APP_URL}/app/?subscription=success` +
+            "&session_id={CHECKOUT_SESSION_ID}#/agent",
 
           cancel_url:
-            `${APP_URL}/agent-subscription.html` +
+            `${APP_URL}/agents.html` +
             "?subscription=cancel",
 
           metadata: {
@@ -1363,7 +1362,7 @@ router.post(
           customer:
             agentProfile.stripeCustomerId,
           return_url:
-            `${APP_URL}/agent-dashboard.html`,
+            `${APP_URL}/app/#/account`,
         });
 
       return res.json({
