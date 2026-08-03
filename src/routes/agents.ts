@@ -1176,17 +1176,23 @@ router.post(
 
       if (
         agentProfile.subscriptionStatus === "ACTIVE" ||
-        agentProfile.subscriptionStatus === "PAST_DUE" ||
-        agentProfile.subscriptionStatus ===
-          "CHECKOUT_PENDING"
+        agentProfile.subscriptionStatus === "PAST_DUE"
       ) {
         return res.status(409).json({
           ok: false,
           error: "SUBSCRIPTION_ALREADY_EXISTS",
           message:
-            "A professional subscription already exists or checkout is already in progress",
+            "A professional subscription already exists",
         });
       }
+
+      /*
+       * CHECKOUT_PENDING is intentionally retryable. A Stripe Checkout
+       * Session can be cancelled, abandoned or expire before any
+       * subscription is created. Because AgentProfile does not persist the
+       * Checkout Session ID, blocking this state would strand the user.
+       * ACTIVE and PAST_DUE remain protected above.
+       */
 
       const checkoutParameters: any =
         {
@@ -1295,6 +1301,72 @@ router.post(
         ok: false,
         message:
           "Could not create professional subscription checkout",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/agents/subscription/checkout-cancelled
+ *
+ * Clears a stale CHECKOUT_PENDING state after the user returns from
+ * Stripe's cancel URL. It never alters an active subscription and only
+ * resets profiles that do not yet have a Stripe subscription ID.
+ */
+router.post(
+  "/subscription/checkout-cancelled",
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const userId = toPositiveSafeInt(req.user?.userId);
+
+      if (userId === null) {
+        return res.status(401).json({
+          ok: false,
+          message: "Invalid authentication session",
+        });
+      }
+
+      const agentProfile = await prisma.agentProfile.findUnique({
+        where: { userId },
+        select: {
+          id: true,
+          subscriptionStatus: true,
+          stripeSubscriptionId: true,
+        },
+      });
+
+      if (!agentProfile) {
+        return res.status(404).json({
+          ok: false,
+          message: "Professional agent profile not found",
+        });
+      }
+
+      if (
+        agentProfile.subscriptionStatus === "CHECKOUT_PENDING" &&
+        !agentProfile.stripeSubscriptionId
+      ) {
+        await prisma.agentProfile.update({
+          where: { id: agentProfile.id },
+          data: {
+            subscriptionStatus: "NOT_STARTED",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+      });
+    } catch (error) {
+      console.error(
+        "POST /api/agents/subscription/checkout-cancelled error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        message: "Could not reset the cancelled checkout",
       });
     }
   }
