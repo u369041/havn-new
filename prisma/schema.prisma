@@ -427,6 +427,7 @@ enum PaymentStatus {
   UNPAID
   PENDING
   COMPLETED
+  INCLUDED
   FAILED
   REFUNDED
 }
