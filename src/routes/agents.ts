@@ -1208,6 +1208,12 @@ router.post(
 
           client_reference_id: String(user.id),
 
+          /*
+           * Permanently show Stripe's promotion-code field.
+           * Any customer with a valid HAVN promotion code may enter it.
+           */
+          allow_promotion_codes: true,
+
           success_url:
             `${APP_URL}/app/?subscription=success` +
             "&session_id={CHECKOUT_SESSION_ID}#/agent",
