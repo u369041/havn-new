@@ -485,7 +485,10 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    if (!user.agentProfile) {
+    const isAdmin =
+      String(user.role || "").toLowerCase() === "admin";
+
+    if (!user.agentProfile && !isAdmin) {
       return res.status(403).json({
         ok: false,
         error: "AGENT_APPLICATION_NOT_FOUND",
@@ -519,6 +522,7 @@ router.post("/login", async (req, res) => {
         emailVerified: user.emailVerified,
       },
       application: user.agentProfile,
+      adminAccess: isAdmin,
     });
   } catch (error) {
     console.error("POST /api/agents/login error", error);
@@ -611,7 +615,10 @@ router.get("/me", requireAuth, async (req: any, res) => {
       });
     }
 
-    if (!user.agentProfile) {
+    const isAdmin =
+      String(user.role || "").toLowerCase() === "admin";
+
+    if (!user.agentProfile && !isAdmin) {
       return res.status(404).json({
         ok: false,
         error: "AGENT_APPLICATION_NOT_FOUND",
@@ -632,6 +639,7 @@ router.get("/me", requireAuth, async (req: any, res) => {
         lastLoginAt: user.lastLoginAt,
       },
       application: user.agentProfile,
+      adminAccess: isAdmin,
     });
   } catch (error) {
     console.error("GET /api/agents/me error", error);
