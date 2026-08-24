@@ -8,51 +8,63 @@ datasource db {
 }
 
 model User {
-  id                       Int              @id @default(autoincrement())
+  id                       Int       @id @default(autoincrement())
   name                     String?
-  email                    String           @unique
+  email                    String    @unique
   password                 String?
-  googleId                 String?          @unique
+  googleId                 String?   @unique
   googleEmail              String?
   googleLinkedAt           DateTime?
-  appleId                  String?          @unique
+  appleId                  String?   @unique
   appleEmail               String?
   appleLinkedAt            DateTime?
   lastAuthProvider         String?
-  role                     UserRole         @default(user)
-  createdAt                DateTime         @default(now())
-  emailVerified            Boolean          @default(false)
-  emailVerifyToken         String?          @unique
+  role                     UserRole  @default(user)
+  createdAt                DateTime  @default(now())
+  emailVerified            Boolean   @default(false)
+  emailVerifyToken         String?   @unique
   emailVerifyTokenExp      DateTime?
   lastLoginAt              DateTime?
-  loginCount               Int              @default(0)
+  loginCount               Int       @default(0)
   lastSearch               Json?
   lastSearchAt             DateTime?
   foundingOfferUsedAt      DateTime?
-  pendingEmail             String?          @unique
-  emailChangeTokenHash     String?          @unique
+  pendingEmail             String?   @unique
+  emailChangeTokenHash     String?   @unique
   emailChangeTokenExp      DateTime?
   passwordChangedAt        DateTime?
-  savedSearchEmailsEnabled Boolean          @default(true)
-  listingEmailsEnabled     Boolean          @default(true)
-  productEmailsEnabled     Boolean          @default(false)
+  savedSearchEmailsEnabled Boolean   @default(true)
+  listingEmailsEnabled     Boolean   @default(true)
+  productEmailsEnabled     Boolean   @default(false)
   deletionRequestedAt      DateTime?
   deletionScheduledAt      DateTime?
   deletionCancelledAt      DateTime?
   deletedAt                DateTime?
-  approvals                Property[]       @relation("PropertyApprovedBy")
-  rejections               Property[]       @relation("PropertyRejectedBy")
-  properties               Property[]
-  savedSearches            SavedSearch[]
-  savedProperties          SavedProperty[]
-  analyticsEvents          AnalyticsEvent[]
 
+  approvals           Property[]           @relation("PropertyApprovedBy")
+  rejections          Property[]           @relation("PropertyRejectedBy")
+  properties          Property[]
+  savedSearches       SavedSearch[]
+  savedProperties     SavedProperty[]
+  analyticsEvents     AnalyticsEvent[]
   passwordResetTokens PasswordResetToken[]
 
   agentProfile               AgentProfile?  @relation("AgentProfileUser")
   agentApplicationsApproved  AgentProfile[] @relation("AgentApprovedBy")
   agentApplicationsRejected  AgentProfile[] @relation("AgentRejectedBy")
   agentApplicationsSuspended AgentProfile[] @relation("AgentSuspendedBy")
+
+  agencyMemberships           AgencyMember[]
+  agenciesCreated             Agency[]              @relation("AgencyCreatedBy")
+  agenciesUpdated             Agency[]              @relation("AgencyUpdatedBy")
+  professionalContactsCreated ProfessionalContact[] @relation("ProfessionalContactCreatedBy")
+  professionalContactsUpdated ProfessionalContact[] @relation("ProfessionalContactUpdatedBy")
+  inventoryPropertiesCreated  InventoryProperty[]   @relation("InventoryPropertyCreatedBy")
+  inventoryPropertiesUpdated  InventoryProperty[]   @relation("InventoryPropertyUpdatedBy")
+  agencyAuditEvents           AgencyAuditLog[]      @relation("AgencyAuditActor")
+  agencyAuditEffectiveEvents  AgencyAuditLog[]      @relation("AgencyAuditEffectiveUser")
+  propertiesCreatedForAgency  Property[]            @relation("PropertyCreatedBy")
+  propertiesUpdatedForAgency  Property[]            @relation("PropertyUpdatedBy")
 }
 
 model AgentProfile {
@@ -122,6 +134,218 @@ model AgentProfile {
   @@index([stripePriceId])
 }
 
+model Agency {
+  id                Int          @id @default(autoincrement())
+  name              String
+  legalName         String?
+  slug              String       @unique
+  psraLicenceNumber String?      @unique
+  primaryEmail      String?
+  billingEmail      String?
+  phoneNumber       String?
+  websiteUrl        String?
+  addressLine1      String?
+  addressLine2      String?
+  townCity          String?
+  county            String?
+  eircode           String?
+  status            AgencyStatus @default(ACTIVE)
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  createdBy User? @relation("AgencyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy User? @relation("AgencyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  members             AgencyMember[]
+  contacts            ProfessionalContact[]
+  inventoryProperties InventoryProperty[]
+  auditLogs           AgencyAuditLog[]
+  properties          Property[]
+
+  @@index([name])
+  @@index([status])
+  @@index([primaryEmail])
+  @@index([billingEmail])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+}
+
+model AgencyMember {
+  id        Int                @id @default(autoincrement())
+  agencyId  Int
+  userId    Int
+  role      AgencyMemberRole   @default(AGENT)
+  status    AgencyMemberStatus @default(ACTIVE)
+  jobTitle  String?
+  isPrimary Boolean            @default(false)
+
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assignedInventoryProperties InventoryProperty[] @relation("InventoryAssignedMember")
+  auditEvents                 AgencyAuditLog[]    @relation("AgencyAuditActorMember")
+
+  @@unique([agencyId, userId])
+  @@index([agencyId])
+  @@index([userId])
+  @@index([role])
+  @@index([status])
+  @@index([agencyId, status])
+  @@index([agencyId, role])
+}
+
+model ProfessionalContact {
+  id       Int @id @default(autoincrement())
+  agencyId Int
+
+  firstName   String?
+  lastName    String?
+  companyName String?
+
+  primaryEmail String?
+  phoneNumber  String?
+  roles        ProfessionalContactRole[] @default([])
+
+  notes      String?
+  isArchived Boolean @default(false)
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  agency    Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("ProfessionalContactCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("ProfessionalContactUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  primaryForInventory InventoryProperty[] @relation("InventoryPrimaryContact")
+
+  @@index([agencyId])
+  @@index([primaryEmail])
+  @@index([phoneNumber])
+  @@index([isArchived])
+  @@index([agencyId, isArchived])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+}
+
+model InventoryProperty {
+  id       Int @id @default(autoincrement())
+  agencyId Int
+
+  address1 String
+  address2 String?
+  city     String
+  county   String
+  eircode  String?
+
+  propertyType String?
+  bedrooms     Int?
+  bathrooms    Int?
+  size         Float?
+  sizeUnit     String?
+
+  transactionType InventoryTransactionType @default(SALE)
+  stage           InventoryStage           @default(PROSPECT)
+
+  askingPrice    Int?
+  valuationPrice Int?
+
+  assignedMemberId Int?
+  primaryContactId Int?
+
+  notes String?
+
+  appraisalDate   DateTime?
+  instructionDate DateTime?
+  readyToListAt   DateTime?
+  liveAt          DateTime?
+  saleAgreedDate  DateTime?
+  letAgreedDate   DateTime?
+  completedAt     DateTime?
+  withdrawnAt     DateTime?
+  lostAt          DateTime?
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  agency         Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignedMember AgencyMember?        @relation("InventoryAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  primaryContact ProfessionalContact? @relation("InventoryPrimaryContact", fields: [primaryContactId], references: [id], onDelete: SetNull)
+  createdBy      User?                @relation("InventoryPropertyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy      User?                @relation("InventoryPropertyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  listings Property[]
+
+  @@index([agencyId])
+  @@index([stage])
+  @@index([transactionType])
+  @@index([assignedMemberId])
+  @@index([primaryContactId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+  @@index([agencyId, stage])
+  @@index([agencyId, assignedMemberId])
+  @@index([updatedAt])
+}
+
+model AgencyAuditLog {
+  id       BigInt @id @default(autoincrement())
+  agencyId Int
+
+  actorUserId         Int?
+  actorAgencyMemberId Int?
+  effectiveUserId     Int?
+
+  action     String
+  entityType String
+  entityId   String?
+
+  beforeState   Json?
+  afterState    Json?
+  changedFields Json?
+  metadata      Json?
+
+  ipAddress String?
+  userAgent String?
+  requestId String?
+
+  createdAt DateTime @default(now())
+
+  agency            Agency        @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  actorUser         User?         @relation("AgencyAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorAgencyMember AgencyMember? @relation("AgencyAuditActorMember", fields: [actorAgencyMemberId], references: [id], onDelete: SetNull)
+  effectiveUser     User?         @relation("AgencyAuditEffectiveUser", fields: [effectiveUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([actorUserId])
+  @@index([actorAgencyMemberId])
+  @@index([effectiveUserId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([agencyId, createdAt])
+  @@index([agencyId, actorUserId, createdAt])
+  @@index([agencyId, entityType, entityId])
+}
+
 model SavedSearch {
   id             Int       @id @default(autoincrement())
   userId         Int
@@ -169,8 +393,8 @@ model PasswordResetToken {
 }
 
 model Property {
-  id                      Int              @id @default(autoincrement())
-  slug                    String           @unique
+  id                      Int             @id @default(autoincrement())
+  slug                    String          @unique
   title                   String
   address1                String
   address2                String?
@@ -186,13 +410,13 @@ model Property {
   photos                  String[]
   userId                  Int
   berNo                   String?
-  createdAt               DateTime         @default(now())
+  createdAt               DateTime        @default(now())
   lat                     Float?
   lng                     Float?
   propertyType            String
   saleType                String?
-  updatedAt               DateTime         @updatedAt
-  listingStatus           ListingStatus    @default(DRAFT)
+  updatedAt               DateTime        @updatedAt
+  listingStatus           ListingStatus   @default(DRAFT)
   publishedAt             DateTime?
   archivedAt              DateTime?
   approvedAt              DateTime?
@@ -201,7 +425,7 @@ model Property {
   rejectedById            Int?
   submittedAt             DateTime?
   marketStatus            String?
-  mode                    MarketMode       @default(BUY)
+  mode                    MarketMode      @default(BUY)
   rejectedReason          String?
   availableFrom           DateTime?
   berRating               String?
@@ -213,8 +437,8 @@ model Property {
   size                    Float?
   sizeUnit                String?
   featuredUntil           DateTime?
-  isFeatured              Boolean          @default(false)
-  views                   Int              @default(0)
+  isFeatured              Boolean         @default(false)
+  views                   Int             @default(0)
   billsIncluded           String?
   couplesAllowed          String?
   currentOccupants        Int?
@@ -235,8 +459,8 @@ model Property {
   photoMeta               Json?
   photoMetaUpdatedAt      DateTime?
   listingPackage          ListingPackage?
-  paymentStatus           PaymentStatus    @default(UNPAID)
-  stripeCheckoutSessionId String?          @unique
+  paymentStatus           PaymentStatus   @default(UNPAID)
+  stripeCheckoutSessionId String?         @unique
   stripePaymentIntentId   String?
   amountPaidCents         Int?
   paidAt                  DateTime?
@@ -244,13 +468,25 @@ model Property {
   expiryWarningSentAt     DateTime?
   expiredEmailSentAt      DateTime?
   locationId              Int?
-  analyticsEvents         AnalyticsEvent[]
-  enquiries               Enquiry[]
-  approvedBy              User?            @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
-  location                Location?        @relation("PropertyLocation", fields: [locationId], references: [id])
-  rejectedBy              User?            @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
-  user                    User             @relation(fields: [userId], references: [id])
-  savedBy                 SavedProperty[]
+
+  agencyId            Int?
+  inventoryPropertyId Int?
+  createdByUserId     Int?
+  updatedByUserId     Int?
+
+  analyticsEvents AnalyticsEvent[]
+  enquiries       Enquiry[]
+  savedBy         SavedProperty[]
+
+  approvedBy User?     @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
+  rejectedBy User?     @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
+  location   Location? @relation("PropertyLocation", fields: [locationId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
+
+  agency            Agency?            @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  inventoryProperty InventoryProperty? @relation(fields: [inventoryPropertyId], references: [id], onDelete: SetNull)
+  createdByUser     User?              @relation("PropertyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser     User?              @relation("PropertyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([locationId])
@@ -263,6 +499,11 @@ model Property {
   @@index([listingExpiresAt])
   @@index([expiryWarningSentAt])
   @@index([expiredEmailSentAt])
+  @@index([agencyId])
+  @@index([inventoryPropertyId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+  @@index([agencyId, listingStatus])
 }
 
 model Enquiry {
@@ -398,6 +639,55 @@ enum AgentSubscriptionStatus {
   PAST_DUE
   CANCELLED
   UNPAID
+}
+
+enum AgencyStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum AgencyMemberRole {
+  OWNER
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum AgencyMemberStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum ProfessionalContactRole {
+  VENDOR
+  BUYER
+  LANDLORD
+  TENANT
+  SOLICITOR
+  BROKER
+  OTHER
+}
+
+enum InventoryTransactionType {
+  SALE
+  RENTAL
+}
+
+enum InventoryStage {
+  PROSPECT
+  APPRAISAL
+  INSTRUCTION
+  PREPARING
+  READY_TO_LIST
+  LIVE
+  SALE_AGREED
+  LET_AGREED
+  SOLD
+  LET_COMPLETED
+  WITHDRAWN
+  LOST
 }
 
 enum ListingStatus {
