@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -17,6 +17,7 @@ import eventsRouter from "./routes/events";
 import adminAnalyticsRouter from "./routes/adminAnalytics";
 import agentsRouter from "./routes/agents";
 import professionalAppRouter from "./routes/professionalApp";
+import agencyInventoryRouter from "./routes/agencyInventory";
 import appRouter from "./routes/app";
 
 const app = express();
@@ -98,7 +99,6 @@ const eventsLimiter = rateLimit({
   },
 });
 
-
 /* body */
 
 /*
@@ -154,8 +154,6 @@ app.use(cors(corsOptions));
 app.use(passport.initialize());
 
 /* health */
-
-/* health */
 app.get("/api/health", (_req, res) => {
   return res.json({ ok: true });
 });
@@ -175,8 +173,9 @@ app.use("/api/locations", locationsRouter);
 app.use("/api/events", eventsLimiter, eventsRouter);
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/agents", authLimiter, agentsRouter);
-app.use("/api/professional-app",strictLimiter,professionalAppRouter);
-app.use("/api/app",strictLimiter,appRouter);
+app.use("/api/professional-app", strictLimiter, professionalAppRouter);
+app.use("/api/agency/inventory", strictLimiter, agencyInventoryRouter);
+app.use("/api/app", strictLimiter, appRouter);
 
 app.use("/api/uploads", strictLimiter, uploadsRouter);
 app.use("/api/stripe", stripeLimiter, stripeRouter);
