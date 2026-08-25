@@ -1,4 +1,5 @@
-﻿import express, { Router } from "express";
+import express, { Router } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
 import requireAdminAuth from "../middleware/adminAuth";
@@ -9,6 +10,7 @@ import {
   sendPropertyLeadEmail,
 } from "../lib/mail";
 import { getTransportIntelligence } from "../services/transport-intelligence";
+import { getAgencyWorkspace } from "../services/agencyAccess";
 
 const router = Router();
 
@@ -3046,8 +3048,15 @@ router.post("/", requireAuth, async (req: any, res) => {
 
     const mode = getIncomingMode(payload);
 
-    const created = await prisma.property.create({
-      data: {
+    const authenticatedUserId = Number(user?.userId);
+
+    if (!Number.isSafeInteger(authenticatedUserId) || authenticatedUserId <= 0) {
+      return res.status(401).json({ ok: false, message: "Invalid auth session" });
+    }
+
+    const agencyWorkspace = await getAgencyWorkspace(authenticatedUserId);
+
+    const propertyData: Prisma.PropertyUncheckedCreateInput = {
         slug,
         title,
         address1: safeText(payload.address1).trim(),
@@ -3097,10 +3106,114 @@ router.post("/", requireAuth, async (req: any, res) => {
         listingStatus: "DRAFT",
         isFeatured: false,
         featuredUntil: null,
-        userId: user.userId,
+        userId: authenticatedUserId,
         mode,
-      },
-    });
+      
+    };
+
+    let created: any;
+
+    if (!agencyWorkspace) {
+      created = await prisma.property.create({
+        data: propertyData,
+      });
+    } else {
+      const transactionType =
+        mode === "RENT" || mode === "SHARE"
+          ? "RENTAL"
+          : "SALE";
+
+      created = await prisma.$transaction(async (tx) => {
+        const inventory = await tx.inventoryProperty.create({
+          data: {
+            agencyId: agencyWorkspace.agency.id,
+            address1: safeText(payload.address1).trim() || title || "Untitled property",
+            address2: asOptionalString(payload.address2),
+            city: safeText(payload.city).trim() || "Unknown",
+            county: safeText(payload.county).trim() || "Unknown",
+            eircode: eircode || null,
+            propertyType: asOptionalString(payload.propertyType) || "house",
+            bedrooms: asOptionalInt(payload.bedrooms),
+            bathrooms: asOptionalInt(payload.bathrooms),
+            size: asOptionalFloat(payload.size),
+            sizeUnit: asOptionalString(payload.sizeUnit),
+            transactionType,
+            stage: "PREPARING",
+            askingPrice: asOptionalInt(payload.price) ?? 0,
+            valuationPrice: null,
+            assignedMemberId: agencyWorkspace.membership.id,
+            primaryContactId: null,
+            createdByUserId: authenticatedUserId,
+            updatedByUserId: authenticatedUserId,
+          },
+        });
+
+        const listing = await tx.property.create({
+          data: {
+            ...propertyData,
+            agencyId: agencyWorkspace.agency.id,
+            inventoryPropertyId: inventory.id,
+            createdByUserId: authenticatedUserId,
+            updatedByUserId: authenticatedUserId,
+          },
+        });
+
+        await tx.agencyAuditLog.create({
+          data: {
+            agencyId: agencyWorkspace.agency.id,
+            actorUserId: authenticatedUserId,
+            actorAgencyMemberId: agencyWorkspace.membership.id,
+            effectiveUserId: authenticatedUserId,
+            action: "INVENTORY_CREATED_FROM_LISTING",
+            entityType: "InventoryProperty",
+            entityId: String(inventory.id),
+            afterState: {
+              inventoryPropertyId: inventory.id,
+              agencyId: inventory.agencyId,
+              address1: inventory.address1,
+              address2: inventory.address2,
+              city: inventory.city,
+              county: inventory.county,
+              eircode: inventory.eircode,
+              propertyType: inventory.propertyType,
+              bedrooms: inventory.bedrooms,
+              bathrooms: inventory.bathrooms,
+              size: inventory.size,
+              sizeUnit: inventory.sizeUnit,
+              transactionType: inventory.transactionType,
+              stage: inventory.stage,
+              askingPrice: inventory.askingPrice,
+              assignedMemberId: inventory.assignedMemberId,
+              createdByUserId: inventory.createdByUserId,
+              updatedByUserId: inventory.updatedByUserId,
+              listingId: listing.id,
+              listingSlug: listing.slug,
+              listingStatus: listing.listingStatus,
+            },
+            changedFields: [
+              "InventoryProperty.created",
+              "Property.agencyId",
+              "Property.inventoryPropertyId",
+              "Property.createdByUserId",
+              "Property.updatedByUserId",
+            ],
+            metadata: {
+              source: "properties.create",
+              propertyId: listing.id,
+              propertySlug: listing.slug,
+              listingStatus: listing.listingStatus,
+              creationMode: "DIRECT_LISTING",
+            },
+            ipAddress: req.ip || null,
+            userAgent: safeText(req.get("user-agent")).trim() || null,
+            requestId:
+              safeText(req.get("x-request-id") || req.get("x-correlation-id")).trim() || null,
+          },
+        });
+
+        return listing;
+      });
+    }
 
     void (async () => {
       try {
