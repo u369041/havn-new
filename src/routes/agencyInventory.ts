@@ -6,6 +6,10 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
+import {
+  sendListingRevisionAdminEmail,
+  type ListingRevisionAdminEmailPayload,
+} from "../lib/mail";
 import requireActiveAgent from "../middleware/requireActiveAgent";
 import {
   AgencyAccessError,
@@ -1020,7 +1024,8 @@ router.patch("/:id", async (req: AgentRequest, res) => {
 
     data.updatedByUserId = workspace.membership.userId;
 
-    const after = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      const revisionNotifications: ListingRevisionAdminEmailPayload[] = [];
       const updated = await tx.inventoryProperty.update({
         where: { id },
         data,
@@ -1047,6 +1052,8 @@ router.patch("/:id", async (req: AgentRequest, res) => {
         },
         select: {
           id: true,
+          slug: true,
+          title: true,
           address1: true,
           address2: true,
           city: true,
@@ -1108,8 +1115,10 @@ router.patch("/:id", async (req: AgentRequest, res) => {
           });
         }
 
+        let savedRevision: { id: number; submittedAt: Date };
+
         if (currentPending) {
-          await tx.listingRevision.update({
+          savedRevision = await tx.listingRevision.update({
             where: { id: currentPending.id },
             data: {
               agencyId: workspace.agency.id,
@@ -1124,9 +1133,13 @@ router.patch("/:id", async (req: AgentRequest, res) => {
               reviewedAt: null,
               rejectionReason: null,
             },
+            select: {
+              id: true,
+              submittedAt: true,
+            },
           });
         } else {
-          await tx.listingRevision.create({
+          savedRevision = await tx.listingRevision.create({
             data: {
               propertyId: listing.id,
               agencyId: workspace.agency.id,
@@ -1138,8 +1151,27 @@ router.patch("/:id", async (req: AgentRequest, res) => {
               changedFields: revisionFields,
               submittedByUserId: workspace.membership.userId,
             },
+            select: {
+              id: true,
+              submittedAt: true,
+            },
           });
         }
+
+        revisionNotifications.push({
+          revisionId: savedRevision.id,
+          listingId: listing.id,
+          listingTitle: listing.title,
+          listingSlug: listing.slug,
+          agencyName: workspace.agency.name,
+          submittedByName: updated.updatedBy?.name,
+          submittedByEmail: updated.updatedBy?.email,
+          submittedAt: savedRevision.submittedAt,
+          changedFields: revisionFields,
+          beforeState,
+          proposedState,
+          adminUrl: "https://havn.ie/app/index.html#/admin/revisions",
+        });
       }
 
       const fields = changedFields(before, updated);
@@ -1165,12 +1197,31 @@ router.patch("/:id", async (req: AgentRequest, res) => {
         });
       }
 
-      return updated;
+      return {
+        updated,
+        revisionNotifications,
+      };
     });
+
+    if (result.revisionNotifications.length > 0) {
+      const emailResults = await Promise.allSettled(
+        result.revisionNotifications.map((notification) =>
+          sendListingRevisionAdminEmail(notification)
+        )
+      );
+
+      emailResults.forEach((emailResult, index) => {
+        if (emailResult.status === "rejected") {
+          console.warn("Listing revision admin email failed", {
+            revisionId: result.revisionNotifications[index]?.revisionId,
+          });
+        }
+      });
+    }
 
     return res.json({
       ok: true,
-      item: after,
+      item: result.updated,
     });
   } catch (error) {
     return handleError(res, error);

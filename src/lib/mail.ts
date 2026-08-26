@@ -7,6 +7,134 @@ const ADMIN_NOTIFY_EMAIL =
   process.env.ADMIN_NOTIFY_EMAIL ||
   process.env.ADMIN_EMAIL ||
   "admin@havn.ie";
+const REVISION_ADMIN_NOTIFY_EMAIL =
+  process.env.REVISION_ADMIN_NOTIFY_EMAIL || "garry.lynch@me.com";
+
+export type ListingRevisionAdminEmailPayload = {
+  revisionId: string | number;
+  listingId: string | number;
+  listingTitle?: string | null;
+  listingSlug?: string | null;
+  agencyName?: string | null;
+  submittedByName?: string | null;
+  submittedByEmail?: string | null;
+  submittedAt?: Date | string | null;
+  changedFields: string[];
+  beforeState: Record<string, unknown>;
+  proposedState: Record<string, unknown>;
+  adminUrl?: string;
+};
+
+const REVISION_FIELD_LABELS: Record<string, string> = {
+  address1: "Address line 1",
+  address2: "Address line 2",
+  city: "City / town",
+  county: "County",
+  eircode: "Eircode",
+  propertyType: "Property type",
+  bedrooms: "Bedrooms",
+  bathrooms: "Bathrooms",
+  size: "Size",
+  sizeUnit: "Size unit",
+};
+
+function revisionEmailValue(value: unknown): string {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+export async function sendListingRevisionAdminEmail(
+  payload: ListingRevisionAdminEmailPayload
+) {
+  try {
+    const title = String(payload.listingTitle || `Listing ${payload.listingId}`);
+    const submitter =
+      String(payload.submittedByName || "").trim() ||
+      String(payload.submittedByEmail || "").trim() ||
+      "An agent";
+    const adminUrl = safeHref(
+      payload.adminUrl,
+      "https://havn.ie/app/index.html#/admin/revisions"
+    );
+    const fields = Array.isArray(payload.changedFields)
+      ? payload.changedFields
+      : [];
+    const rows = fields
+      .map((field) => {
+        const label = REVISION_FIELD_LABELS[field] || field;
+        const beforeValue = revisionEmailValue(payload.beforeState?.[field]);
+        const proposedValue = revisionEmailValue(payload.proposedState?.[field]);
+
+        return `
+          <tr>
+            <td style="padding:11px 12px;border-bottom:1px solid #E2E8F0;color:#334155;font-size:13px;font-weight:800;">${escapeHtml(label)}</td>
+            <td style="padding:11px 12px;border-bottom:1px solid #E2E8F0;color:#64748B;font-size:13px;">${escapeHtml(beforeValue)}</td>
+            <td style="padding:11px 8px;border-bottom:1px solid #E2E8F0;color:#94A3B8;font-size:15px;text-align:center;">→</td>
+            <td style="padding:11px 12px;border-bottom:1px solid #E2E8F0;color:#0F172A;font-size:13px;font-weight:800;">${escapeHtml(proposedValue)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+    const submittedAt = formatDateTime(payload.submittedAt) || "Just now";
+
+    const html = `
+      <!doctype html>
+      <html lang="en">
+        <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
+        <body style="margin:0;padding:0;background:#F5F8FC;font-family:Arial,Helvetica,sans-serif;color:#0F172A;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F5F8FC;padding:28px 12px;">
+            <tr><td align="center">
+              <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:680px;max-width:100%;background:#ffffff;border:1px solid #E2E8F0;border-radius:18px;overflow:hidden;">
+                <tr><td align="center" style="background:#0A1A33;padding:22px 28px;color:#ffffff;">
+                  <div style="font-size:25px;font-weight:900;">havn<span style="color:#346FB6;">.ie</span></div>
+                  <div style="margin-top:6px;color:#D8E3F2;font-size:11px;font-weight:700;">ADMINISTRATION</div>
+                </td></tr>
+                <tr><td style="padding:28px 30px 14px;">
+                  <div style="display:inline-block;padding:6px 10px;background:#FFF7ED;color:#C2410C;border-radius:999px;font-size:11px;font-weight:900;">REVIEW REQUIRED</div>
+                  <h1 style="margin:14px 0 8px;color:#0A1A33;font-size:25px;line-height:1.2;">Published listing revision submitted</h1>
+                  <p style="margin:0;color:#475569;font-size:14px;line-height:1.65;"><strong>${escapeHtml(submitter)}</strong> requested changes to <strong>${escapeHtml(title)}</strong>.</p>
+                </td></tr>
+                <tr><td style="padding:8px 30px 18px;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E2E8F0;border-radius:12px;background:#F8FAFC;">
+                    <tr><td style="padding:12px;color:#64748B;font-size:12px;font-weight:700;">Agency</td><td align="right" style="padding:12px;color:#0F172A;font-size:12px;font-weight:800;">${escapeHtml(String(payload.agencyName || "—"))}</td></tr>
+                    <tr><td style="padding:12px;border-top:1px solid #E2E8F0;color:#64748B;font-size:12px;font-weight:700;">Submitted</td><td align="right" style="padding:12px;border-top:1px solid #E2E8F0;color:#0F172A;font-size:12px;font-weight:800;">${escapeHtml(submittedAt)}</td></tr>
+                    <tr><td style="padding:12px;border-top:1px solid #E2E8F0;color:#64748B;font-size:12px;font-weight:700;">Revision ID</td><td align="right" style="padding:12px;border-top:1px solid #E2E8F0;color:#0F172A;font-size:12px;font-weight:800;">${escapeHtml(String(payload.revisionId))}</td></tr>
+                  </table>
+                </td></tr>
+                <tr><td style="padding:0 30px 24px;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;">
+                    <tr style="background:#F8FAFC;"><th align="left" style="padding:10px 12px;color:#64748B;font-size:10px;">FIELD</th><th align="left" style="padding:10px 12px;color:#64748B;font-size:10px;">CURRENTLY LIVE</th><th></th><th align="left" style="padding:10px 12px;color:#64748B;font-size:10px;">REQUESTED</th></tr>
+                    ${rows || '<tr><td colspan="4" style="padding:18px;color:#64748B;font-size:13px;text-align:center;">No changed fields supplied.</td></tr>'}
+                  </table>
+                  ${emailButton("Review revision", adminUrl)}
+                </td></tr>
+                <tr><td style="background:#0A1A33;padding:20px 28px;color:#CBD5E1;font-size:11px;text-align:center;">HAVN.ie administrator notification</td></tr>
+              </table>
+            </td></tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    return await resend.emails.send({
+      from: FROM,
+      to: REVISION_ADMIN_NOTIFY_EMAIL,
+      subject: `Revision review required: ${title}`,
+      html,
+    });
+  } catch (err) {
+    logMailFailure("sendListingRevisionAdminEmail", err);
+    return null;
+  }
+}
 
 /**
  * ----------------------------
