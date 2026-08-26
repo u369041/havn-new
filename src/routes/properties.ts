@@ -11,6 +11,7 @@ import {
 } from "../lib/mail";
 import { getTransportIntelligence } from "../services/transport-intelligence";
 import { getAgencyWorkspace } from "../services/agencyAccess";
+import { draftListingToInventoryData } from "../services/agencyPropertySync";
 
 const router = Router();
 
@@ -3285,9 +3286,10 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
         ? getIncomingMode(payload)
         : existing.mode;
 
-    const updated = await prisma.property.update({
-      where: { id },
-      data: {
+    const updated = await prisma.$transaction(async (tx) => {
+      const listing = await tx.property.update({
+        where: { id },
+        data: {
         title: payload.title ?? existing.title,
         address1: payload.address1 ?? existing.address1,
         address2: payload.address2 !== undefined ? asOptionalString(payload.address2) : existing.address2,
@@ -3412,7 +3414,20 @@ router.patch("/:id", requireAuth, async (req: any, res) => {
             ? asOptionalString(payload.ownerOccupied)
             : (existing as any).ownerOccupied,
         mode: nextMode,
-      },
+        },
+      });
+
+      if (listing.inventoryPropertyId) {
+        await tx.inventoryProperty.update({
+          where: { id: listing.inventoryPropertyId },
+          data: {
+            ...draftListingToInventoryData(listing),
+            updatedByUserId: Number(user.userId),
+          },
+        });
+      }
+
+      return listing;
     });
 
     return res.json({ ok: true, item: updated });

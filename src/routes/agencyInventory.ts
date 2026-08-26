@@ -14,6 +14,7 @@ import {
   canEditInventoryRecord,
   requireAgencyWorkspace,
 } from "../services/agencyAccess";
+import { inventoryToDraftListingData } from "../services/agencyPropertySync";
 
 const router = Router();
 
@@ -986,6 +987,18 @@ router.patch("/:id", async (req: AgentRequest, res) => {
         where: { id },
         data,
         include: inventoryInclude,
+      });
+
+      await tx.property.updateMany({
+        where: {
+          inventoryPropertyId: id,
+          agencyId: workspace.agency.id,
+          listingStatus: "DRAFT",
+        },
+        data: {
+          ...inventoryToDraftListingData(updated),
+          updatedByUserId: workspace.membership.userId,
+        },
       });
 
       const fields = changedFields(before, updated);
