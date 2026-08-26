@@ -1,5 +1,4 @@
 // src/routes/moderation.ts
-// src/routes/moderation.ts
 import express, { Router } from "express";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
@@ -352,4 +351,307 @@ router.post("/properties/:id/reject", requireAuth, requireAdminAuth, async (req:
   }
 });
 
+
+const REVISION_FIELDS = [
+  "address1",
+  "address2",
+  "city",
+  "county",
+  "eircode",
+  "propertyType",
+  "bedrooms",
+  "bathrooms",
+  "size",
+  "sizeUnit",
+] as const;
+
+function revisionStateFromProperty(property: any) {
+  return Object.fromEntries(
+    REVISION_FIELDS.map((field) => [field, property?.[field] ?? null])
+  );
+}
+
+function revisionStatesMatch(left: any, right: any): boolean {
+  return REVISION_FIELDS.every(
+    (field) =>
+      JSON.stringify(left?.[field] ?? null) ===
+      JSON.stringify(right?.[field] ?? null)
+  );
+}
+
+function revisionPropertyData(proposedState: any) {
+  return Object.fromEntries(
+    REVISION_FIELDS.map((field) => [field, proposedState?.[field] ?? null])
+  );
+}
+
+function validPositiveId(raw: any): number | null {
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * GET /api/admin/revisions
+ */
+router.get("/revisions", requireAuth, requireAdminAuth, async (req: any, res) => {
+  try {
+    const rawStatus = safeText(req.query.status || "PENDING")
+      .trim()
+      .toUpperCase();
+
+    const allowedStatuses = new Set([
+      "PENDING",
+      "APPROVED",
+      "REJECTED",
+      "SUPERSEDED",
+    ]);
+
+    if (!allowedStatuses.has(rawStatus)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid revision status",
+      });
+    }
+
+    const items = await prisma.listingRevision.findMany({
+      where: {
+        status: rawStatus as any,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            listingStatus: true,
+            address1: true,
+            address2: true,
+            city: true,
+            county: true,
+            eircode: true,
+            propertyType: true,
+            bedrooms: true,
+            bathrooms: true,
+            size: true,
+            sizeUnit: true,
+            updatedAt: true,
+          },
+        },
+        agency: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        submittedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        reviewedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: [{ submittedAt: "asc" }, { id: "asc" }],
+      take: 500,
+    });
+
+    return res.json({ ok: true, items });
+  } catch (err: any) {
+    console.error("revision queue error", err);
+    return res.status(500).json({
+      ok: false,
+      message: err?.message || "Server error",
+    });
+  }
+});
+
+/**
+ * POST /api/admin/revisions/:id/approve
+ */
+router.post(
+  "/revisions/:id/approve",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const id = validPositiveId(req.params.id);
+
+      if (!id) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid revision id",
+        });
+      }
+
+      const result = await prisma.$transaction(async (tx) => {
+        const revision = await tx.listingRevision.findUnique({
+          where: { id },
+          include: {
+            property: true,
+          },
+        });
+
+        if (!revision) {
+          throw Object.assign(new Error("Revision not found"), {
+            statusCode: 404,
+          });
+        }
+
+        if (revision.status !== "PENDING") {
+          throw Object.assign(
+            new Error(`Cannot approve revision from status ${revision.status}`),
+            { statusCode: 409 }
+          );
+        }
+
+        if (revision.property.listingStatus !== "PUBLISHED") {
+          throw Object.assign(
+            new Error(
+              `Cannot apply a revision to listing status ${revision.property.listingStatus}`
+            ),
+            { statusCode: 409 }
+          );
+        }
+
+        const beforeState = revision.beforeState as any;
+        const proposedState = revision.proposedState as any;
+        const currentState = revisionStateFromProperty(revision.property);
+
+        if (!revisionStatesMatch(beforeState, currentState)) {
+          throw Object.assign(
+            new Error(
+              "The live listing changed after this revision was submitted. Review the current listing before approving."
+            ),
+            { statusCode: 409 }
+          );
+        }
+
+        const now = new Date();
+
+        const property = await tx.property.update({
+          where: { id: revision.propertyId },
+          data: {
+            ...revisionPropertyData(proposedState),
+            updatedByUserId: req.user.userId,
+          },
+          include: {
+            user: true,
+          },
+        });
+
+        const updatedRevision = await tx.listingRevision.update({
+          where: { id },
+          data: {
+            status: "APPROVED",
+            reviewedByUserId: req.user.userId,
+            reviewedAt: now,
+            rejectionReason: null,
+          },
+        });
+
+        await tx.listingRevision.updateMany({
+          where: {
+            propertyId: revision.propertyId,
+            status: "PENDING",
+            id: { not: id },
+          },
+          data: {
+            status: "SUPERSEDED",
+            reviewedByUserId: req.user.userId,
+            reviewedAt: now,
+          },
+        });
+
+        return {
+          property,
+          revision: updatedRevision,
+        };
+      });
+
+      return res.json({
+        ok: true,
+        item: result.revision,
+        property: result.property,
+      });
+    } catch (err: any) {
+      console.error("revision approve error", err);
+      return res.status(err?.statusCode || 500).json({
+        ok: false,
+        message: err?.message || "Server error",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/revisions/:id/reject
+ */
+router.post(
+  "/revisions/:id/reject",
+  requireAuth,
+  requireAdminAuth,
+  async (req: any, res) => {
+    try {
+      const id = validPositiveId(req.params.id);
+
+      if (!id) {
+        return res.status(400).json({
+          ok: false,
+          message: "Invalid revision id",
+        });
+      }
+
+      const payload = normalizePayload(req.body);
+      const reason = safeText(payload.reason).trim();
+
+      const existing = await prisma.listingRevision.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          message: "Revision not found",
+        });
+      }
+
+      if (existing.status !== "PENDING") {
+        return res.status(409).json({
+          ok: false,
+          message: `Cannot reject revision from status ${existing.status}`,
+        });
+      }
+
+      const updated = await prisma.listingRevision.update({
+        where: { id },
+        data: {
+          status: "REJECTED",
+          reviewedByUserId: req.user.userId,
+          reviewedAt: new Date(),
+          rejectionReason: reason || null,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        item: updated,
+      });
+    } catch (err: any) {
+      console.error("revision reject error", err);
+      return res.status(500).json({
+        ok: false,
+        message: err?.message || "Server error",
+      });
+    }
+  }
+);
+
 export default router;
+

@@ -216,6 +216,44 @@ function changedFields(before: any, after: any): string[] {
   });
 }
 
+function listingPublicSnapshot(item: any) {
+  return {
+    address1: item?.address1 ?? null,
+    address2: item?.address2 ?? null,
+    city: item?.city ?? null,
+    county: item?.county ?? null,
+    eircode: item?.eircode ?? null,
+    propertyType: item?.propertyType ?? null,
+    bedrooms: item?.bedrooms ?? null,
+    bathrooms: item?.bathrooms ?? null,
+    size: item?.size ?? null,
+    sizeUnit: item?.sizeUnit ?? null,
+  };
+}
+
+function inventoryPublicProposal(item: any) {
+  return {
+    address1: item?.address1 ?? null,
+    address2: item?.address2 ?? null,
+    city: item?.city ?? null,
+    county: item?.county ?? null,
+    eircode: item?.eircode ?? null,
+    propertyType: item?.propertyType ?? null,
+    bedrooms: item?.bedrooms ?? null,
+    bathrooms: item?.bathrooms ?? null,
+    size: item?.size ?? null,
+    sizeUnit: item?.sizeUnit ?? null,
+  };
+}
+
+function changedPublicListingFields(before: any, proposed: any): string[] {
+  const keys = Object.keys(before || {});
+
+  return keys.filter((key) => {
+    return JSON.stringify(before?.[key]) !== JSON.stringify(proposed?.[key]);
+  });
+}
+
 async function workspaceFor(req: AgentRequest): Promise<AgencyWorkspace> {
   const userId = asPositiveInt(req.agentAccess?.userId);
   if (!userId) {
@@ -1000,6 +1038,109 @@ router.patch("/:id", async (req: AgentRequest, res) => {
           updatedByUserId: workspace.membership.userId,
         },
       });
+
+      const publishedListings = await tx.property.findMany({
+        where: {
+          inventoryPropertyId: id,
+          agencyId: workspace.agency.id,
+          listingStatus: "PUBLISHED",
+        },
+        select: {
+          id: true,
+          address1: true,
+          address2: true,
+          city: true,
+          county: true,
+          eircode: true,
+          propertyType: true,
+          bedrooms: true,
+          bathrooms: true,
+          size: true,
+          sizeUnit: true,
+        },
+      });
+
+      for (const listing of publishedListings) {
+        const beforeState = listingPublicSnapshot(listing);
+        const proposedState = inventoryPublicProposal(updated);
+        const revisionFields = changedPublicListingFields(
+          beforeState,
+          proposedState
+        );
+
+        const pendingRevisions = await tx.listingRevision.findMany({
+          where: {
+            propertyId: listing.id,
+            status: "PENDING",
+          },
+          orderBy: { id: "desc" },
+          select: { id: true },
+        });
+
+        if (revisionFields.length === 0) {
+          if (pendingRevisions.length > 0) {
+            await tx.listingRevision.updateMany({
+              where: {
+                id: { in: pendingRevisions.map((revision) => revision.id) },
+              },
+              data: {
+                status: "SUPERSEDED",
+              },
+            });
+          }
+
+          continue;
+        }
+
+        const currentPending = pendingRevisions[0] || null;
+        const olderPendingIds = pendingRevisions
+          .slice(1)
+          .map((revision) => revision.id);
+
+        if (olderPendingIds.length > 0) {
+          await tx.listingRevision.updateMany({
+            where: {
+              id: { in: olderPendingIds },
+            },
+            data: {
+              status: "SUPERSEDED",
+            },
+          });
+        }
+
+        if (currentPending) {
+          await tx.listingRevision.update({
+            where: { id: currentPending.id },
+            data: {
+              agencyId: workspace.agency.id,
+              inventoryPropertyId: id,
+              source: "INVENTORY_UPDATE",
+              beforeState,
+              proposedState,
+              changedFields: revisionFields,
+              submittedByUserId: workspace.membership.userId,
+              submittedAt: new Date(),
+              reviewedByUserId: null,
+              reviewedAt: null,
+              rejectionReason: null,
+            },
+          });
+        } else {
+          await tx.listingRevision.create({
+            data: {
+              propertyId: listing.id,
+              agencyId: workspace.agency.id,
+              inventoryPropertyId: id,
+              status: "PENDING",
+              source: "INVENTORY_UPDATE",
+              beforeState,
+              proposedState,
+              changedFields: revisionFields,
+              submittedByUserId: workspace.membership.userId,
+            },
+          });
+        }
+      }
 
       const fields = changedFields(before, updated);
 

@@ -65,6 +65,8 @@ model User {
   agencyAuditEffectiveEvents  AgencyAuditLog[]      @relation("AgencyAuditEffectiveUser")
   propertiesCreatedForAgency  Property[]            @relation("PropertyCreatedBy")
   propertiesUpdatedForAgency  Property[]            @relation("PropertyUpdatedBy")
+  listingRevisionsSubmitted   ListingRevision[]     @relation("ListingRevisionSubmittedBy")
+  listingRevisionsReviewed    ListingRevision[]     @relation("ListingRevisionReviewedBy")
 }
 
 model AgentProfile {
@@ -166,6 +168,7 @@ model Agency {
   inventoryProperties InventoryProperty[]
   auditLogs           AgencyAuditLog[]
   properties          Property[]
+  listingRevisions    ListingRevision[]
 
   @@index([name])
   @@index([status])
@@ -291,7 +294,8 @@ model InventoryProperty {
   createdBy      User?                @relation("InventoryPropertyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy      User?                @relation("InventoryPropertyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  listings Property[]
+  listings  Property[]
+  revisions ListingRevision[]
 
   @@index([agencyId])
   @@index([stage])
@@ -477,6 +481,7 @@ model Property {
   analyticsEvents AnalyticsEvent[]
   enquiries       Enquiry[]
   savedBy         SavedProperty[]
+  revisions       ListingRevision[]
 
   approvedBy User?     @relation("PropertyApprovedBy", fields: [approvedById], references: [id])
   rejectedBy User?     @relation("PropertyRejectedBy", fields: [rejectedById], references: [id])
@@ -504,6 +509,43 @@ model Property {
   @@index([createdByUserId])
   @@index([updatedByUserId])
   @@index([agencyId, listingStatus])
+}
+
+model ListingRevision {
+  id                  Int                   @id @default(autoincrement())
+  propertyId          Int
+  agencyId            Int?
+  inventoryPropertyId Int?
+  status              ListingRevisionStatus @default(PENDING)
+
+  source        String
+  beforeState   Json
+  proposedState Json
+  changedFields String[]
+
+  submittedByUserId Int?
+  reviewedByUserId  Int?
+  submittedAt       DateTime  @default(now())
+  reviewedAt        DateTime?
+  rejectionReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  property          Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agency            Agency?            @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  inventoryProperty InventoryProperty? @relation(fields: [inventoryPropertyId], references: [id], onDelete: SetNull)
+  submittedBy       User?              @relation("ListingRevisionSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  reviewedBy        User?              @relation("ListingRevisionReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([propertyId, status])
+  @@index([status])
+  @@index([agencyId, status])
+  @@index([inventoryPropertyId, status])
+  @@index([submittedByUserId])
+  @@index([reviewedByUserId])
+  @@index([submittedAt])
 }
 
 model Enquiry {
@@ -688,6 +730,13 @@ enum InventoryStage {
   LET_COMPLETED
   WITHDRAWN
   LOST
+}
+
+enum ListingRevisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUPERSEDED
 }
 
 enum ListingStatus {
