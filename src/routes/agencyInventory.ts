@@ -972,6 +972,149 @@ router.post("/:id/link-listing", async (req: AgentRequest, res) => {
   }
 });
 
+router.post("/:id/archive", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const before = await inventoryForAgency(id, workspace.agency.id);
+    if (!before) {
+      throw new ApiError(
+        "INVENTORY_NOT_FOUND",
+        "Inventory record not found",
+        404
+      );
+    }
+
+    assertCanEdit(workspace, before.assignedMemberId);
+
+    if (before.archivedAt) {
+      return res.json({
+        ok: true,
+        item: before,
+        alreadyArchived: true,
+      });
+    }
+
+    const userId = workspace.membership.userId;
+    const archivedAt = new Date();
+
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.inventoryProperty.update({
+        where: { id },
+        data: {
+          archivedAt,
+          updatedByUserId: userId,
+        },
+        include: inventoryInclude,
+      });
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_ARCHIVED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          beforeState: inventorySnapshot(before),
+          afterState: inventorySnapshot(updated),
+          changedFields: ["archivedAt", "updatedByUserId", "updatedAt"],
+          metadata: {
+            source: "agencyInventory",
+          },
+          ...requestMeta(req),
+        },
+      });
+
+      return updated;
+    });
+
+    return res.json({
+      ok: true,
+      item: after,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/restore", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const before = await inventoryForAgency(id, workspace.agency.id);
+    if (!before) {
+      throw new ApiError(
+        "INVENTORY_NOT_FOUND",
+        "Inventory record not found",
+        404
+      );
+    }
+
+    assertCanEdit(workspace, before.assignedMemberId);
+
+    if (!before.archivedAt) {
+      return res.json({
+        ok: true,
+        item: before,
+        alreadyActive: true,
+      });
+    }
+
+    const userId = workspace.membership.userId;
+
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.inventoryProperty.update({
+        where: { id },
+        data: {
+          archivedAt: null,
+          updatedByUserId: userId,
+        },
+        include: inventoryInclude,
+      });
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_RESTORED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          beforeState: inventorySnapshot(before),
+          afterState: inventorySnapshot(updated),
+          changedFields: ["archivedAt", "updatedByUserId", "updatedAt"],
+          metadata: {
+            source: "agencyInventory",
+          },
+          ...requestMeta(req),
+        },
+      });
+
+      return updated;
+    });
+
+    return res.json({
+      ok: true,
+      item: after,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.patch("/:id", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
