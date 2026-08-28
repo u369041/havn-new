@@ -3120,9 +3120,11 @@ router.post("/", requireAuth, async (req: any, res) => {
       });
     } else {
       const transactionType =
-        mode === "RENT" || mode === "SHARE"
-          ? "RENTAL"
-          : "SALE";
+        mode === "SHARE"
+          ? "SHARE"
+          : mode === "RENT"
+            ? "RENTAL"
+            : "SALE";
 
       created = await prisma.$transaction(async (tx) => {
         const inventory = await tx.inventoryProperty.create({

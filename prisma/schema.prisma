@@ -61,6 +61,8 @@ model User {
   professionalContactsUpdated ProfessionalContact[] @relation("ProfessionalContactUpdatedBy")
   inventoryPropertiesCreated  InventoryProperty[]   @relation("InventoryPropertyCreatedBy")
   inventoryPropertiesUpdated  InventoryProperty[]   @relation("InventoryPropertyUpdatedBy")
+  inventoryMediaCreated       InventoryMedia[]      @relation("InventoryMediaCreatedBy")
+  inventoryMediaUpdated       InventoryMedia[]      @relation("InventoryMediaUpdatedBy")
   agencyAuditEvents           AgencyAuditLog[]      @relation("AgencyAuditActor")
   agencyAuditEffectiveEvents  AgencyAuditLog[]      @relation("AgencyAuditEffectiveUser")
   propertiesCreatedForAgency  Property[]            @relation("PropertyCreatedBy")
@@ -166,6 +168,7 @@ model Agency {
   members             AgencyMember[]
   contacts            ProfessionalContact[]
   inventoryProperties InventoryProperty[]
+  inventoryMedia      InventoryMedia[]
   auditLogs           AgencyAuditLog[]
   properties          Property[]
   listingRevisions    ListingRevision[]
@@ -296,6 +299,7 @@ model InventoryProperty {
 
   listings  Property[]
   revisions ListingRevision[]
+  media     InventoryMedia[]
 
   @@index([agencyId])
   @@index([stage])
@@ -307,6 +311,60 @@ model InventoryProperty {
   @@index([agencyId, stage])
   @@index([agencyId, assignedMemberId])
   @@index([updatedAt])
+}
+
+model InventoryMedia {
+  id                  Int @id @default(autoincrement())
+  inventoryPropertyId Int
+  agencyId            Int
+
+  kind       InventoryMediaKind
+  source     InventoryMediaSource     @default(CLOUDINARY)
+  visibility InventoryMediaVisibility @default(LISTING_ELIGIBLE)
+
+  url          String
+  thumbnailUrl String?
+  publicId     String?
+  resourceType String?
+  format       String?
+  mimeType     String?
+
+  originalFilename String?
+  bytes            Int?
+  width            Int?
+  height           Int?
+  duration         Float?
+
+  title    String?
+  caption  String?
+  category String?
+
+  position Int     @default(0)
+  isCover  Boolean @default(false)
+
+  externalProvider String?
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventoryProperty InventoryProperty @relation(fields: [inventoryPropertyId], references: [id], onDelete: Cascade)
+  agency            Agency            @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  createdBy         User?             @relation("InventoryMediaCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?             @relation("InventoryMediaUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([inventoryPropertyId, publicId])
+  @@index([inventoryPropertyId])
+  @@index([agencyId])
+  @@index([kind])
+  @@index([visibility])
+  @@index([inventoryPropertyId, kind])
+  @@index([inventoryPropertyId, position])
+  @@index([agencyId, createdAt])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
 }
 
 model AgencyAuditLog {
@@ -716,6 +774,23 @@ enum InventoryTransactionType {
   SALE
   RENTAL
   SHARE
+}
+
+enum InventoryMediaKind {
+  IMAGE
+  VIDEO
+  FLOOR_PLAN
+  DOCUMENT
+}
+
+enum InventoryMediaSource {
+  CLOUDINARY
+  EXTERNAL_URL
+}
+
+enum InventoryMediaVisibility {
+  LISTING_ELIGIBLE
+  INTERNAL_ONLY
 }
 
 enum InventoryStage {

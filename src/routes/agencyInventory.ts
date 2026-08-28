@@ -1,5 +1,9 @@
 import { Router, Request } from "express";
+import crypto from "crypto";
 import {
+  InventoryMediaKind,
+  InventoryMediaSource,
+  InventoryMediaVisibility,
   InventoryStage,
   InventoryTransactionType,
   Prisma,
@@ -44,6 +48,11 @@ type AgentRequest = Request & {
 const INVENTORY_STAGES = new Set<string>(Object.values(InventoryStage));
 const TRANSACTION_TYPES = new Set<string>(
   Object.values(InventoryTransactionType)
+);
+const MEDIA_KINDS = new Set<string>(Object.values(InventoryMediaKind));
+const MEDIA_SOURCES = new Set<string>(Object.values(InventoryMediaSource));
+const MEDIA_VISIBILITIES = new Set<string>(
+  Object.values(InventoryMediaVisibility)
 );
 
 const inventoryInclude = {
@@ -105,6 +114,9 @@ const inventoryInclude = {
     orderBy: {
       updatedAt: "desc" as const,
     },
+  },
+  media: {
+    orderBy: [{ position: "asc" as const }, { id: "asc" as const }],
   },
 } satisfies Prisma.InventoryPropertyInclude;
 
@@ -371,6 +383,192 @@ function parseTransactionType(
     );
   }
   return type as InventoryTransactionType;
+}
+
+function parseMediaKind(value: unknown): InventoryMediaKind {
+  const kind = String(value || "").trim().toUpperCase();
+  if (!MEDIA_KINDS.has(kind)) {
+    throw new ApiError("VALIDATION_ERROR", "Invalid inventory media kind", 400);
+  }
+  return kind as InventoryMediaKind;
+}
+
+function parseMediaSource(value: unknown): InventoryMediaSource {
+  const source = String(value || "CLOUDINARY").trim().toUpperCase();
+  if (!MEDIA_SOURCES.has(source)) {
+    throw new ApiError("VALIDATION_ERROR", "Invalid inventory media source", 400);
+  }
+  return source as InventoryMediaSource;
+}
+
+function parseMediaVisibility(value: unknown): InventoryMediaVisibility {
+  const visibility = String(value || "LISTING_ELIGIBLE").trim().toUpperCase();
+  if (!MEDIA_VISIBILITIES.has(visibility)) {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "Invalid inventory media visibility",
+      400
+    );
+  }
+  return visibility as InventoryMediaVisibility;
+}
+
+function nonNegativeInt(value: unknown, field: string): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      `${field} must be a non-negative integer`,
+      400
+    );
+  }
+  return n;
+}
+
+function nullableBoolean(value: unknown, field: string): boolean | null {
+  if (value == null || value === "") return null;
+  if (value === true || value === false) return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  throw new ApiError("VALIDATION_ERROR", `${field} must be a boolean`, 400);
+}
+
+function requiredHttpsUrl(value: unknown, field: string): string {
+  const text = requiredString(value, field, 2000);
+  try {
+    const parsed = new URL(text);
+    if (parsed.protocol !== "https:") throw new Error("HTTPS required");
+  } catch {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      `${field} must be a valid HTTPS URL`,
+      400
+    );
+  }
+  return text;
+}
+
+function assertCloudinaryUrl(url: string) {
+  const hostname = new URL(url).hostname.toLowerCase();
+  if (hostname !== "res.cloudinary.com") {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "Cloudinary media URL must use res.cloudinary.com",
+      400
+    );
+  }
+}
+
+function mediaSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    inventoryPropertyId: item.inventoryPropertyId,
+    agencyId: item.agencyId,
+    kind: item.kind,
+    source: item.source,
+    visibility: item.visibility,
+    url: item.url,
+    thumbnailUrl: item.thumbnailUrl,
+    publicId: item.publicId,
+    resourceType: item.resourceType,
+    format: item.format,
+    mimeType: item.mimeType,
+    originalFilename: item.originalFilename,
+    bytes: item.bytes,
+    width: item.width,
+    height: item.height,
+    duration: item.duration,
+    title: item.title,
+    caption: item.caption,
+    category: item.category,
+    position: item.position,
+    isCover: item.isCover,
+    externalProvider: item.externalProvider,
+    createdByUserId: item.createdByUserId,
+    updatedByUserId: item.updatedByUserId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function snapshotChangedFields(before: any, after: any): string[] {
+  const a = before || {};
+  const b = after || {};
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].filter(
+    (key) => JSON.stringify(a[key]) !== JSON.stringify(b[key])
+  );
+}
+
+function cloudinaryConfig() {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new ApiError(
+      "MEDIA_CONFIGURATION_ERROR",
+      "Inventory media storage is not configured",
+      500
+    );
+  }
+  return { cloudName, apiKey, apiSecret };
+}
+
+function cloudinarySignature(params: Record<string, string>, apiSecret: string) {
+  const payload = Object.keys(params)
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+  return crypto
+    .createHash("sha1")
+    .update(`${payload}${apiSecret}`)
+    .digest("hex");
+}
+
+async function destroyCloudinaryMedia(item: any) {
+  if (item.source !== "CLOUDINARY" || !item.publicId) return;
+
+  const { cloudName, apiKey, apiSecret } = cloudinaryConfig();
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const params = {
+    invalidate: "true",
+    public_id: String(item.publicId),
+    timestamp,
+  };
+  const signature = cloudinarySignature(params, apiSecret);
+  const resourceType = ["image", "video", "raw"].includes(
+    String(item.resourceType || "").toLowerCase()
+  )
+    ? String(item.resourceType).toLowerCase()
+    : item.kind === "VIDEO"
+      ? "video"
+      : item.kind === "DOCUMENT"
+        ? "raw"
+        : "image";
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/${resourceType}/destroy`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        ...params,
+        api_key: apiKey,
+        signature,
+      }),
+    }
+  );
+  const result: any = await response.json().catch(() => null);
+  if (!response.ok || !result || !["ok", "not found"].includes(result.result)) {
+    throw new ApiError(
+      "MEDIA_DELETE_FAILED",
+      "Could not remove the stored media asset",
+      502
+    );
+  }
 }
 
 function mutableInventoryData(body: any) {
@@ -824,6 +1022,439 @@ router.patch("/:id/assign", async (req: AgentRequest, res) => {
     });
 
     return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/media/signature", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError(
+        "INVENTORY_ARCHIVED",
+        "Archived inventory records are read-only",
+        409
+      );
+    }
+
+    const kind = parseMediaKind(req.body?.kind || "IMAGE");
+    const { cloudName, apiKey, apiSecret } = cloudinaryConfig();
+    const folder = `havn/agency-inventory/${workspace.agency.id}/${id}`;
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const params = { folder, timestamp };
+    const signature = cloudinarySignature(params, apiSecret);
+
+    return res.json({
+      ok: true,
+      cloudName,
+      apiKey,
+      timestamp: Number(timestamp),
+      folder,
+      signature,
+      resourceType: kind === "VIDEO" ? "video" : "auto",
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/media", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError(
+        "INVENTORY_ARCHIVED",
+        "Archived inventory records are read-only",
+        409
+      );
+    }
+
+    const body = req.body || {};
+    const kind = parseMediaKind(body.kind);
+    const source = parseMediaSource(body.source);
+    const visibility = parseMediaVisibility(body.visibility);
+    const url = requiredHttpsUrl(body.url, "url");
+    const publicId = nullableString(body.publicId, 1000);
+
+    if (source === "CLOUDINARY") {
+      assertCloudinaryUrl(url);
+      const expectedPrefix = `havn/agency-inventory/${workspace.agency.id}/${id}/`;
+      if (!publicId || !publicId.startsWith(expectedPrefix)) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          "Cloudinary publicId does not belong to this inventory property",
+          400
+        );
+      }
+    } else if (publicId) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "External media must not include a Cloudinary publicId",
+        400
+      );
+    }
+
+    const limits: Record<InventoryMediaKind, number> = {
+      IMAGE: 70,
+      VIDEO: 10,
+      FLOOR_PLAN: 20,
+      DOCUMENT: 50,
+    };
+    const existingCount = await prisma.inventoryMedia.count({
+      where: { inventoryPropertyId: id, kind },
+    });
+    if (existingCount >= limits[kind]) {
+      throw new ApiError(
+        "MEDIA_LIMIT_REACHED",
+        `Maximum ${limits[kind]} ${kind.toLowerCase().replace("_", " ")} assets`,
+        409
+      );
+    }
+
+    const latest = await prisma.inventoryMedia.findFirst({
+      where: { inventoryPropertyId: id },
+      orderBy: [{ position: "desc" }, { id: "desc" }],
+      select: { position: true },
+    });
+    const requestedCover = nullableBoolean(body.isCover, "isCover") === true;
+    const shouldBeCover =
+      kind === "IMAGE" &&
+      (requestedCover ||
+        !(await prisma.inventoryMedia.findFirst({
+          where: { inventoryPropertyId: id, kind: "IMAGE", isCover: true },
+          select: { id: true },
+        })));
+    const userId = workspace.membership.userId;
+
+    const created = await prisma.$transaction(async (tx) => {
+      if (shouldBeCover) {
+        await tx.inventoryMedia.updateMany({
+          where: { inventoryPropertyId: id, kind: "IMAGE", isCover: true },
+          data: { isCover: false, updatedByUserId: userId },
+        });
+      }
+
+      const media = await tx.inventoryMedia.create({
+        data: {
+          inventoryPropertyId: id,
+          agencyId: workspace.agency.id,
+          kind,
+          source,
+          visibility,
+          url,
+          thumbnailUrl:
+            body.thumbnailUrl == null
+              ? null
+              : requiredHttpsUrl(body.thumbnailUrl, "thumbnailUrl"),
+          publicId,
+          resourceType: nullableString(body.resourceType, 30),
+          format: nullableString(body.format, 30),
+          mimeType: nullableString(body.mimeType, 100),
+          originalFilename: nullableString(body.originalFilename, 500),
+          bytes: nonNegativeInt(body.bytes, "bytes"),
+          width: nonNegativeInt(body.width, "width"),
+          height: nonNegativeInt(body.height, "height"),
+          duration: nullableFloat(body.duration, "duration"),
+          title: nullableString(body.title, 300),
+          caption: nullableString(body.caption, 1000),
+          category: nullableString(body.category, 100),
+          position: (latest?.position ?? -1) + 1,
+          isCover: shouldBeCover,
+          externalProvider: nullableString(body.externalProvider, 100),
+          createdByUserId: userId,
+          updatedByUserId: userId,
+        },
+      });
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_MEDIA_CREATED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          afterState: mediaSnapshot(media),
+          changedFields: Object.keys(mediaSnapshot(media) || {}),
+          metadata: { source: "agencyInventory", mediaId: media.id, kind },
+          ...requestMeta(req),
+        },
+      });
+
+      await tx.inventoryProperty.update({
+        where: { id },
+        data: { updatedByUserId: userId },
+      });
+      return media;
+    });
+
+    return res.status(201).json({ ok: true, media: created });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.patch("/:id/media/order", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+
+    const orderedIds = Array.isArray(req.body?.orderedIds)
+      ? req.body.orderedIds.map(asPositiveInt)
+      : [];
+    if (!orderedIds.length || orderedIds.some((mediaId: number | null) => !mediaId)) {
+      throw new ApiError("VALIDATION_ERROR", "orderedIds must contain valid media ids", 400);
+    }
+    if (new Set(orderedIds).size !== orderedIds.length) {
+      throw new ApiError("VALIDATION_ERROR", "orderedIds must not contain duplicates", 400);
+    }
+
+    const media = await prisma.inventoryMedia.findMany({
+      where: { inventoryPropertyId: id },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+    });
+    if (
+      media.length !== orderedIds.length ||
+      media.some((item) => !orderedIds.includes(item.id))
+    ) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "orderedIds must contain every media item exactly once",
+        400
+      );
+    }
+
+    const coverId = asPositiveInt(req.body?.coverId);
+    if (coverId) {
+      const cover = media.find((item) => item.id === coverId);
+      if (!cover || cover.kind !== "IMAGE") {
+        throw new ApiError("VALIDATION_ERROR", "coverId must identify an image", 400);
+      }
+    }
+    const currentCover = media.find((item) => item.kind === "IMAGE" && item.isCover);
+    const effectiveCoverId =
+      coverId || currentCover?.id || media.find((item) => item.kind === "IMAGE")?.id || null;
+    const userId = workspace.membership.userId;
+
+    await prisma.$transaction(async (tx) => {
+      await Promise.all(
+        orderedIds.map((mediaId: number, position: number) =>
+          tx.inventoryMedia.update({
+            where: { id: mediaId },
+            data: {
+              position,
+              isCover: mediaId === effectiveCoverId,
+              updatedByUserId: userId,
+            },
+          })
+        )
+      );
+      await tx.inventoryProperty.update({
+        where: { id },
+        data: { updatedByUserId: userId },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_MEDIA_REORDERED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          changedFields: ["media.position", "media.isCover"],
+          metadata: {
+            source: "agencyInventory",
+            orderedIds,
+            coverId: effectiveCoverId,
+          },
+          ...requestMeta(req),
+        },
+      });
+    });
+
+    const items = await prisma.inventoryMedia.findMany({
+      where: { inventoryPropertyId: id },
+      orderBy: [{ position: "asc" }, { id: "asc" }],
+    });
+    return res.json({ ok: true, items });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.patch("/:id/media/:mediaId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    const mediaId = asPositiveInt(req.params.mediaId);
+    if (!id || !mediaId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory or media id", 400);
+    }
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+    const before = await prisma.inventoryMedia.findFirst({
+      where: { id: mediaId, inventoryPropertyId: id, agencyId: workspace.agency.id },
+    });
+    if (!before) {
+      throw new ApiError("MEDIA_NOT_FOUND", "Inventory media not found", 404);
+    }
+
+    const body = req.body || {};
+    const data: Prisma.InventoryMediaUncheckedUpdateInput = {
+      updatedByUserId: workspace.membership.userId,
+    };
+    if ("title" in body) data.title = nullableString(body.title, 300);
+    if ("caption" in body) data.caption = nullableString(body.caption, 1000);
+    if ("category" in body) data.category = nullableString(body.category, 100);
+    if ("visibility" in body) data.visibility = parseMediaVisibility(body.visibility);
+    if ("externalProvider" in body) {
+      data.externalProvider = nullableString(body.externalProvider, 100);
+    }
+
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.inventoryMedia.update({ where: { id: mediaId }, data });
+      await tx.inventoryProperty.update({
+        where: { id },
+        data: { updatedByUserId: workspace.membership.userId },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "INVENTORY_MEDIA_UPDATED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          beforeState: mediaSnapshot(before),
+          afterState: mediaSnapshot(updated),
+          changedFields: snapshotChangedFields(
+            mediaSnapshot(before),
+            mediaSnapshot(updated)
+          ),
+          metadata: { source: "agencyInventory", mediaId },
+          ...requestMeta(req),
+        },
+      });
+      return updated;
+    });
+    return res.json({ ok: true, media: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.delete("/:id/media/:mediaId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    const mediaId = asPositiveInt(req.params.mediaId);
+    if (!id || !mediaId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory or media id", 400);
+    }
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+    const before = await prisma.inventoryMedia.findFirst({
+      where: { id: mediaId, inventoryPropertyId: id, agencyId: workspace.agency.id },
+    });
+    if (!before) {
+      throw new ApiError("MEDIA_NOT_FOUND", "Inventory media not found", 404);
+    }
+
+    await destroyCloudinaryMedia(before);
+    const userId = workspace.membership.userId;
+    await prisma.$transaction(async (tx) => {
+      await tx.inventoryMedia.delete({ where: { id: mediaId } });
+      if (before.isCover && before.kind === "IMAGE") {
+        const nextCover = await tx.inventoryMedia.findFirst({
+          where: { inventoryPropertyId: id, kind: "IMAGE" },
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        if (nextCover) {
+          await tx.inventoryMedia.update({
+            where: { id: nextCover.id },
+            data: { isCover: true, updatedByUserId: userId },
+          });
+        }
+      }
+      const remaining = await tx.inventoryMedia.findMany({
+        where: { inventoryPropertyId: id },
+        orderBy: [{ position: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      await Promise.all(
+        remaining.map((item, position) =>
+          tx.inventoryMedia.update({ where: { id: item.id }, data: { position } })
+        )
+      );
+      await tx.inventoryProperty.update({
+        where: { id },
+        data: { updatedByUserId: userId },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_MEDIA_DELETED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          beforeState: mediaSnapshot(before),
+          changedFields: ["media.deleted"],
+          metadata: { source: "agencyInventory", mediaId, kind: before.kind },
+          ...requestMeta(req),
+        },
+      });
+    });
+    return res.json({ ok: true, deletedMediaId: mediaId });
   } catch (error) {
     return handleError(res, error);
   }
