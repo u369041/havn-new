@@ -22,7 +22,10 @@ import {
   canEditInventoryRecord,
   requireAgencyWorkspace,
 } from "../services/agencyAccess";
-import { inventoryToDraftListingData } from "../services/agencyPropertySync";
+import {
+  inventoryMediaToListingSnapshot,
+  inventoryToDraftListingData,
+} from "../services/agencyPropertySync";
 
 const router = Router();
 
@@ -123,6 +126,32 @@ const inventoryInclude = {
 function asPositiveInt(value: unknown): number | null {
   const n = Number(value);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+function propertySlugBase(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "property";
+}
+
+async function uniquePropertySlug(
+  tx: Prisma.TransactionClient,
+  value: string,
+): Promise<string> {
+  const base = propertySlugBase(value);
+  for (let suffix = 0; suffix < 1000; suffix += 1) {
+    const candidate = suffix === 0 ? base : `${base}-${suffix + 1}`;
+    const existing = await tx.property.findUnique({
+      where: { slug: candidate },
+      select: { id: true },
+    });
+    if (!existing) return candidate;
+  }
+  return `${base}-${Date.now()}`;
 }
 
 function nullableString(value: unknown, maxLength = 500): string | null {
@@ -1022,6 +1051,136 @@ router.patch("/:id/assign", async (req: AgentRequest, res) => {
     });
 
     return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/listing", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError(
+        "INVENTORY_ARCHIVED",
+        "Restore this Inventory property before creating a listing",
+        409,
+      );
+    }
+
+    const existingDraft = inventory.listings.find(
+      (listing) => listing.listingStatus === "DRAFT",
+    );
+    if (existingDraft) {
+      return res.json({ ok: true, created: false, item: existingDraft });
+    }
+    const activeListing = inventory.listings.find((listing) =>
+      ["SUBMITTED", "PUBLISHED", "REJECTED"].includes(listing.listingStatus),
+    );
+    if (activeListing) {
+      throw new ApiError(
+        "LISTING_ALREADY_EXISTS",
+        "This Inventory property already has a linked listing",
+        409,
+      );
+    }
+
+    const listingMedia = inventoryMediaToListingSnapshot(inventory.media);
+    const title = [inventory.address1, inventory.city, inventory.county]
+      .filter(Boolean)
+      .join(", ");
+    const mode: "BUY" | "RENT" | "SHARE" =
+      inventory.transactionType === "SHARE"
+        ? "SHARE"
+        : inventory.transactionType === "RENTAL"
+          ? "RENT"
+          : "BUY";
+    const userId = workspace.membership.userId;
+
+    const listing = await prisma.$transaction(async (tx) => {
+      const slug = await uniquePropertySlug(
+        tx,
+        [inventory.address1, inventory.city, inventory.eircode].filter(Boolean).join(" "),
+      );
+      const created = await tx.property.create({
+        data: {
+          slug,
+          title: title || `Inventory property ${inventory.id}`,
+          address1: inventory.address1,
+          address2: inventory.address2,
+          city: inventory.city,
+          county: inventory.county,
+          eircode: inventory.eircode,
+          price: inventory.askingPrice ?? 0,
+          bedrooms: inventory.bedrooms,
+          bathrooms: inventory.bathrooms,
+          size: inventory.size,
+          sizeUnit: inventory.sizeUnit,
+          propertyType: inventory.propertyType || "house",
+          features: [],
+          photos: listingMedia.photos,
+          photoMeta: listingMedia.photoMeta,
+          photoMetaUpdatedAt: new Date(),
+          presentationMedia: listingMedia.presentationMedia,
+          userId,
+          mode,
+          listingStatus: "DRAFT",
+          agencyId: workspace.agency.id,
+          inventoryPropertyId: inventory.id,
+          createdByUserId: userId,
+          updatedByUserId: userId,
+        },
+      });
+
+      if (["PROSPECT", "APPRAISAL", "INSTRUCTION"].includes(inventory.stage)) {
+        await tx.inventoryProperty.update({
+          where: { id: inventory.id },
+          data: { stage: "PREPARING", updatedByUserId: userId },
+        });
+      }
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "LISTING_DRAFT_CREATED_FROM_INVENTORY",
+          entityType: "InventoryProperty",
+          entityId: String(inventory.id),
+          afterState: {
+            listingId: created.id,
+            listingSlug: created.slug,
+            listingStatus: created.listingStatus,
+            photoCount: listingMedia.photos.length,
+            supportingMediaCount: Array.isArray(listingMedia.presentationMedia)
+              ? listingMedia.presentationMedia.length
+              : 0,
+          },
+          changedFields: [
+            "Property.created",
+            "Property.photos",
+            "Property.photoMeta",
+            "Property.presentationMedia",
+          ],
+          metadata: { source: "agencyInventory", propertyId: created.id },
+          ...requestMeta(req),
+        },
+      });
+
+      return created;
+    });
+
+    return res.status(201).json({ ok: true, created: true, item: listing });
   } catch (error) {
     return handleError(res, error);
   }

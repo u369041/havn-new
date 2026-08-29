@@ -520,6 +520,7 @@ model Property {
   intelligenceUpdatedAt   DateTime?
   photoMeta               Json?
   photoMetaUpdatedAt      DateTime?
+  presentationMedia       Json?
   listingPackage          ListingPackage?
   paymentStatus           PaymentStatus   @default(UNPAID)
   stripeCheckoutSessionId String?         @unique
