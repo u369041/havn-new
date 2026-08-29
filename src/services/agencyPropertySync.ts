@@ -17,6 +17,32 @@ type InventoryDraftSyncSource = Pick<
   | "bathrooms"
   | "size"
   | "sizeUnit"
+  | "transactionType"
+  | "askingPrice"
+  | "listingTitle"
+  | "description"
+  | "features"
+  | "berRating"
+  | "berNo"
+  | "parking"
+  | "outdoorSpace"
+  | "saleCondition"
+  | "yearBuilt"
+  | "heatingType"
+  | "viewingDetails"
+  | "rentFrequency"
+  | "deposit"
+  | "availableFrom"
+  | "furnished"
+  | "leaseLength"
+  | "minimumTerm"
+  | "billsIncluded"
+  | "petsAllowed"
+  | "roomType"
+  | "ensuite"
+  | "currentOccupants"
+  | "couplesAllowed"
+  | "ownerOccupied"
 >;
 
 type PropertyInventorySyncSource = Pick<
@@ -31,6 +57,33 @@ type PropertyInventorySyncSource = Pick<
   | "bathrooms"
   | "size"
   | "sizeUnit"
+  | "mode"
+  | "price"
+  | "title"
+  | "description"
+  | "features"
+  | "ber"
+  | "berRating"
+  | "berNo"
+  | "parking"
+  | "outdoorSpace"
+  | "saleCondition"
+  | "yearBuilt"
+  | "heatingType"
+  | "viewingDetails"
+  | "rentFrequency"
+  | "deposit"
+  | "availableFrom"
+  | "furnished"
+  | "leaseLength"
+  | "minimumTerm"
+  | "billsIncluded"
+  | "petsAllowed"
+  | "roomType"
+  | "ensuite"
+  | "currentOccupants"
+  | "couplesAllowed"
+  | "ownerOccupied"
 >;
 
 type PublicInventoryMediaSource = Pick<
@@ -136,6 +189,42 @@ export function inventoryToDraftListingData(
     bathrooms: inventory.bathrooms,
     size: inventory.size,
     sizeUnit: inventory.sizeUnit,
+    mode:
+      inventory.transactionType === "SHARE"
+        ? "SHARE"
+        : inventory.transactionType === "RENTAL"
+          ? "RENT"
+          : "BUY",
+    price: inventory.askingPrice ?? 0,
+    title:
+      inventory.listingTitle ||
+      [inventory.address1, inventory.city, inventory.county]
+        .filter(Boolean)
+        .join(", "),
+    description: inventory.description,
+    features: inventory.features,
+    ber: inventory.berRating,
+    berRating: inventory.berRating,
+    berNo: inventory.berNo,
+    parking: inventory.parking,
+    outdoorSpace: inventory.outdoorSpace,
+    saleCondition: inventory.saleCondition,
+    yearBuilt: inventory.yearBuilt,
+    heatingType: inventory.heatingType,
+    viewingDetails: inventory.viewingDetails,
+    rentFrequency: inventory.rentFrequency,
+    deposit: inventory.deposit,
+    availableFrom: inventory.availableFrom,
+    furnished: inventory.furnished,
+    leaseLength: inventory.leaseLength,
+    minimumTerm: inventory.minimumTerm,
+    billsIncluded: inventory.billsIncluded,
+    petsAllowed: inventory.petsAllowed,
+    roomType: inventory.roomType,
+    ensuite: inventory.ensuite,
+    currentOccupants: inventory.currentOccupants,
+    couplesAllowed: inventory.couplesAllowed,
+    ownerOccupied: inventory.ownerOccupied,
   };
 }
 
@@ -153,5 +242,36 @@ export function draftListingToInventoryData(
     bathrooms: property.bathrooms,
     size: property.size,
     sizeUnit: property.sizeUnit,
+    transactionType:
+      property.mode === "SHARE"
+        ? "SHARE"
+        : property.mode === "RENT"
+          ? "RENTAL"
+          : "SALE",
+    askingPrice: property.price,
+    listingTitle: property.title,
+    description: property.description,
+    features: property.features,
+    berRating: property.berRating || property.ber,
+    berNo: property.berNo,
+    parking: property.parking,
+    outdoorSpace: property.outdoorSpace,
+    saleCondition: property.saleCondition,
+    yearBuilt: property.yearBuilt,
+    heatingType: property.heatingType,
+    viewingDetails: property.viewingDetails,
+    rentFrequency: property.rentFrequency,
+    deposit: property.deposit,
+    availableFrom: property.availableFrom,
+    furnished: property.furnished,
+    leaseLength: property.leaseLength,
+    minimumTerm: property.minimumTerm,
+    billsIncluded: property.billsIncluded,
+    petsAllowed: property.petsAllowed,
+    roomType: property.roomType,
+    ensuite: property.ensuite,
+    currentOccupants: property.currentOccupants,
+    couplesAllowed: property.couplesAllowed,
+    ownerOccupied: property.ownerOccupied,
   };
 }

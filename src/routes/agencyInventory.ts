@@ -229,6 +229,30 @@ function inventorySnapshot(item: any) {
     stage: item.stage,
     askingPrice: item.askingPrice,
     valuationPrice: item.valuationPrice,
+    listingTitle: item.listingTitle,
+    description: item.description,
+    features: item.features,
+    berRating: item.berRating,
+    berNo: item.berNo,
+    parking: item.parking,
+    outdoorSpace: item.outdoorSpace,
+    saleCondition: item.saleCondition,
+    yearBuilt: item.yearBuilt,
+    heatingType: item.heatingType,
+    viewingDetails: item.viewingDetails,
+    rentFrequency: item.rentFrequency,
+    deposit: item.deposit,
+    availableFrom: item.availableFrom,
+    furnished: item.furnished,
+    leaseLength: item.leaseLength,
+    minimumTerm: item.minimumTerm,
+    billsIncluded: item.billsIncluded,
+    petsAllowed: item.petsAllowed,
+    roomType: item.roomType,
+    ensuite: item.ensuite,
+    currentOccupants: item.currentOccupants,
+    couplesAllowed: item.couplesAllowed,
+    ownerOccupied: item.ownerOccupied,
     assignedMemberId: item.assignedMemberId,
     primaryContactId: item.primaryContactId,
     notes: item.notes,
@@ -263,6 +287,9 @@ function changedFields(before: any, after: any): string[] {
 
 function listingPublicSnapshot(item: any) {
   return {
+    title: item?.title ?? null,
+    price: item?.price ?? 0,
+    mode: item?.mode ?? null,
     address1: item?.address1 ?? null,
     address2: item?.address2 ?? null,
     city: item?.city ?? null,
@@ -273,11 +300,44 @@ function listingPublicSnapshot(item: any) {
     bathrooms: item?.bathrooms ?? null,
     size: item?.size ?? null,
     sizeUnit: item?.sizeUnit ?? null,
+    description: item?.description ?? null,
+    features: item?.features ?? [],
+    berRating: item?.berRating ?? item?.ber ?? null,
+    berNo: item?.berNo ?? null,
+    parking: item?.parking ?? null,
+    outdoorSpace: item?.outdoorSpace ?? null,
+    saleCondition: item?.saleCondition ?? null,
+    yearBuilt: item?.yearBuilt ?? null,
+    heatingType: item?.heatingType ?? null,
+    viewingDetails: item?.viewingDetails ?? null,
+    rentFrequency: item?.rentFrequency ?? null,
+    deposit: item?.deposit ?? null,
+    availableFrom: item?.availableFrom ?? null,
+    furnished: item?.furnished ?? null,
+    leaseLength: item?.leaseLength ?? null,
+    minimumTerm: item?.minimumTerm ?? null,
+    billsIncluded: item?.billsIncluded ?? null,
+    petsAllowed: item?.petsAllowed ?? null,
+    roomType: item?.roomType ?? null,
+    ensuite: item?.ensuite ?? null,
+    currentOccupants: item?.currentOccupants ?? null,
+    couplesAllowed: item?.couplesAllowed ?? null,
+    ownerOccupied: item?.ownerOccupied ?? null,
   };
 }
 
 function inventoryPublicProposal(item: any) {
   return {
+    title:
+      item?.listingTitle ||
+      [item?.address1, item?.city, item?.county].filter(Boolean).join(", "),
+    price: item?.askingPrice ?? 0,
+    mode:
+      item?.transactionType === "SHARE"
+        ? "SHARE"
+        : item?.transactionType === "RENTAL"
+          ? "RENT"
+          : "BUY",
     address1: item?.address1 ?? null,
     address2: item?.address2 ?? null,
     city: item?.city ?? null,
@@ -288,6 +348,29 @@ function inventoryPublicProposal(item: any) {
     bathrooms: item?.bathrooms ?? null,
     size: item?.size ?? null,
     sizeUnit: item?.sizeUnit ?? null,
+    description: item?.description ?? null,
+    features: item?.features ?? [],
+    berRating: item?.berRating ?? null,
+    berNo: item?.berNo ?? null,
+    parking: item?.parking ?? null,
+    outdoorSpace: item?.outdoorSpace ?? null,
+    saleCondition: item?.saleCondition ?? null,
+    yearBuilt: item?.yearBuilt ?? null,
+    heatingType: item?.heatingType ?? null,
+    viewingDetails: item?.viewingDetails ?? null,
+    rentFrequency: item?.rentFrequency ?? null,
+    deposit: item?.deposit ?? null,
+    availableFrom: item?.availableFrom ?? null,
+    furnished: item?.furnished ?? null,
+    leaseLength: item?.leaseLength ?? null,
+    minimumTerm: item?.minimumTerm ?? null,
+    billsIncluded: item?.billsIncluded ?? null,
+    petsAllowed: item?.petsAllowed ?? null,
+    roomType: item?.roomType ?? null,
+    ensuite: item?.ensuite ?? null,
+    currentOccupants: item?.currentOccupants ?? null,
+    couplesAllowed: item?.couplesAllowed ?? null,
+    ownerOccupied: item?.ownerOccupied ?? null,
   };
 }
 
@@ -600,6 +683,18 @@ async function destroyCloudinaryMedia(item: any) {
   }
 }
 
+function inventoryStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new ApiError("VALIDATION_ERROR", `${field} must be an array`, 400);
+  }
+  if (value.length > 50) {
+    throw new ApiError("VALIDATION_ERROR", `${field} cannot exceed 50 items`, 400);
+  }
+  return value
+    .map((item) => String(item || "").trim().slice(0, 300))
+    .filter(Boolean);
+}
+
 function mutableInventoryData(body: any) {
   const data: Prisma.InventoryPropertyUncheckedUpdateInput = {};
 
@@ -646,6 +741,44 @@ function mutableInventoryData(body: any) {
   if ("valuationPrice" in body) {
     data.valuationPrice = nullableInt(body.valuationPrice, "valuationPrice");
   }
+  if ("listingTitle" in body) {
+    data.listingTitle = nullableString(body.listingTitle, 300);
+  }
+  if ("description" in body) {
+    data.description = nullableString(body.description, 20000);
+  }
+  if ("features" in body) {
+    data.features = inventoryStringArray(body.features, "features");
+  }
+  if ("berRating" in body) data.berRating = nullableString(body.berRating, 30);
+  if ("berNo" in body) data.berNo = nullableString(body.berNo, 100);
+  if ("parking" in body) data.parking = nullableString(body.parking, 200);
+  if ("outdoorSpace" in body) data.outdoorSpace = nullableString(body.outdoorSpace, 200);
+  if ("saleCondition" in body) data.saleCondition = nullableString(body.saleCondition, 200);
+  if ("yearBuilt" in body) {
+    const yearBuilt = nonNegativeInt(body.yearBuilt, "yearBuilt");
+    if (yearBuilt != null && (yearBuilt < 1000 || yearBuilt > 2200)) {
+      throw new ApiError("VALIDATION_ERROR", "yearBuilt must be between 1000 and 2200", 400);
+    }
+    data.yearBuilt = yearBuilt;
+  }
+  if ("heatingType" in body) data.heatingType = nullableString(body.heatingType, 200);
+  if ("viewingDetails" in body) data.viewingDetails = nullableString(body.viewingDetails, 5000);
+  if ("rentFrequency" in body) data.rentFrequency = nullableString(body.rentFrequency, 100);
+  if ("deposit" in body) data.deposit = nonNegativeInt(body.deposit, "deposit");
+  if ("availableFrom" in body) data.availableFrom = nullableDate(body.availableFrom, "availableFrom");
+  if ("furnished" in body) data.furnished = nullableBoolean(body.furnished, "furnished");
+  if ("leaseLength" in body) data.leaseLength = nullableString(body.leaseLength, 200);
+  if ("minimumTerm" in body) data.minimumTerm = nullableString(body.minimumTerm, 200);
+  if ("billsIncluded" in body) data.billsIncluded = nullableString(body.billsIncluded, 200);
+  if ("petsAllowed" in body) data.petsAllowed = nullableString(body.petsAllowed, 200);
+  if ("roomType" in body) data.roomType = nullableString(body.roomType, 200);
+  if ("ensuite" in body) data.ensuite = nullableString(body.ensuite, 200);
+  if ("currentOccupants" in body) {
+    data.currentOccupants = nonNegativeInt(body.currentOccupants, "currentOccupants");
+  }
+  if ("couplesAllowed" in body) data.couplesAllowed = nullableString(body.couplesAllowed, 200);
+  if ("ownerOccupied" in body) data.ownerOccupied = nullableString(body.ownerOccupied, 200);
   if ("primaryContactId" in body) {
     data.primaryContactId = asPositiveInt(body.primaryContactId);
   }
@@ -1114,19 +1247,42 @@ router.post("/:id/listing", async (req: AgentRequest, res) => {
       const created = await tx.property.create({
         data: {
           slug,
-          title: title || `Inventory property ${inventory.id}`,
+          title: inventory.listingTitle || title || `Inventory property ${inventory.id}`,
           address1: inventory.address1,
           address2: inventory.address2,
           city: inventory.city,
           county: inventory.county,
           eircode: inventory.eircode,
           price: inventory.askingPrice ?? 0,
+          description: inventory.description,
+          features: inventory.features,
+          ber: inventory.berRating,
+          berRating: inventory.berRating,
+          berNo: inventory.berNo,
+          parking: inventory.parking,
+          outdoorSpace: inventory.outdoorSpace,
+          saleCondition: inventory.saleCondition,
+          yearBuilt: inventory.yearBuilt,
+          heatingType: inventory.heatingType,
+          viewingDetails: inventory.viewingDetails,
+          rentFrequency: inventory.rentFrequency,
+          deposit: inventory.deposit,
+          availableFrom: inventory.availableFrom,
+          furnished: inventory.furnished,
+          leaseLength: inventory.leaseLength,
+          minimumTerm: inventory.minimumTerm,
+          billsIncluded: inventory.billsIncluded,
+          petsAllowed: inventory.petsAllowed,
+          roomType: inventory.roomType,
+          ensuite: inventory.ensuite,
+          currentOccupants: inventory.currentOccupants,
+          couplesAllowed: inventory.couplesAllowed,
+          ownerOccupied: inventory.ownerOccupied,
           bedrooms: inventory.bedrooms,
           bathrooms: inventory.bathrooms,
           size: inventory.size,
           sizeUnit: inventory.sizeUnit,
           propertyType: inventory.propertyType || "house",
-          features: [],
           photos: listingMedia.photos,
           photoMeta: listingMedia.photoMeta,
           photoMetaUpdatedAt: new Date(),
@@ -1997,6 +2153,32 @@ router.patch("/:id", async (req: AgentRequest, res) => {
           bathrooms: true,
           size: true,
           sizeUnit: true,
+          mode: true,
+          price: true,
+          description: true,
+          features: true,
+          ber: true,
+          berRating: true,
+          berNo: true,
+          parking: true,
+          outdoorSpace: true,
+          saleCondition: true,
+          yearBuilt: true,
+          heatingType: true,
+          viewingDetails: true,
+          rentFrequency: true,
+          deposit: true,
+          availableFrom: true,
+          furnished: true,
+          leaseLength: true,
+          minimumTerm: true,
+          billsIncluded: true,
+          petsAllowed: true,
+          roomType: true,
+          ensuite: true,
+          currentOccupants: true,
+          couplesAllowed: true,
+          ownerOccupied: true,
         },
       });
 

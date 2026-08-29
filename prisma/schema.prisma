@@ -269,6 +269,32 @@ model InventoryProperty {
   askingPrice    Int?
   valuationPrice Int?
 
+  listingTitle   String?
+  description    String?
+  features       String[] @default([])
+  berRating      String?
+  berNo          String?
+  parking        String?
+  outdoorSpace   String?
+  saleCondition  String?
+  yearBuilt      Int?
+  heatingType    String?
+  viewingDetails String?
+
+  rentFrequency    String?
+  deposit          Int?
+  availableFrom    DateTime?
+  furnished        Boolean?
+  leaseLength      String?
+  minimumTerm      String?
+  billsIncluded    String?
+  petsAllowed      String?
+  roomType         String?
+  ensuite          String?
+  currentOccupants Int?
+  couplesAllowed   String?
+  ownerOccupied    String?
+
   assignedMemberId Int?
   primaryContactId Int?
 
