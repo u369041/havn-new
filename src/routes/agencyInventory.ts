@@ -225,6 +225,10 @@ function inventorySnapshot(item: any) {
     bathrooms: item.bathrooms,
     size: item.size,
     sizeUnit: item.sizeUnit,
+    lat: item.lat,
+    lng: item.lng,
+    intelligence: item.intelligence,
+    intelligenceUpdatedAt: item.intelligenceUpdatedAt,
     transactionType: item.transactionType,
     stage: item.stage,
     askingPrice: item.askingPrice,
@@ -638,6 +642,49 @@ function cloudinarySignature(params: Record<string, string>, apiSecret: string) 
     .createHash("sha1")
     .update(`${payload}${apiSecret}`)
     .digest("hex");
+}
+
+async function geocodeInventoryLocation(inventory: any) {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    throw new ApiError(
+      "LOCATION_CONFIGURATION_ERROR",
+      "Property location services are not configured",
+      500,
+    );
+  }
+  const address = [
+    inventory.address1,
+    inventory.address2,
+    inventory.city,
+    inventory.county,
+    inventory.eircode,
+    "Ireland",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const endpoint = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  endpoint.searchParams.set("address", address);
+  endpoint.searchParams.set("region", "ie");
+  endpoint.searchParams.set("key", apiKey);
+  const response = await fetch(endpoint);
+  const payload: any = await response.json().catch(() => null);
+  const location = payload?.results?.[0]?.geometry?.location;
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  if (!response.ok || payload?.status !== "OK" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new ApiError(
+      "LOCATION_NOT_FOUND",
+      payload?.error_message || "HAVN could not confirm this property location",
+      422,
+    );
+  }
+  return {
+    lat,
+    lng,
+    formattedAddress: nullableString(payload.results[0]?.formatted_address, 500),
+    placeId: nullableString(payload.results[0]?.place_id, 300),
+  };
 }
 
 async function destroyCloudinaryMedia(item: any) {
@@ -1189,6 +1236,71 @@ router.patch("/:id/assign", async (req: AgentRequest, res) => {
   }
 });
 
+router.post("/:id/location/geocode", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+
+    const location = await geocodeInventoryLocation(inventory);
+    const userId = workspace.membership.userId;
+    const updated = await prisma.$transaction(async (tx) => {
+      const item = await tx.inventoryProperty.update({
+        where: { id },
+        data: {
+          lat: location.lat,
+          lng: location.lng,
+          intelligence: Prisma.DbNull,
+          intelligenceUpdatedAt: null,
+          updatedByUserId: userId,
+        },
+        include: inventoryInclude,
+      });
+      await tx.property.updateMany({
+        where: {
+          inventoryPropertyId: id,
+          agencyId: workspace.agency.id,
+          listingStatus: "DRAFT",
+        },
+        data: {
+          lat: location.lat,
+          lng: location.lng,
+          intelligence: Prisma.DbNull,
+          intelligenceUpdatedAt: null,
+          updatedByUserId: userId,
+        },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_LOCATION_CONFIRMED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          afterState: location,
+          changedFields: ["lat", "lng", "intelligence"],
+          metadata: { source: "agencyInventory", ...location },
+          ...requestMeta(req),
+        },
+      });
+      return item;
+    });
+    return res.json({ ok: true, item: updated, location });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.post("/:id/listing", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
@@ -1253,6 +1365,10 @@ router.post("/:id/listing", async (req: AgentRequest, res) => {
           city: inventory.city,
           county: inventory.county,
           eircode: inventory.eircode,
+          lat: inventory.lat,
+          lng: inventory.lng,
+          intelligence: inventory.intelligence ?? Prisma.DbNull,
+          intelligenceUpdatedAt: inventory.intelligenceUpdatedAt,
           price: inventory.askingPrice ?? 0,
           description: inventory.description,
           features: inventory.features,
@@ -2088,6 +2204,13 @@ router.patch("/:id", async (req: AgentRequest, res) => {
     }
 
     const data = mutableInventoryData(body);
+
+    if (["address1", "address2", "city", "county", "eircode"].some((field) => field in body)) {
+      data.lat = null;
+      data.lng = null;
+      data.intelligence = Prisma.DbNull;
+      data.intelligenceUpdatedAt = null;
+    }
 
     if ("primaryContactId" in body) {
       const primaryContactId =

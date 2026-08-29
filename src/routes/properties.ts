@@ -2301,7 +2301,7 @@ router.post("/:id/view", async (req: any, res) => {
  * This MUST appear before /:slug, otherwise Express treats "slug" as the slug value.
  */
 
-router.get("/:id/intelligence", async (req: any, res) => {
+router.get("/:id/intelligence", requireAuth.optional, async (req: any, res) => {
   try {
     const id = toPositiveSafeInt(req.params.id);
 
@@ -2314,7 +2314,11 @@ router.get("/:id/intelligence", async (req: any, res) => {
 
     const property = await prisma.property.findUnique({ where: { id } });
 
-    if (!property || property.listingStatus !== "PUBLISHED") {
+    if (
+      !property ||
+      (property.listingStatus !== "PUBLISHED" &&
+        (!req.user || !isOwner(req.user, property.userId)))
+    ) {
       return res.status(404).json({ ok: false, message: "Property not found" });
     }
 
@@ -2953,16 +2957,34 @@ router.get("/:id/intelligence", async (req: any, res) => {
       insight,
     };
 
-    const updated = await prisma.property.update({
-      where: { id: property.id },
-      data: {
-        intelligence: intelligence as any,
-        intelligenceUpdatedAt: new Date(),
-      },
-      select: {
-        intelligence: true,
-        intelligenceUpdatedAt: true,
-      },
+    const updatedAt = new Date();
+    const updated = await prisma.$transaction(async (tx) => {
+      const listing = await tx.property.update({
+        where: { id: property.id },
+        data: {
+          intelligence: intelligence as any,
+          intelligenceUpdatedAt: updatedAt,
+        },
+        select: {
+          intelligence: true,
+          intelligenceUpdatedAt: true,
+        },
+      });
+      if (property.inventoryPropertyId) {
+        await tx.inventoryProperty.updateMany({
+          where: {
+            id: property.inventoryPropertyId,
+            agencyId: property.agencyId ?? undefined,
+          },
+          data: {
+            lat,
+            lng,
+            intelligence: intelligence as any,
+            intelligenceUpdatedAt: updatedAt,
+          },
+        });
+      }
+      return listing;
     });
 
     return res.json({

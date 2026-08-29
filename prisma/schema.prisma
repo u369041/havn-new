@@ -257,11 +257,15 @@ model InventoryProperty {
   county   String
   eircode  String?
 
-  propertyType String?
-  bedrooms     Int?
-  bathrooms    Int?
-  size         Float?
-  sizeUnit     String?
+  propertyType          String?
+  bedrooms              Int?
+  bathrooms             Int?
+  size                  Float?
+  sizeUnit              String?
+  lat                   Float?
+  lng                   Float?
+  intelligence          Json?
+  intelligenceUpdatedAt DateTime?
 
   transactionType InventoryTransactionType @default(SALE)
   stage           InventoryStage           @default(PROSPECT)

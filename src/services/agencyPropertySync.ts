@@ -1,7 +1,7 @@
-﻿import type {
+﻿import { Prisma } from "@prisma/client";
+import type {
   InventoryMedia,
   InventoryProperty,
-  Prisma,
   Property,
 } from "@prisma/client";
 
@@ -17,6 +17,10 @@ type InventoryDraftSyncSource = Pick<
   | "bathrooms"
   | "size"
   | "sizeUnit"
+  | "lat"
+  | "lng"
+  | "intelligence"
+  | "intelligenceUpdatedAt"
   | "transactionType"
   | "askingPrice"
   | "listingTitle"
@@ -57,6 +61,10 @@ type PropertyInventorySyncSource = Pick<
   | "bathrooms"
   | "size"
   | "sizeUnit"
+  | "lat"
+  | "lng"
+  | "intelligence"
+  | "intelligenceUpdatedAt"
   | "mode"
   | "price"
   | "title"
@@ -189,6 +197,10 @@ export function inventoryToDraftListingData(
     bathrooms: inventory.bathrooms,
     size: inventory.size,
     sizeUnit: inventory.sizeUnit,
+    lat: inventory.lat,
+    lng: inventory.lng,
+    intelligence: inventory.intelligence ?? Prisma.DbNull,
+    intelligenceUpdatedAt: inventory.intelligenceUpdatedAt,
     mode:
       inventory.transactionType === "SHARE"
         ? "SHARE"
@@ -242,6 +254,10 @@ export function draftListingToInventoryData(
     bathrooms: property.bathrooms,
     size: property.size,
     sizeUnit: property.sizeUnit,
+    lat: property.lat,
+    lng: property.lng,
+    intelligence: property.intelligence ?? Prisma.DbNull,
+    intelligenceUpdatedAt: property.intelligenceUpdatedAt,
     transactionType:
       property.mode === "SHARE"
         ? "SHARE"
