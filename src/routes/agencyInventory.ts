@@ -3,10 +3,12 @@ import crypto from "crypto";
 import {
   InventoryMediaKind,
   InventoryMediaSource,
+  InventoryContactNotificationLevel,
   InventoryMediaVisibility,
   InventoryStage,
   InventoryTransactionType,
   Prisma,
+  ProfessionalContactRole,
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
@@ -57,6 +59,13 @@ const MEDIA_SOURCES = new Set<string>(Object.values(InventoryMediaSource));
 const MEDIA_VISIBILITIES = new Set<string>(
   Object.values(InventoryMediaVisibility)
 );
+const CONTACT_NOTIFICATION_LEVELS = new Set<string>(
+  Object.values(InventoryContactNotificationLevel)
+);
+const PROFESSIONAL_CONTACT_ROLES = new Set<string>(
+  Object.values(ProfessionalContactRole)
+);
+const MAX_ACTIVE_PROPERTY_CONTACTS = 10;
 
 const inventoryInclude = {
   assignedMember: {
@@ -120,6 +129,37 @@ const inventoryInclude = {
   },
   media: {
     orderBy: [{ position: "asc" as const }, { id: "asc" as const }],
+  },
+  contacts: {
+    where: { archivedAt: null },
+    orderBy: [
+      { isPrimary: "desc" as const },
+      { createdAt: "asc" as const },
+      { id: "asc" as const },
+    ],
+    include: {
+      contact: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          companyName: true,
+          primaryEmail: true,
+          phoneNumber: true,
+          roles: true,
+          notes: true,
+          isArchived: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      createdBy: {
+        select: { id: true, name: true, email: true },
+      },
+      updatedBy: {
+        select: { id: true, name: true, email: true },
+      },
+    },
   },
 } satisfies Prisma.InventoryPropertyInclude;
 
@@ -474,6 +514,154 @@ async function assertPrimaryContact(
       "Primary contact must belong to this agency and be active",
       400
     );
+  }
+}
+
+function parseContactNotificationLevel(
+  value: unknown,
+  fallback: InventoryContactNotificationLevel = "OFF"
+): InventoryContactNotificationLevel {
+  if (value == null || value === "") return fallback;
+  const level = String(value).trim().toUpperCase();
+  if (!CONTACT_NOTIFICATION_LEVELS.has(level)) {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "notificationLevel must be OFF, MAJOR_ONLY or MEDIUM_AND_MAJOR",
+      400
+    );
+  }
+  return level as InventoryContactNotificationLevel;
+}
+
+function parseProfessionalContactRoles(value: unknown): ProfessionalContactRole[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    throw new ApiError("VALIDATION_ERROR", "roles must be an array", 400);
+  }
+  const roles = [...new Set(
+    value
+      .map((role) => String(role || "").trim().toUpperCase())
+      .filter(Boolean)
+  )];
+  if (roles.some((role) => !PROFESSIONAL_CONTACT_ROLES.has(role))) {
+    throw new ApiError("VALIDATION_ERROR", "One or more contact roles are invalid", 400);
+  }
+  return roles as ProfessionalContactRole[];
+}
+
+function contactSnapshot(link: any) {
+  if (!link) return null;
+  const contact = link.contact || null;
+  return {
+    linkId: link.id,
+    inventoryPropertyId: link.inventoryPropertyId,
+    contactId: link.contactId,
+    relationshipLabel: link.relationshipLabel,
+    isPrimary: link.isPrimary,
+    notificationLevel: link.notificationLevel,
+    archivedAt: link.archivedAt,
+    contact: contact
+      ? {
+          id: contact.id,
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          companyName: contact.companyName,
+          primaryEmail: contact.primaryEmail,
+          phoneNumber: contact.phoneNumber,
+          roles: contact.roles,
+          isArchived: contact.isArchived,
+        }
+      : null,
+  };
+}
+
+function contactDisplayName(contact: any): string {
+  const personName = [contact?.firstName, contact?.lastName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  return personName || String(contact?.companyName || "").trim() || String(contact?.primaryEmail || "").trim() || "Contact";
+}
+
+async function lockInventoryContacts(
+  tx: Prisma.TransactionClient,
+  agencyId: number,
+  inventoryPropertyId: number
+) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(${agencyId}, ${inventoryPropertyId})`;
+}
+
+async function syncLegacyPrimaryContactLink(
+  tx: Prisma.TransactionClient,
+  params: {
+    agencyId: number;
+    inventoryPropertyId: number;
+    contactId: number | null;
+    userId: number;
+  }
+) {
+  const { agencyId, inventoryPropertyId, contactId, userId } = params;
+  await lockInventoryContacts(tx, agencyId, inventoryPropertyId);
+
+  await tx.inventoryPropertyContact.updateMany({
+    where: {
+      agencyId,
+      inventoryPropertyId,
+      archivedAt: null,
+      isPrimary: true,
+    },
+    data: {
+      isPrimary: false,
+      updatedByUserId: userId,
+    },
+  });
+
+  if (contactId == null) return;
+
+  const existing = await tx.inventoryPropertyContact.findUnique({
+    where: {
+      inventoryPropertyId_contactId: {
+        inventoryPropertyId,
+        contactId,
+      },
+    },
+  });
+
+  if (!existing || existing.archivedAt) {
+    const activeCount = await tx.inventoryPropertyContact.count({
+      where: { inventoryPropertyId, archivedAt: null },
+    });
+    if (activeCount >= MAX_ACTIVE_PROPERTY_CONTACTS) {
+      throw new ApiError(
+        "CONTACT_LIMIT_REACHED",
+        `An Inventory property can have a maximum of ${MAX_ACTIVE_PROPERTY_CONTACTS} active contacts`,
+        409
+      );
+    }
+  }
+
+  if (existing) {
+    await tx.inventoryPropertyContact.update({
+      where: { id: existing.id },
+      data: {
+        archivedAt: null,
+        isPrimary: true,
+        updatedByUserId: userId,
+      },
+    });
+  } else {
+    await tx.inventoryPropertyContact.create({
+      data: {
+        agencyId,
+        inventoryPropertyId,
+        contactId,
+        relationshipLabel: "Primary contact",
+        isPrimary: true,
+        notificationLevel: "OFF",
+        createdByUserId: userId,
+        updatedByUserId: userId,
+      },
+    });
   }
 }
 
@@ -954,6 +1142,520 @@ router.get("/", async (req: AgentRequest, res) => {
   }
 });
 
+router.get("/:id/contacts", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertAgencyPermission(workspace, "canViewAllInventory");
+
+    const id = asPositiveInt(req.params.id);
+    if (!id) throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+
+    const item = await inventoryForAgency(id, workspace.agency.id);
+    if (!item) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+
+    return res.json({
+      ok: true,
+      itemId: id,
+      maxContacts: MAX_ACTIVE_PROPERTY_CONTACTS,
+      contacts: item.contacts,
+      permissions: {
+        ...workspace.permissions,
+        canEditThisInventory: canEditInventoryRecord(workspace, item.assignedMemberId),
+      },
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get("/:id/contacts/search", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertAgencyPermission(workspace, "canViewAllInventory");
+
+    const id = asPositiveInt(req.params.id);
+    if (!id) throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+
+    const item = await inventoryForAgency(id, workspace.agency.id);
+    if (!item) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+
+    const q = nullableString(req.query.q, 200);
+    const contacts = await prisma.professionalContact.findMany({
+      where: {
+        agencyId: workspace.agency.id,
+        isArchived: false,
+        ...(q
+          ? {
+              OR: [
+                { firstName: { contains: q, mode: "insensitive" } },
+                { lastName: { contains: q, mode: "insensitive" } },
+                { companyName: { contains: q, mode: "insensitive" } },
+                { primaryEmail: { contains: q, mode: "insensitive" } },
+                { phoneNumber: { contains: q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        companyName: true,
+        primaryEmail: true,
+        phoneNumber: true,
+        roles: true,
+        notes: true,
+        createdAt: true,
+        updatedAt: true,
+        propertyLinks: {
+          where: { inventoryPropertyId: id, archivedAt: null },
+          select: { id: true },
+          take: 1,
+        },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 25,
+    });
+
+    return res.json({
+      ok: true,
+      items: contacts.map((contact) => ({
+        ...contact,
+        alreadyLinked: contact.propertyLinks.length > 0,
+        propertyLinks: undefined,
+      })),
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/contacts", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    if (!id) throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+
+    const body = req.body || {};
+    const requestedContactId = asPositiveInt(body.contactId);
+    const relationshipLabel = nullableString(body.relationshipLabel, 200);
+    const notificationLevel = parseContactNotificationLevel(body.notificationLevel, "OFF");
+    const isPrimary = nullableBoolean(body.isPrimary, "isPrimary") === true;
+    const userId = workspace.membership.userId;
+
+    const result = await prisma.$transaction(async (tx) => {
+      await lockInventoryContacts(tx, workspace.agency.id, id);
+
+      const activeCount = await tx.inventoryPropertyContact.count({
+        where: { inventoryPropertyId: id, archivedAt: null },
+      });
+
+      let contact: any;
+
+      if (requestedContactId) {
+        contact = await tx.professionalContact.findFirst({
+          where: {
+            id: requestedContactId,
+            agencyId: workspace.agency.id,
+            isArchived: false,
+          },
+        });
+        if (!contact) {
+          throw new ApiError(
+            "CONTACT_NOT_FOUND",
+            "Contact must belong to this agency and be active",
+            404
+          );
+        }
+      } else {
+        const source = body.contact || body;
+        const firstName = nullableString(source.firstName, 120);
+        const lastName = nullableString(source.lastName, 120);
+        const companyName = nullableString(source.companyName, 200);
+        const primaryEmail = nullableString(source.primaryEmail, 320)?.toLowerCase() || null;
+        const phoneNumber = nullableString(source.phoneNumber, 80);
+        const roles = parseProfessionalContactRoles(source.roles);
+        const notes = nullableString(source.notes, 5000);
+
+        if (!firstName && !lastName && !companyName && !primaryEmail && !phoneNumber) {
+          throw new ApiError(
+            "VALIDATION_ERROR",
+            "Provide a name, company, email or phone number for the contact",
+            400
+          );
+        }
+
+        if (primaryEmail) {
+          const duplicate = await tx.professionalContact.findFirst({
+            where: {
+              agencyId: workspace.agency.id,
+              isArchived: false,
+              primaryEmail: { equals: primaryEmail, mode: "insensitive" },
+            },
+            select: { id: true, firstName: true, lastName: true, companyName: true },
+          });
+          if (duplicate) {
+            throw new ApiError(
+              "CONTACT_ALREADY_EXISTS",
+              `A CRM contact with this email already exists (contact ${duplicate.id}). Link the existing contact instead.`,
+              409
+            );
+          }
+        }
+
+        contact = await tx.professionalContact.create({
+          data: {
+            agencyId: workspace.agency.id,
+            firstName,
+            lastName,
+            companyName,
+            primaryEmail,
+            phoneNumber,
+            roles,
+            notes,
+            createdByUserId: userId,
+            updatedByUserId: userId,
+          },
+        });
+      }
+
+      const existingLink = await tx.inventoryPropertyContact.findUnique({
+        where: {
+          inventoryPropertyId_contactId: {
+            inventoryPropertyId: id,
+            contactId: contact.id,
+          },
+        },
+        include: { contact: true },
+      });
+
+      if (existingLink && !existingLink.archivedAt) {
+        throw new ApiError(
+          "CONTACT_ALREADY_LINKED",
+          "This CRM contact is already linked to the Inventory property",
+          409
+        );
+      }
+
+      if (activeCount >= MAX_ACTIVE_PROPERTY_CONTACTS) {
+        throw new ApiError(
+          "CONTACT_LIMIT_REACHED",
+          `An Inventory property can have a maximum of ${MAX_ACTIVE_PROPERTY_CONTACTS} active contacts`,
+          409
+        );
+      }
+
+      if (isPrimary) {
+        await tx.inventoryPropertyContact.updateMany({
+          where: {
+            inventoryPropertyId: id,
+            archivedAt: null,
+            isPrimary: true,
+          },
+          data: { isPrimary: false, updatedByUserId: userId },
+        });
+      }
+
+      const link = existingLink
+        ? await tx.inventoryPropertyContact.update({
+            where: { id: existingLink.id },
+            data: {
+              relationshipLabel,
+              isPrimary,
+              notificationLevel,
+              archivedAt: null,
+              updatedByUserId: userId,
+            },
+            include: { contact: true },
+          })
+        : await tx.inventoryPropertyContact.create({
+            data: {
+              agencyId: workspace.agency.id,
+              inventoryPropertyId: id,
+              contactId: contact.id,
+              relationshipLabel,
+              isPrimary,
+              notificationLevel,
+              createdByUserId: userId,
+              updatedByUserId: userId,
+            },
+            include: { contact: true },
+          });
+
+      if (isPrimary) {
+        await tx.inventoryProperty.update({
+          where: { id },
+          data: { primaryContactId: contact.id, updatedByUserId: userId },
+        });
+      }
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_CONTACT_LINKED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          afterState: contactSnapshot(link),
+          changedFields: [
+            "contacts",
+            "contactId",
+            "relationshipLabel",
+            "isPrimary",
+            "notificationLevel",
+          ],
+          metadata: {
+            source: "agencyInventory",
+            contactId: contact.id,
+            contactName: contactDisplayName(contact),
+            linkId: link.id,
+          },
+          ...requestMeta(req),
+        },
+      });
+
+      return tx.inventoryProperty.findUniqueOrThrow({
+        where: { id },
+        include: inventoryInclude,
+      });
+    });
+
+    return res.status(201).json({
+      ok: true,
+      item: result,
+      contacts: result.contacts,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.patch("/:id/contacts/:linkId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    const linkId = asPositiveInt(req.params.linkId);
+    if (!id || !linkId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory or contact link id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+
+    const body = req.body || {};
+    const userId = workspace.membership.userId;
+
+    const result = await prisma.$transaction(async (tx) => {
+      await lockInventoryContacts(tx, workspace.agency.id, id);
+
+      const before = await tx.inventoryPropertyContact.findFirst({
+        where: {
+          id: linkId,
+          agencyId: workspace.agency.id,
+          inventoryPropertyId: id,
+          archivedAt: null,
+        },
+        include: { contact: true },
+      });
+      if (!before) {
+        throw new ApiError("CONTACT_LINK_NOT_FOUND", "Property contact link not found", 404);
+      }
+
+      const data: Prisma.InventoryPropertyContactUncheckedUpdateInput = {
+        updatedByUserId: userId,
+      };
+      if ("relationshipLabel" in body) {
+        data.relationshipLabel = nullableString(body.relationshipLabel, 200);
+      }
+      if ("notificationLevel" in body) {
+        data.notificationLevel = parseContactNotificationLevel(body.notificationLevel, before.notificationLevel);
+      }
+
+      let nextIsPrimary = before.isPrimary;
+      if ("isPrimary" in body) {
+        nextIsPrimary = nullableBoolean(body.isPrimary, "isPrimary") === true;
+        data.isPrimary = nextIsPrimary;
+      }
+
+      if (nextIsPrimary && !before.isPrimary) {
+        await tx.inventoryPropertyContact.updateMany({
+          where: {
+            inventoryPropertyId: id,
+            archivedAt: null,
+            isPrimary: true,
+            NOT: { id: linkId },
+          },
+          data: { isPrimary: false, updatedByUserId: userId },
+        });
+      }
+
+      const after = await tx.inventoryPropertyContact.update({
+        where: { id: linkId },
+        data,
+        include: { contact: true },
+      });
+
+      if (nextIsPrimary) {
+        await tx.inventoryProperty.update({
+          where: { id },
+          data: { primaryContactId: before.contactId, updatedByUserId: userId },
+        });
+      } else if (before.isPrimary && !nextIsPrimary) {
+        await tx.inventoryProperty.update({
+          where: { id },
+          data: { primaryContactId: null, updatedByUserId: userId },
+        });
+      }
+
+      const changed = snapshotChangedFields(contactSnapshot(before), contactSnapshot(after));
+      if (changed.length > 0) {
+        await tx.agencyAuditLog.create({
+          data: {
+            agencyId: workspace.agency.id,
+            actorUserId: userId,
+            actorAgencyMemberId: workspace.membership.id,
+            effectiveUserId: userId,
+            action: "INVENTORY_CONTACT_UPDATED",
+            entityType: "InventoryProperty",
+            entityId: String(id),
+            beforeState: contactSnapshot(before),
+            afterState: contactSnapshot(after),
+            changedFields: changed.map((field) => `contacts.${field}`),
+            metadata: {
+              source: "agencyInventory",
+              contactId: before.contactId,
+              contactName: contactDisplayName(before.contact),
+              linkId,
+            },
+            ...requestMeta(req),
+          },
+        });
+      }
+
+      return tx.inventoryProperty.findUniqueOrThrow({
+        where: { id },
+        include: inventoryInclude,
+      });
+    });
+
+    return res.json({ ok: true, item: result, contacts: result.contacts });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.delete("/:id/contacts/:linkId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const id = asPositiveInt(req.params.id);
+    const linkId = asPositiveInt(req.params.linkId);
+    if (!id || !linkId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory or contact link id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError("INVENTORY_NOT_FOUND", "Inventory record not found", 404);
+    }
+    assertCanEdit(workspace, inventory.assignedMemberId);
+    if (inventory.archivedAt) {
+      throw new ApiError("INVENTORY_ARCHIVED", "Archived inventory records are read-only", 409);
+    }
+
+    const userId = workspace.membership.userId;
+    const result = await prisma.$transaction(async (tx) => {
+      await lockInventoryContacts(tx, workspace.agency.id, id);
+
+      const before = await tx.inventoryPropertyContact.findFirst({
+        where: {
+          id: linkId,
+          agencyId: workspace.agency.id,
+          inventoryPropertyId: id,
+          archivedAt: null,
+        },
+        include: { contact: true },
+      });
+      if (!before) {
+        throw new ApiError("CONTACT_LINK_NOT_FOUND", "Property contact link not found", 404);
+      }
+
+      const after = await tx.inventoryPropertyContact.update({
+        where: { id: linkId },
+        data: {
+          archivedAt: new Date(),
+          isPrimary: false,
+          updatedByUserId: userId,
+        },
+        include: { contact: true },
+      });
+
+      if (before.isPrimary || inventory.primaryContactId === before.contactId) {
+        await tx.inventoryProperty.update({
+          where: { id },
+          data: { primaryContactId: null, updatedByUserId: userId },
+        });
+      }
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "INVENTORY_CONTACT_UNLINKED",
+          entityType: "InventoryProperty",
+          entityId: String(id),
+          beforeState: contactSnapshot(before),
+          afterState: contactSnapshot(after),
+          changedFields: ["contacts", "archivedAt"],
+          metadata: {
+            source: "agencyInventory",
+            contactId: before.contactId,
+            contactName: contactDisplayName(before.contact),
+            linkId,
+          },
+          ...requestMeta(req),
+        },
+      });
+
+      return tx.inventoryProperty.findUniqueOrThrow({
+        where: { id },
+        include: inventoryInclude,
+      });
+    });
+
+    return res.json({
+      ok: true,
+      deletedLinkId: linkId,
+      item: result,
+      contacts: result.contacts,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.get("/:id/audit", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
@@ -1153,8 +1855,21 @@ router.post("/", async (req: AgentRequest, res) => {
     };
 
     const result = await prisma.$transaction(async (tx) => {
-      const item = await tx.inventoryProperty.create({
+      const created = await tx.inventoryProperty.create({
         data: createData,
+      });
+
+      if (primaryContactId) {
+        await syncLegacyPrimaryContactLink(tx, {
+          agencyId: workspace.agency.id,
+          inventoryPropertyId: created.id,
+          contactId: primaryContactId,
+          userId,
+        });
+      }
+
+      const item = await tx.inventoryProperty.findUniqueOrThrow({
+        where: { id: created.id },
         include: inventoryInclude,
       });
 
@@ -2267,11 +2982,28 @@ router.patch("/:id", async (req: AgentRequest, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       const revisionNotifications: ListingRevisionAdminEmailPayload[] = [];
-      const updated = await tx.inventoryProperty.update({
+      let updated = await tx.inventoryProperty.update({
         where: { id },
         data,
         include: inventoryInclude,
       });
+
+      if ("primaryContactId" in body) {
+        const nextPrimaryContactId =
+          body.primaryContactId == null || body.primaryContactId === ""
+            ? null
+            : asPositiveInt(body.primaryContactId);
+        await syncLegacyPrimaryContactLink(tx, {
+          agencyId: workspace.agency.id,
+          inventoryPropertyId: id,
+          contactId: nextPrimaryContactId,
+          userId: workspace.membership.userId,
+        });
+        updated = await tx.inventoryProperty.findUniqueOrThrow({
+          where: { id },
+          include: inventoryInclude,
+        });
+      }
 
       await tx.property.updateMany({
         where: {

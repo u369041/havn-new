@@ -54,21 +54,23 @@ model User {
   agentApplicationsRejected  AgentProfile[] @relation("AgentRejectedBy")
   agentApplicationsSuspended AgentProfile[] @relation("AgentSuspendedBy")
 
-  agencyMemberships           AgencyMember[]
-  agenciesCreated             Agency[]              @relation("AgencyCreatedBy")
-  agenciesUpdated             Agency[]              @relation("AgencyUpdatedBy")
-  professionalContactsCreated ProfessionalContact[] @relation("ProfessionalContactCreatedBy")
-  professionalContactsUpdated ProfessionalContact[] @relation("ProfessionalContactUpdatedBy")
-  inventoryPropertiesCreated  InventoryProperty[]   @relation("InventoryPropertyCreatedBy")
-  inventoryPropertiesUpdated  InventoryProperty[]   @relation("InventoryPropertyUpdatedBy")
-  inventoryMediaCreated       InventoryMedia[]      @relation("InventoryMediaCreatedBy")
-  inventoryMediaUpdated       InventoryMedia[]      @relation("InventoryMediaUpdatedBy")
-  agencyAuditEvents           AgencyAuditLog[]      @relation("AgencyAuditActor")
-  agencyAuditEffectiveEvents  AgencyAuditLog[]      @relation("AgencyAuditEffectiveUser")
-  propertiesCreatedForAgency  Property[]            @relation("PropertyCreatedBy")
-  propertiesUpdatedForAgency  Property[]            @relation("PropertyUpdatedBy")
-  listingRevisionsSubmitted   ListingRevision[]     @relation("ListingRevisionSubmittedBy")
-  listingRevisionsReviewed    ListingRevision[]     @relation("ListingRevisionReviewedBy")
+  agencyMemberships            AgencyMember[]
+  agenciesCreated              Agency[]                   @relation("AgencyCreatedBy")
+  agenciesUpdated              Agency[]                   @relation("AgencyUpdatedBy")
+  professionalContactsCreated  ProfessionalContact[]      @relation("ProfessionalContactCreatedBy")
+  professionalContactsUpdated  ProfessionalContact[]      @relation("ProfessionalContactUpdatedBy")
+  inventoryContactLinksCreated InventoryPropertyContact[] @relation("InventoryPropertyContactCreatedBy")
+  inventoryContactLinksUpdated InventoryPropertyContact[] @relation("InventoryPropertyContactUpdatedBy")
+  inventoryPropertiesCreated   InventoryProperty[]        @relation("InventoryPropertyCreatedBy")
+  inventoryPropertiesUpdated   InventoryProperty[]        @relation("InventoryPropertyUpdatedBy")
+  inventoryMediaCreated        InventoryMedia[]           @relation("InventoryMediaCreatedBy")
+  inventoryMediaUpdated        InventoryMedia[]           @relation("InventoryMediaUpdatedBy")
+  agencyAuditEvents            AgencyAuditLog[]           @relation("AgencyAuditActor")
+  agencyAuditEffectiveEvents   AgencyAuditLog[]           @relation("AgencyAuditEffectiveUser")
+  propertiesCreatedForAgency   Property[]                 @relation("PropertyCreatedBy")
+  propertiesUpdatedForAgency   Property[]                 @relation("PropertyUpdatedBy")
+  listingRevisionsSubmitted    ListingRevision[]          @relation("ListingRevisionSubmittedBy")
+  listingRevisionsReviewed     ListingRevision[]          @relation("ListingRevisionReviewedBy")
 }
 
 model AgentProfile {
@@ -165,13 +167,14 @@ model Agency {
   createdBy User? @relation("AgencyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy User? @relation("AgencyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  members             AgencyMember[]
-  contacts            ProfessionalContact[]
-  inventoryProperties InventoryProperty[]
-  inventoryMedia      InventoryMedia[]
-  auditLogs           AgencyAuditLog[]
-  properties          Property[]
-  listingRevisions    ListingRevision[]
+  members                   AgencyMember[]
+  contacts                  ProfessionalContact[]
+  inventoryProperties       InventoryProperty[]
+  inventoryPropertyContacts InventoryPropertyContact[]
+  inventoryMedia            InventoryMedia[]
+  auditLogs                 AgencyAuditLog[]
+  properties                Property[]
+  listingRevisions          ListingRevision[]
 
   @@index([name])
   @@index([status])
@@ -236,13 +239,48 @@ model ProfessionalContact {
   createdBy User?  @relation("ProfessionalContactCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy User?  @relation("ProfessionalContactUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  primaryForInventory InventoryProperty[] @relation("InventoryPrimaryContact")
+  primaryForInventory InventoryProperty[]        @relation("InventoryPrimaryContact")
+  propertyLinks       InventoryPropertyContact[]
 
   @@index([agencyId])
   @@index([primaryEmail])
   @@index([phoneNumber])
   @@index([isArchived])
   @@index([agencyId, isArchived])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+}
+
+model InventoryPropertyContact {
+  id                  Int @id @default(autoincrement())
+  agencyId            Int
+  inventoryPropertyId Int
+  contactId           Int
+
+  relationshipLabel String?
+  isPrimary         Boolean                           @default(false)
+  notificationLevel InventoryContactNotificationLevel @default(OFF)
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  agency            Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  inventoryProperty InventoryProperty   @relation(fields: [inventoryPropertyId], references: [id], onDelete: Cascade)
+  contact           ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy         User?               @relation("InventoryPropertyContactCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?               @relation("InventoryPropertyContactUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([inventoryPropertyId, contactId])
+  @@index([agencyId])
+  @@index([inventoryPropertyId])
+  @@index([contactId])
+  @@index([agencyId, archivedAt])
+  @@index([inventoryPropertyId, archivedAt])
+  @@index([contactId, archivedAt])
   @@index([createdByUserId])
   @@index([updatedByUserId])
 }
@@ -330,6 +368,7 @@ model InventoryProperty {
   listings  Property[]
   revisions ListingRevision[]
   media     InventoryMedia[]
+  contacts  InventoryPropertyContact[]
 
   @@index([agencyId])
   @@index([stage])
@@ -799,6 +838,12 @@ enum ProfessionalContactRole {
   SOLICITOR
   BROKER
   OTHER
+}
+
+enum InventoryContactNotificationLevel {
+  OFF
+  MAJOR_ONLY
+  MEDIUM_AND_MAJOR
 }
 
 enum InventoryTransactionType {
