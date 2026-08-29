@@ -646,6 +646,7 @@ function cloudinarySignature(params: Record<string, string>, apiSecret: string) 
 
 async function geocodeInventoryLocation(inventory: any) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
   if (!apiKey) {
     throw new ApiError(
       "LOCATION_CONFIGURATION_ERROR",
@@ -653,39 +654,67 @@ async function geocodeInventoryLocation(inventory: any) {
       500,
     );
   }
-  const address = [
-    inventory.address1,
-    inventory.address2,
-    inventory.city,
-    inventory.county,
-    inventory.eircode,
-    "Ireland",
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const endpoint = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-  endpoint.searchParams.set("address", address);
+
+  const compactEircode = String(inventory.eircode || "")
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (!compactEircode) {
+    throw new ApiError(
+      "EIRCODE_REQUIRED",
+      "An Eircode is required to confirm this property location",
+      400,
+    );
+  }
+
+  const eircode =
+    /^[A-Z0-9]{7}$/.test(compactEircode)
+      ? `${compactEircode.slice(0, 3)} ${compactEircode.slice(3)}`
+      : String(inventory.eircode || "").trim().toUpperCase();
+
+  const endpoint = new URL(
+    "https://maps.googleapis.com/maps/api/geocode/json",
+  );
+
+  endpoint.searchParams.set("address", `${eircode}, Ireland`);
   endpoint.searchParams.set("region", "ie");
   endpoint.searchParams.set("key", apiKey);
+
   const response = await fetch(endpoint);
   const payload: any = await response.json().catch(() => null);
-  const location = payload?.results?.[0]?.geometry?.location;
+
+  const result = payload?.results?.[0];
+  const location = result?.geometry?.location;
+
   const lat = Number(location?.lat);
   const lng = Number(location?.lng);
-  if (!response.ok || payload?.status !== "OK" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+
+  if (
+    !response.ok ||
+    payload?.status !== "OK" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
     throw new ApiError(
       "LOCATION_NOT_FOUND",
-      payload?.error_message || "HAVN could not confirm this property location",
+      payload?.error_message ||
+        "HAVN could not confirm this property Eircode",
       422,
     );
   }
+
   return {
     lat,
     lng,
-    formattedAddress: nullableString(payload.results[0]?.formatted_address, 500),
-    placeId: nullableString(payload.results[0]?.place_id, 300),
+    formattedAddress: nullableString(
+      result?.formatted_address,
+      500,
+    ),
+    placeId: nullableString(result?.place_id, 300),
   };
 }
+
 
 async function destroyCloudinaryMedia(item: any) {
   if (item.source !== "CLOUDINARY" || !item.publicId) return;
