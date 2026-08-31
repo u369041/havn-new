@@ -1188,19 +1188,27 @@ router.get("/:id/contacts/search", async (req: AgentRequest, res) => {
     }
 
     const q = nullableString(req.query.q, 200);
+    const searchTokens = q
+      ? q.split(/\s+/).map((token) => token.trim()).filter(Boolean).slice(0, 8)
+      : [];
+
+    const contactSearchFields = (term: string) => [
+      { firstName: { contains: term, mode: "insensitive" as const } },
+      { lastName: { contains: term, mode: "insensitive" as const } },
+      { companyName: { contains: term, mode: "insensitive" as const } },
+      { primaryEmail: { contains: term, mode: "insensitive" as const } },
+      { phoneNumber: { contains: term, mode: "insensitive" as const } },
+    ];
+
     const contacts = await prisma.professionalContact.findMany({
       where: {
         agencyId: workspace.agency.id,
         isArchived: false,
         ...(q
           ? {
-              OR: [
-                { firstName: { contains: q, mode: "insensitive" } },
-                { lastName: { contains: q, mode: "insensitive" } },
-                { companyName: { contains: q, mode: "insensitive" } },
-                { primaryEmail: { contains: q, mode: "insensitive" } },
-                { phoneNumber: { contains: q, mode: "insensitive" } },
-              ],
+              AND: searchTokens.map((token) => ({
+                OR: contactSearchFields(token),
+              })),
             }
           : {}),
       },
