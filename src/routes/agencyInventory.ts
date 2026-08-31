@@ -590,8 +590,9 @@ async function lockInventoryContacts(
 ) {
   // Prisma serializes JavaScript numbers as PostgreSQL BIGINT parameters in raw
   // queries. The two-key advisory-lock overload expects INTEGER, INTEGER, so
-  // cast both values explicitly to keep the lock call portable and deterministic.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(CAST(${agencyId} AS integer), CAST(${inventoryPropertyId} AS integer))`;
+  // cast both values explicitly. Use $executeRaw because pg_advisory_xact_lock
+  // returns PostgreSQL void and we do not need Prisma to deserialize a result row.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(CAST(${agencyId} AS integer), CAST(${inventoryPropertyId} AS integer))`;
 }
 
 async function syncLegacyPrimaryContactLink(
