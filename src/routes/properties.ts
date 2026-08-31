@@ -1,4 +1,4 @@
-import express, { Router } from "express";
+﻿import express, { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth"; // default import
@@ -11,7 +11,16 @@ import {
 } from "../lib/mail";
 import { getTransportIntelligence } from "../services/transport-intelligence";
 import { getAgencyWorkspace } from "../services/agencyAccess";
-import { draftListingToInventoryData } from "../services/agencyPropertySync";
+import {
+  draftListingToInventoryData,
+  inventoryMediaToListingSnapshot,
+  inventoryToDraftListingData,
+} from "../services/agencyPropertySync";
+
+import {
+  isPropertyPreviewToken,
+  parsePropertyPreviewToken,
+} from "../services/propertyPreviewToken";
 
 const router = Router();
 
@@ -43,6 +52,66 @@ function isOwner(user: any, ownerId: number) {
   return userId === propertyOwnerId;
 }
 
+async function loadInventoryPropertyPreview(rawToken: unknown) {
+  const token = String(rawToken || "").trim();
+  const preview = parsePropertyPreviewToken(token);
+  if (!preview) return null;
+
+  const inventory = await prisma.inventoryProperty.findFirst({
+    where: {
+      id: preview.inventoryPropertyId,
+      agencyId: preview.agencyId,
+      archivedAt: null,
+    },
+    include: {
+      media: {
+        orderBy: [{ position: "asc" }, { id: "asc" }],
+      },
+    },
+  });
+
+  if (!inventory) return null;
+
+  const listingData = inventoryToDraftListingData(inventory) as any;
+  const listingMedia = inventoryMediaToListingSnapshot(inventory.media);
+
+  return {
+    ...listingData,
+    id: token,
+    slug: token,
+
+    // property.html uses address in places as well as address1
+    address: inventory.address1,
+
+    photos: listingMedia.photos,
+    photoMeta: listingMedia.photoMeta,
+    presentationMedia: listingMedia.presentationMedia,
+
+    // Only in-memory response flags so the real property.html renderer accepts it.
+    listingStatus: "PUBLISHED",
+    publicStatus: "PUBLISHED",
+    status: "PUBLISHED",
+
+    isFeatured: false,
+    featuredUntil: null,
+
+    publishedAt:
+      inventory.liveAt ||
+      inventory.updatedAt ||
+      inventory.createdAt,
+
+    createdAt: inventory.createdAt,
+    updatedAt: inventory.updatedAt,
+
+    views: 0,
+
+    intelligence: inventory.intelligence ?? null,
+    intelligenceUpdatedAt: inventory.intelligenceUpdatedAt,
+
+    __preview: true,
+    __inventoryPropertyId: inventory.id,
+  };
+}
 function safeText(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
@@ -658,7 +727,7 @@ function uniqueValues(items: any[], picker: (item: any) => any) {
 
   for (const item of asArray(items)) {
     const value = safeText(picker(item)).trim().toLowerCase();
-    if (value && value !== "—") values.add(value);
+    if (value && value !== "â€”") values.add(value);
   }
 
   return values;
@@ -689,7 +758,7 @@ function classifySchoolType(item: any): ClassifiedSchoolType {
       "community college",
       "vocational school",
       "college",
-      "coláiste",
+      "colÃ¡iste",
       "grammar school",
       "high school",
       "comprehensive school",
@@ -720,7 +789,7 @@ function classifySchoolType(item: any): ClassifiedSchoolType {
       "pre-school",
       "pre school",
       "creche",
-      "crèche",
+      "crÃ¨che",
       "childcare",
       "kindergarten",
       "playschool",
@@ -1307,7 +1376,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
   ].filter(Boolean).length;
 
   const lifestyle = makeAreaScore(
-    "Shows the local lifestyle offer across parks, fitness, cafés, restaurants, pubs and culture so users can picture daily life in the area.",
+    "Shows the local lifestyle offer across parks, fitness, cafÃ©s, restaurants, pubs and culture so users can picture daily life in the area.",
     [
       {
         label: "Parks & green space",
@@ -1330,7 +1399,7 @@ function calculateAreaScores(nearby: any): Record<string, AreaScoreResult> {
         score: scoreByCount(foodCoffeeCount, 25, [[15, 25], [10, 22], [6, 18], [3, 11], [1, 6]]),
         max: 25,
         reason: foodCoffeeCount
-          ? `${foodCoffeeCount} food, café, coffee or restaurant signal${foodCoffeeCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(foodCoffeePlaces)}.`
+          ? `${foodCoffeeCount} food, cafÃ©, coffee or restaurant signal${foodCoffeeCount === 1 ? "" : "s"} found nearby. Nearest is around ${nearestDistanceText(foodCoffeePlaces)}.`
           : "No food or coffee signal was found nearby in the current source data.",
       },
       {
@@ -2249,6 +2318,24 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
 
 router.post("/:id/view", async (req: any, res) => {
   try {
+    if (isPropertyPreviewToken(req.params.id)) {
+      const preview = await loadInventoryPropertyPreview(req.params.id);
+
+      if (!preview) {
+        return res.status(404).json({
+          ok: false,
+          message: "Property not found",
+        });
+      }
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        ok: true,
+        counted: false,
+        preview: true,
+      });
+    }
+
     const id = toPositiveSafeInt(req.params.id);
 
     if (id === null) {
@@ -2303,6 +2390,33 @@ router.post("/:id/view", async (req: any, res) => {
 
 router.get("/:id/intelligence", requireAuth.optional, async (req: any, res) => {
   try {
+    if (isPropertyPreviewToken(req.params.id)) {
+      const preview = await loadInventoryPropertyPreview(req.params.id);
+
+      if (!preview) {
+        return res.status(404).json({
+          ok: false,
+          message: "Property not found",
+        });
+      }
+
+      if (!preview.intelligence) {
+        return res.status(404).json({
+          ok: false,
+          message: "Property intelligence has not been generated yet.",
+        });
+      }
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        ok: true,
+        cached: true,
+        preview: true,
+        intelligence: preview.intelligence,
+        intelligenceUpdatedAt: preview.intelligenceUpdatedAt,
+      });
+    }
+
     const id = toPositiveSafeInt(req.params.id);
 
     if (id === null) {
@@ -2657,7 +2771,7 @@ router.get("/:id/intelligence", requireAuth.optional, async (req: any, res) => {
       nearby("school", 20, "school"),
       nearby("secondary school", 20, "school"),
       nearby("community school community college", 20, "school"),
-      nearby("post primary school coláiste college", 20, "school"),
+      nearby("post primary school colÃ¡iste college", 20, "school"),
       nearbyTransport(20),
       Promise.race([
         getTransportIntelligence(lat, lng, 30),
@@ -3008,6 +3122,23 @@ router.get("/:id/intelligence", requireAuth.optional, async (req: any, res) => {
 router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
+
+    if (isPropertyPreviewToken(slug)) {
+      const preview = await loadInventoryPropertyPreview(slug);
+
+      if (!preview) {
+        return res.status(404).json({
+          ok: false,
+          error: "NOT_FOUND",
+        });
+      }
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        ok: true,
+        item: preview,
+      });
+    }
     const user = req.user || null;
 
     const property = await prisma.property.findUnique({ where: { slug } });
@@ -3032,6 +3163,23 @@ router.get("/slug/:slug", requireAuth.optional, async (req: any, res) => {
 router.get("/:slug", requireAuth.optional, async (req: any, res) => {
   try {
     const slug = String(req.params.slug);
+
+    if (isPropertyPreviewToken(slug)) {
+      const preview = await loadInventoryPropertyPreview(slug);
+
+      if (!preview) {
+        return res.status(404).json({
+          ok: false,
+          message: "Not found",
+        });
+      }
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        ok: true,
+        item: preview,
+      });
+    }
     const user = req.user || null;
 
     const property = await prisma.property.findUnique({ where: { slug } });
@@ -3670,3 +3818,4 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, express.json(), as
 });
 
 export default router;
+
