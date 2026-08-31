@@ -588,7 +588,10 @@ async function lockInventoryContacts(
   agencyId: number,
   inventoryPropertyId: number
 ) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(${agencyId}, ${inventoryPropertyId})`;
+  // Prisma serializes JavaScript numbers as PostgreSQL BIGINT parameters in raw
+  // queries. The two-key advisory-lock overload expects INTEGER, INTEGER, so
+  // cast both values explicitly to keep the lock call portable and deterministic.
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(CAST(${agencyId} AS integer), CAST(${inventoryPropertyId} AS integer))`;
 }
 
 async function syncLegacyPrimaryContactLink(
