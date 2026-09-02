@@ -614,6 +614,89 @@ router.post("/:id/notes", async (req: AgentRequest, res) => {
   }
 });
 
+router.patch("/:id/notes/:noteId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const id = asPositiveInt(req.params.id);
+    const noteId = asPositiveInt(req.params.noteId);
+    if (!id || !noteId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact or note id", 400);
+    }
+    const before = await prisma.crmNote.findFirst({
+      where: { id: noteId, contactId: id, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_NOTE_NOT_FOUND", "CRM note not found", 404);
+    const body = requiredString(req.body?.body, "body", 10000);
+    const updated = await prisma.$transaction(async (tx) => {
+      const note = await tx.crmNote.update({
+        where: { id: noteId },
+        data: { body },
+        include: { createdBy: { select: { id: true, name: true, email: true } } },
+      });
+      if (before.body !== note.body) {
+        await tx.agencyAuditLog.create({
+          data: {
+            agencyId: workspace.agency.id,
+            actorUserId: workspace.membership.userId,
+            actorAgencyMemberId: workspace.membership.id,
+            effectiveUserId: workspace.membership.userId,
+            action: "CRM_NOTE_UPDATED",
+            entityType: "ProfessionalContact",
+            entityId: String(id),
+            beforeState: { noteId: before.id, contactId: id, body: before.body },
+            afterState: { noteId: note.id, contactId: id, body: note.body },
+            changedFields: ["crmNotes.body"],
+            metadata: { source: "agencyContacts", noteId },
+            ...requestMeta(req),
+          },
+        });
+      }
+      return note;
+    });
+    return res.json({ ok: true, item: updated });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.delete("/:id/notes/:noteId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const id = asPositiveInt(req.params.id);
+    const noteId = asPositiveInt(req.params.noteId);
+    if (!id || !noteId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact or note id", 400);
+    }
+    const before = await prisma.crmNote.findFirst({
+      where: { id: noteId, contactId: id, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_NOTE_NOT_FOUND", "CRM note not found", 404);
+    await prisma.$transaction(async (tx) => {
+      await tx.crmNote.delete({ where: { id: noteId } });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_NOTE_DELETED",
+          entityType: "ProfessionalContact",
+          entityId: String(id),
+          beforeState: { noteId: before.id, contactId: id, body: before.body, createdAt: before.createdAt },
+          changedFields: ["crmNotes"],
+          metadata: { source: "agencyContacts", noteId },
+          ...requestMeta(req),
+        },
+      });
+    });
+    return res.json({ ok: true, deletedNoteId: noteId });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 /* Follow-ups */
 router.post("/:id/follow-ups", async (req: AgentRequest, res) => {
   try {
@@ -713,7 +796,12 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
             actorUserId: workspace.membership.userId,
             actorAgencyMemberId: workspace.membership.id,
             effectiveUserId: workspace.membership.userId,
-            action: "CRM_FOLLOW_UP_UPDATED",
+            action:
+              !before.completedAt && updated.completedAt
+                ? "CRM_FOLLOW_UP_COMPLETED"
+                : before.completedAt && !updated.completedAt
+                  ? "CRM_FOLLOW_UP_REOPENED"
+                  : "CRM_FOLLOW_UP_UPDATED",
             entityType: "ProfessionalContact",
             entityId: String(id),
             beforeState: {
@@ -739,6 +827,49 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
       return updated;
     });
     return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.delete("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const id = asPositiveInt(req.params.id);
+    const followUpId = asPositiveInt(req.params.followUpId);
+    if (!id || !followUpId) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact or follow-up id", 400);
+    }
+    const before = await prisma.crmFollowUp.findFirst({
+      where: { id: followUpId, contactId: id, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_FOLLOW_UP_NOT_FOUND", "CRM follow-up not found", 404);
+    await prisma.$transaction(async (tx) => {
+      await tx.crmFollowUp.delete({ where: { id: followUpId } });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_FOLLOW_UP_DELETED",
+          entityType: "ProfessionalContact",
+          entityId: String(id),
+          beforeState: {
+            id: before.id,
+            title: before.title,
+            description: before.description,
+            dueAt: before.dueAt,
+            completedAt: before.completedAt,
+          },
+          changedFields: ["crmFollowUps"],
+          metadata: { source: "agencyContacts", followUpId },
+          ...requestMeta(req),
+        },
+      });
+    });
+    return res.json({ ok: true, deletedFollowUpId: followUpId });
   } catch (error) {
     return handleError(res, error);
   }
