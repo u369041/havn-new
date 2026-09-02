@@ -18,6 +18,7 @@ import adminAnalyticsRouter from "./routes/adminAnalytics";
 import agentsRouter from "./routes/agents";
 import professionalAppRouter from "./routes/professionalApp";
 import agencyInventoryRouter from "./routes/agencyInventory";
+import agencyContactsRouter from "./routes/agencyContacts";
 import appRouter from "./routes/app";
 
 const app = express();
@@ -175,6 +176,7 @@ app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/agents", authLimiter, agentsRouter);
 app.use("/api/professional-app", strictLimiter, professionalAppRouter);
 app.use("/api/agency/inventory", strictLimiter, agencyInventoryRouter);
+app.use("/api/agency/contacts", strictLimiter, agencyContactsRouter);
 app.use("/api/app", strictLimiter, appRouter);
 
 app.use("/api/uploads", strictLimiter, uploadsRouter);

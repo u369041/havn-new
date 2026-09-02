@@ -59,6 +59,11 @@ model User {
   agenciesUpdated              Agency[]                   @relation("AgencyUpdatedBy")
   professionalContactsCreated  ProfessionalContact[]      @relation("ProfessionalContactCreatedBy")
   professionalContactsUpdated  ProfessionalContact[]      @relation("ProfessionalContactUpdatedBy")
+  crmCompaniesCreated          CrmCompany[]               @relation("CrmCompanyCreatedBy")
+  crmCompaniesUpdated          CrmCompany[]               @relation("CrmCompanyUpdatedBy")
+  crmNotesCreated              CrmNote[]                  @relation("CrmNoteCreatedBy")
+  crmFollowUpsCreated          CrmFollowUp[]              @relation("CrmFollowUpCreatedBy")
+  crmFollowUpsUpdated          CrmFollowUp[]              @relation("CrmFollowUpUpdatedBy")
   inventoryContactLinksCreated InventoryPropertyContact[] @relation("InventoryPropertyContactCreatedBy")
   inventoryContactLinksUpdated InventoryPropertyContact[] @relation("InventoryPropertyContactUpdatedBy")
   inventoryPropertiesCreated   InventoryProperty[]        @relation("InventoryPropertyCreatedBy")
@@ -169,6 +174,9 @@ model Agency {
 
   members                   AgencyMember[]
   contacts                  ProfessionalContact[]
+  crmCompanies              CrmCompany[]
+  crmNotes                  CrmNote[]
+  crmFollowUps              CrmFollowUp[]
   inventoryProperties       InventoryProperty[]
   inventoryPropertyContacts InventoryPropertyContact[]
   inventoryMedia            InventoryMedia[]
@@ -214,8 +222,9 @@ model AgencyMember {
 }
 
 model ProfessionalContact {
-  id       Int @id @default(autoincrement())
-  agencyId Int
+  id        Int  @id @default(autoincrement())
+  agencyId  Int
+  companyId Int?
 
   firstName   String?
   lastName    String?
@@ -235,12 +244,15 @@ model ProfessionalContact {
   updatedAt  DateTime  @updatedAt
   archivedAt DateTime?
 
-  agency    Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  createdBy User?  @relation("ProfessionalContactCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("ProfessionalContactUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  agency    Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  company   CrmCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdBy User?       @relation("ProfessionalContactCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy User?       @relation("ProfessionalContactUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
   primaryForInventory InventoryProperty[]        @relation("InventoryPrimaryContact")
   propertyLinks       InventoryPropertyContact[]
+  crmNotes            CrmNote[]
+  crmFollowUps        CrmFollowUp[]
 
   @@index([agencyId])
   @@index([primaryEmail])
@@ -249,6 +261,98 @@ model ProfessionalContact {
   @@index([agencyId, isArchived])
   @@index([createdByUserId])
   @@index([updatedByUserId])
+  @@index([companyId])
+}
+
+model CrmCompany {
+  id       Int @id @default(autoincrement())
+  agencyId Int
+
+  name        String
+  email       String?
+  phoneNumber String?
+  websiteUrl  String?
+
+  addressLine1 String?
+  addressLine2 String?
+  townCity     String?
+  county       String?
+  eircode      String?
+
+  notes      String?
+  isArchived Boolean @default(false)
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  agency    Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("CrmCompanyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("CrmCompanyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  contacts ProfessionalContact[]
+
+  @@index([agencyId])
+  @@index([name])
+  @@index([email])
+  @@index([phoneNumber])
+  @@index([isArchived])
+  @@index([agencyId, isArchived])
+}
+
+model CrmNote {
+  id        Int @id @default(autoincrement())
+  agencyId  Int
+  contactId Int
+
+  body String
+
+  createdByUserId Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agency    Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact   ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy User?               @relation("CrmNoteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([contactId])
+  @@index([createdAt])
+  @@index([agencyId, createdAt])
+  @@index([contactId, createdAt])
+}
+
+model CrmFollowUp {
+  id        Int @id @default(autoincrement())
+  agencyId  Int
+  contactId Int
+
+  title       String
+  description String?
+  dueAt       DateTime
+  completedAt DateTime?
+
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agency    Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact   ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy User?               @relation("CrmFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy User?               @relation("CrmFollowUpUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([contactId])
+  @@index([dueAt])
+  @@index([completedAt])
+  @@index([agencyId, dueAt])
+  @@index([contactId, dueAt])
 }
 
 model InventoryPropertyContact {
