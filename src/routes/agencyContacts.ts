@@ -376,6 +376,96 @@ router.patch("/companies/:companyId", async (req: AgentRequest, res) => {
   }
 });
 
+/* Company archive / restore */
+router.post("/companies/:companyId/archive", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const companyId = asPositiveInt(req.params.companyId);
+    if (!companyId) throw new ApiError("VALIDATION_ERROR", "Invalid company id", 400);
+    const before = await prisma.crmCompany.findFirst({
+      where: { id: companyId, agencyId: workspace.agency.id },
+      include: { contacts: { where: { isArchived: false }, select: { id: true } } },
+    });
+    if (!before) throw new ApiError("CRM_COMPANY_NOT_FOUND", "CRM company not found", 404);
+    if (before.isArchived) return res.json({ ok: true, item: before, alreadyArchived: true });
+    if (before.contacts.length > 0) {
+      throw new ApiError(
+        "CRM_COMPANY_HAS_ACTIVE_CONTACTS",
+        "Unlink or archive active CRM contacts before archiving this company",
+        409,
+      );
+    }
+    const archivedAt = new Date();
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmCompany.update({
+        where: { id: companyId },
+        data: { isArchived: true, archivedAt, updatedByUserId: workspace.membership.userId },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_COMPANY_ARCHIVED",
+          entityType: "CrmCompany",
+          entityId: String(companyId),
+          beforeState: companySnapshot(before),
+          afterState: companySnapshot(updated),
+          changedFields: ["isArchived", "archivedAt"],
+          metadata: { source: "agencyContacts" },
+          ...requestMeta(req),
+        },
+      });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/companies/:companyId/restore", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const companyId = asPositiveInt(req.params.companyId);
+    if (!companyId) throw new ApiError("VALIDATION_ERROR", "Invalid company id", 400);
+    const before = await prisma.crmCompany.findFirst({
+      where: { id: companyId, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_COMPANY_NOT_FOUND", "CRM company not found", 404);
+    if (!before.isArchived) return res.json({ ok: true, item: before, alreadyActive: true });
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmCompany.update({
+        where: { id: companyId },
+        data: { isArchived: false, archivedAt: null, updatedByUserId: workspace.membership.userId },
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_COMPANY_RESTORED",
+          entityType: "CrmCompany",
+          entityId: String(companyId),
+          beforeState: companySnapshot(before),
+          afterState: companySnapshot(updated),
+          changedFields: ["isArchived", "archivedAt"],
+          metadata: { source: "agencyContacts" },
+          ...requestMeta(req),
+        },
+      });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 /* Contact list */
 router.get("/", async (req: AgentRequest, res) => {
   try {
