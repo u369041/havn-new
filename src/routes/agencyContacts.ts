@@ -466,6 +466,52 @@ router.post("/companies/:companyId/restore", async (req: AgentRequest, res) => {
   }
 });
 
+/* Agency-wide follow-up list */
+router.get("/follow-ups", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const includeArchivedContacts =
+      String(req.query.includeArchivedContacts || "").toLowerCase() === "true";
+
+    const items = await prisma.crmFollowUp.findMany({
+      where: {
+        agencyId: workspace.agency.id,
+        ...(includeArchivedContacts
+          ? {}
+          : { contact: { is: { isArchived: false } } }),
+      },
+      include: {
+        contact: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            primaryEmail: true,
+            phoneNumber: true,
+            roles: true,
+            isArchived: true,
+            companyId: true,
+            companyName: true,
+            company: { select: { id: true, name: true, isArchived: true } },
+          },
+        },
+        createdBy: { select: { id: true, name: true, email: true } },
+        updatedBy: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+      take: 1000,
+    });
+
+    return res.json({
+      ok: true,
+      agency: { id: workspace.agency.id, name: workspace.agency.name },
+      items,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 /* Contact list */
 router.get("/", async (req: AgentRequest, res) => {
   try {
