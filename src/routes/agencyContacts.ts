@@ -981,8 +981,26 @@ router.get("/:id", async (req: AgentRequest, res) => {
     const activity = await prisma.agencyAuditLog.findMany({
       where: {
         agencyId: workspace.agency.id,
-        entityType: "ProfessionalContact",
-        entityId: String(id),
+        OR: [
+          {
+            entityType: "ProfessionalContact",
+            entityId: String(id),
+          },
+          {
+            entityType: "InventoryProperty",
+            action: {
+              in: [
+                "INVENTORY_CONTACT_LINKED",
+                "INVENTORY_CONTACT_UPDATED",
+                "INVENTORY_CONTACT_UNLINKED",
+              ],
+            },
+            metadata: {
+              path: ["contactId"],
+              equals: id,
+            },
+          },
+        ],
       },
       select: {
         id: true,
@@ -1002,10 +1020,44 @@ router.get("/:id", async (req: AgentRequest, res) => {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 250,
     });
+
+    const inventoryIds = Array.from(
+      new Set(
+        activity
+          .filter((entry) => entry.entityType === "InventoryProperty")
+          .map((entry) => Number(entry.entityId))
+          .filter((value) => Number.isSafeInteger(value) && value > 0)
+      )
+    );
+    const inventoryItems = inventoryIds.length
+      ? await prisma.inventoryProperty.findMany({
+          where: { agencyId: workspace.agency.id, id: { in: inventoryIds } },
+          select: {
+            id: true,
+            address1: true,
+            address2: true,
+            city: true,
+            county: true,
+            eircode: true,
+            stage: true,
+            transactionType: true,
+            archivedAt: true,
+          },
+        })
+      : [];
+    const inventoryById = new Map(inventoryItems.map((property) => [property.id, property]));
+
     return res.json({
       ok: true,
       item,
-      activity: activity.map((entry) => ({ ...entry, id: entry.id.toString() })),
+      activity: activity.map((entry) => ({
+        ...entry,
+        id: entry.id.toString(),
+        inventoryProperty:
+          entry.entityType === "InventoryProperty"
+            ? inventoryById.get(Number(entry.entityId)) || null
+            : null,
+      })),
     });
   } catch (error) {
     return handleError(res, error);
