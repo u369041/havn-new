@@ -177,6 +177,7 @@ model Agency {
   crmCompanies              CrmCompany[]
   crmNotes                  CrmNote[]
   crmFollowUps              CrmFollowUp[]
+  crmOpportunities          CrmOpportunity[]
   inventoryProperties       InventoryProperty[]
   inventoryPropertyContacts InventoryPropertyContact[]
   inventoryMedia            InventoryMedia[]
@@ -211,6 +212,8 @@ model AgencyMember {
 
   assignedInventoryProperties InventoryProperty[] @relation("InventoryAssignedMember")
   auditEvents                 AgencyAuditLog[]    @relation("AgencyAuditActorMember")
+  crmFollowUpsAssigned        CrmFollowUp[]        @relation("CrmFollowUpAssignedMember")
+  crmOpportunitiesOwned       CrmOpportunity[]     @relation("CrmOpportunityOwner")
 
   @@unique([agencyId, userId])
   @@index([agencyId])
@@ -253,6 +256,7 @@ model ProfessionalContact {
   propertyLinks       InventoryPropertyContact[]
   crmNotes            CrmNote[]
   crmFollowUps        CrmFollowUp[]
+  crmOpportunities    CrmOpportunity[]
 
   @@index([agencyId])
   @@index([primaryEmail])
@@ -293,7 +297,8 @@ model CrmCompany {
   createdBy User?  @relation("CrmCompanyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy User?  @relation("CrmCompanyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  contacts ProfessionalContact[]
+  contacts      ProfessionalContact[]
+  opportunities CrmOpportunity[]
 
   @@index([agencyId])
   @@index([name])
@@ -327,14 +332,16 @@ model CrmNote {
 }
 
 model CrmFollowUp {
-  id        Int @id @default(autoincrement())
-  agencyId  Int
-  contactId Int
+  id               Int @id @default(autoincrement())
+  agencyId         Int
+  contactId        Int
+  assignedMemberId Int?
 
   title       String
   description String?
   dueAt       DateTime
   completedAt DateTime?
+  priority    CrmTaskPriority @default(NORMAL)
 
   createdByUserId Int?
   updatedByUserId Int?
@@ -342,17 +349,62 @@ model CrmFollowUp {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agency    Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  contact   ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  createdBy User?               @relation("CrmFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedBy User?               @relation("CrmFollowUpUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  agency         Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact        ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedMember AgencyMember?       @relation("CrmFollowUpAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  createdBy      User?               @relation("CrmFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy      User?               @relation("CrmFollowUpUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
   @@index([agencyId])
   @@index([contactId])
+  @@index([assignedMemberId])
+  @@index([priority])
   @@index([dueAt])
   @@index([completedAt])
   @@index([agencyId, dueAt])
+  @@index([agencyId, assignedMemberId, dueAt])
   @@index([contactId, dueAt])
+}
+
+model CrmOpportunity {
+  id                  Int @id @default(autoincrement())
+  agencyId            Int
+  contactId           Int?
+  companyId           Int?
+  inventoryPropertyId Int?
+  ownerMemberId       Int?
+
+  title         String
+  type          CrmOpportunityType
+  stage         CrmOpportunityStage @default(LEAD)
+  valueCents    Int?
+  probability   Int                 @default(10)
+  expectedCloseAt DateTime?
+  lostReason    String?
+  notes         String?
+
+  isArchived Boolean @default(false)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agency            Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact           ProfessionalContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company           CrmCompany?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  inventoryProperty InventoryProperty?    @relation(fields: [inventoryPropertyId], references: [id], onDelete: SetNull)
+  ownerMember       AgencyMember?         @relation("CrmOpportunityOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([inventoryPropertyId])
+  @@index([ownerMemberId])
+  @@index([type])
+  @@index([stage])
+  @@index([isArchived])
+  @@index([expectedCloseAt])
+  @@index([agencyId, stage, isArchived])
+  @@index([agencyId, ownerMemberId, stage])
 }
 
 model InventoryPropertyContact {
@@ -473,6 +525,7 @@ model InventoryProperty {
   revisions ListingRevision[]
   media     InventoryMedia[]
   contacts  InventoryPropertyContact[]
+  crmOpportunities CrmOpportunity[]
 
   @@index([agencyId])
   @@index([stage])
@@ -942,6 +995,34 @@ enum ProfessionalContactRole {
   SOLICITOR
   BROKER
   OTHER
+}
+
+
+enum CrmTaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum CrmOpportunityType {
+  VENDOR_INSTRUCTION
+  BUYER_SEARCH
+  LANDLORD_INSTRUCTION
+  TENANT_SEARCH
+  OTHER
+}
+
+enum CrmOpportunityStage {
+  LEAD
+  QUALIFIED
+  APPOINTMENT
+  INSTRUCTION
+  ACTIVE
+  NEGOTIATION
+  AGREED
+  WON
+  LOST
 }
 
 enum InventoryContactNotificationLevel {
