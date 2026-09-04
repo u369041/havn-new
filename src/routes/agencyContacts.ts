@@ -1,5 +1,5 @@
 import { Router, Request } from "express";
-import { Prisma, ProfessionalContactRole } from "@prisma/client";
+import { Prisma, ProfessionalContactRole, CrmTaskPriority, CrmOpportunityType, CrmOpportunityStage } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import requireActiveAgent from "../middleware/requireActiveAgent";
@@ -33,6 +33,41 @@ type AgentRequest = Request & {
 const PROFESSIONAL_CONTACT_ROLES = new Set<string>(
   Object.values(ProfessionalContactRole),
 );
+
+const CRM_TASK_PRIORITIES = new Set<string>(Object.values(CrmTaskPriority));
+const CRM_OPPORTUNITY_TYPES = new Set<string>(Object.values(CrmOpportunityType));
+const CRM_OPPORTUNITY_STAGES = new Set<string>(Object.values(CrmOpportunityStage));
+
+function parseEnumValue<T extends string>(
+  value: unknown,
+  allowed: Set<string>,
+  field: string,
+): T | null {
+  if (value == null || value === "") return null;
+  const parsed = String(value).trim().toUpperCase();
+  if (!allowed.has(parsed)) {
+    throw new ApiError("VALIDATION_ERROR", `Invalid ${field}`, 400);
+  }
+  return parsed as T;
+}
+
+function nullableNonNegativeInt(value: unknown, field: string): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ApiError("VALIDATION_ERROR", `${field} must be a non-negative integer`, 400);
+  }
+  return parsed;
+}
+
+function probabilityValue(value: unknown, fallback?: number): number {
+  if (value == null || value === "") return fallback ?? 10;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+    throw new ApiError("VALIDATION_ERROR", "probability must be an integer from 0 to 100", 400);
+  }
+  return parsed;
+}
 
 function asPositiveInt(value: unknown): number | null {
   const n = Number(value);
@@ -118,6 +153,69 @@ async function assertCompanyForAgency(companyId: number | null, agencyId: number
       404,
     );
   }
+}
+
+async function assertActiveAgencyMember(memberId: number | null, agencyId: number) {
+  if (memberId == null) return;
+  const member = await prisma.agencyMember.findFirst({
+    where: { id: memberId, agencyId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (!member) {
+    throw new ApiError(
+      "CRM_MEMBER_NOT_FOUND",
+      "Assigned CRM owner must be an active member of this agency",
+      404,
+    );
+  }
+}
+
+async function assertOpportunityRelations(agencyId: number, values: {
+  contactId?: number | null;
+  companyId?: number | null;
+  inventoryPropertyId?: number | null;
+  ownerMemberId?: number | null;
+}) {
+  if (values.contactId != null) {
+    const contact = await prisma.professionalContact.findFirst({
+      where: { id: values.contactId, agencyId, isArchived: false },
+      select: { id: true },
+    });
+    if (!contact) throw new ApiError("CONTACT_NOT_FOUND", "Opportunity contact must be an active CRM contact in this agency", 404);
+  }
+  if (values.companyId != null) await assertCompanyForAgency(values.companyId, agencyId);
+  if (values.inventoryPropertyId != null) {
+    const property = await prisma.inventoryProperty.findFirst({
+      where: { id: values.inventoryPropertyId, agencyId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!property) throw new ApiError("INVENTORY_NOT_FOUND", "Opportunity property must be an active Inventory record in this agency", 404);
+  }
+  if (values.ownerMemberId != null) await assertActiveAgencyMember(values.ownerMemberId, agencyId);
+}
+
+function opportunitySnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    agencyId: item.agencyId,
+    contactId: item.contactId,
+    companyId: item.companyId,
+    inventoryPropertyId: item.inventoryPropertyId,
+    ownerMemberId: item.ownerMemberId,
+    title: item.title,
+    type: item.type,
+    stage: item.stage,
+    valueCents: item.valueCents,
+    probability: item.probability,
+    expectedCloseAt: item.expectedCloseAt,
+    lostReason: item.lostReason,
+    notes: item.notes,
+    isArchived: item.isArchived,
+    archivedAt: item.archivedAt,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
 }
 
 function contactSnapshot(contact: any) {
@@ -208,6 +306,21 @@ async function crmContactForAgency(id: number, agencyId: number) {
         include: {
           createdBy: { select: { id: true, name: true, email: true } },
           updatedBy: { select: { id: true, name: true, email: true } },
+          assignedMember: {
+            select: {
+              id: true, role: true, jobTitle: true,
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
+      crmOpportunities: {
+        where: { isArchived: false },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        include: {
+          company: { select: { id: true, name: true, isArchived: true } },
+          ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+          inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
         },
       },
       createdBy: { select: { id: true, name: true, email: true } },
@@ -497,8 +610,11 @@ router.get("/follow-ups", async (req: AgentRequest, res) => {
         },
         createdBy: { select: { id: true, name: true, email: true } },
         updatedBy: { select: { id: true, name: true, email: true } },
+        assignedMember: {
+          select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } },
+        },
       },
-      orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+      orderBy: [{ completedAt: "asc" }, { dueAt: "asc" }, { priority: "desc" }, { id: "asc" }],
       take: 1000,
     });
 
@@ -510,6 +626,213 @@ router.get("/follow-ups", async (req: AgentRequest, res) => {
   } catch (error) {
     return handleError(res, error);
   }
+});
+
+/* CRM owners / assignees */
+router.get("/workspace-members", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const items = await prisma.agencyMember.findMany({
+      where: { agencyId: workspace.agency.id, status: "ACTIVE" },
+      select: {
+        id: true,
+        role: true,
+        jobTitle: true,
+        isPrimary: true,
+        user: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: [{ isPrimary: "desc" }, { id: "asc" }],
+    });
+    return res.json({ ok: true, items });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+/* Opportunity pipeline */
+const opportunityInclude = {
+  contact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, roles: true, isArchived: true } },
+  company: { select: { id: true, name: true, isArchived: true } },
+  inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
+  ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+} satisfies Prisma.CrmOpportunityInclude;
+
+router.get("/opportunities", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const includeArchived = String(req.query.includeArchived || "").toLowerCase() === "true";
+    const stage = parseEnumValue<CrmOpportunityStage>(req.query.stage, CRM_OPPORTUNITY_STAGES, "stage");
+    const ownerMemberId = req.query.ownerMemberId == null || req.query.ownerMemberId === "" ? null : asPositiveInt(req.query.ownerMemberId);
+    const contactId = req.query.contactId == null || req.query.contactId === "" ? null : asPositiveInt(req.query.contactId);
+    if (req.query.ownerMemberId != null && req.query.ownerMemberId !== "" && !ownerMemberId) throw new ApiError("VALIDATION_ERROR", "ownerMemberId must be a positive integer", 400);
+    if (req.query.contactId != null && req.query.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer", 400);
+    const items = await prisma.crmOpportunity.findMany({
+      where: {
+        agencyId: workspace.agency.id,
+        ...(includeArchived ? {} : { isArchived: false }),
+        ...(stage ? { stage } : {}),
+        ...(ownerMemberId ? { ownerMemberId } : {}),
+        ...(contactId ? { contactId } : {}),
+      },
+      include: opportunityInclude,
+      orderBy: [{ isArchived: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
+      take: 1000,
+    });
+    return res.json({ ok: true, items });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/opportunities", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const body = req.body || {};
+    const type = parseEnumValue<CrmOpportunityType>(body.type, CRM_OPPORTUNITY_TYPES, "opportunity type");
+    if (!type) throw new ApiError("VALIDATION_ERROR", "type is required", 400);
+    const stage = parseEnumValue<CrmOpportunityStage>(body.stage, CRM_OPPORTUNITY_STAGES, "opportunity stage") || CrmOpportunityStage.LEAD;
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    const companyId = body.companyId == null || body.companyId === "" ? null : asPositiveInt(body.companyId);
+    const inventoryPropertyId = body.inventoryPropertyId == null || body.inventoryPropertyId === "" ? null : asPositiveInt(body.inventoryPropertyId);
+    const ownerMemberId = body.ownerMemberId == null || body.ownerMemberId === "" ? workspace.membership.id : asPositiveInt(body.ownerMemberId);
+    for (const [field, raw, parsed] of [["contactId", body.contactId, contactId], ["companyId", body.companyId, companyId], ["inventoryPropertyId", body.inventoryPropertyId, inventoryPropertyId], ["ownerMemberId", body.ownerMemberId, ownerMemberId]] as const) {
+      if (raw != null && raw !== "" && !parsed) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+    }
+    await assertOpportunityRelations(workspace.agency.id, { contactId, companyId, inventoryPropertyId, ownerMemberId });
+    const created = await prisma.$transaction(async (tx) => {
+      const item = await tx.crmOpportunity.create({
+        data: {
+          agencyId: workspace.agency.id,
+          contactId,
+          companyId,
+          inventoryPropertyId,
+          ownerMemberId,
+          title: requiredString(body.title, "title", 300),
+          type,
+          stage,
+          valueCents: nullableNonNegativeInt(body.valueCents, "valueCents"),
+          probability: probabilityValue(body.probability, stage === CrmOpportunityStage.WON ? 100 : stage === CrmOpportunityStage.LOST ? 0 : 10),
+          expectedCloseAt: nullableDate(body.expectedCloseAt, "expectedCloseAt"),
+          lostReason: stage === CrmOpportunityStage.LOST ? nullableString(body.lostReason, 2000) : null,
+          notes: nullableString(body.notes, 10000),
+        },
+        include: opportunityInclude,
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_OPPORTUNITY_CREATED",
+          entityType: "CrmOpportunity",
+          entityId: String(item.id),
+          afterState: opportunitySnapshot(item),
+          changedFields: ["created"],
+          metadata: { source: "agencyContacts", contactId: item.contactId, companyId: item.companyId, inventoryPropertyId: item.inventoryPropertyId },
+          ...requestMeta(req),
+        },
+      });
+      return item;
+    });
+    return res.status(201).json({ ok: true, item: created });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.patch("/opportunities/:opportunityId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const opportunityId = asPositiveInt(req.params.opportunityId);
+    if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid opportunity id", 400);
+    const before = await prisma.crmOpportunity.findFirst({ where: { id: opportunityId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
+    const body = req.body || {};
+    const data: Prisma.CrmOpportunityUncheckedUpdateInput = {};
+    if ("title" in body) data.title = requiredString(body.title, "title", 300);
+    if ("type" in body) { const v = parseEnumValue<CrmOpportunityType>(body.type, CRM_OPPORTUNITY_TYPES, "opportunity type"); if (!v) throw new ApiError("VALIDATION_ERROR", "type is required", 400); data.type = v; }
+    if ("stage" in body) { const v = parseEnumValue<CrmOpportunityStage>(body.stage, CRM_OPPORTUNITY_STAGES, "opportunity stage"); if (!v) throw new ApiError("VALIDATION_ERROR", "stage is required", 400); data.stage = v; if (v === CrmOpportunityStage.WON && !("probability" in body)) data.probability = 100; if (v === CrmOpportunityStage.LOST && !("probability" in body)) data.probability = 0; if (v !== CrmOpportunityStage.LOST && !("lostReason" in body)) data.lostReason = null; }
+    if ("valueCents" in body) data.valueCents = nullableNonNegativeInt(body.valueCents, "valueCents");
+    if ("probability" in body) data.probability = probabilityValue(body.probability);
+    if ("expectedCloseAt" in body) data.expectedCloseAt = nullableDate(body.expectedCloseAt, "expectedCloseAt");
+    if ("lostReason" in body) data.lostReason = nullableString(body.lostReason, 2000);
+    if ("notes" in body) data.notes = nullableString(body.notes, 10000);
+    const relationFields = ["contactId", "companyId", "inventoryPropertyId", "ownerMemberId"] as const;
+    const relationValues: any = {};
+    for (const field of relationFields) {
+      if (field in body) {
+        const parsed = body[field] == null || body[field] === "" ? null : asPositiveInt(body[field]);
+        if (body[field] != null && body[field] !== "" && !parsed) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+        relationValues[field] = parsed;
+        (data as any)[field] = parsed;
+      }
+    }
+    await assertOpportunityRelations(workspace.agency.id, relationValues);
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmOpportunity.update({ where: { id: opportunityId }, data, include: opportunityInclude });
+      const changed = snapshotChangedFields(opportunitySnapshot(before), opportunitySnapshot(updated));
+      if (changed.length) await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_OPPORTUNITY_UPDATED",
+          entityType: "CrmOpportunity",
+          entityId: String(opportunityId),
+          beforeState: opportunitySnapshot(before),
+          afterState: opportunitySnapshot(updated),
+          changedFields: changed,
+          metadata: { source: "agencyContacts", contactId: updated.contactId, companyId: updated.companyId, inventoryPropertyId: updated.inventoryPropertyId },
+          ...requestMeta(req),
+        },
+      });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/opportunities/:opportunityId/archive", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const opportunityId = asPositiveInt(req.params.opportunityId);
+    if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid opportunity id", 400);
+    const before = await prisma.crmOpportunity.findFirst({ where: { id: opportunityId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
+    if (before.isArchived) return res.json({ ok: true, item: before, alreadyArchived: true });
+    const archivedAt = new Date();
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmOpportunity.update({ where: { id: opportunityId }, data: { isArchived: true, archivedAt }, include: opportunityInclude });
+      await tx.agencyAuditLog.create({ data: { agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId, action: "CRM_OPPORTUNITY_ARCHIVED", entityType: "CrmOpportunity", entityId: String(opportunityId), beforeState: opportunitySnapshot(before), afterState: opportunitySnapshot(updated), changedFields: ["isArchived", "archivedAt"], metadata: { source: "agencyContacts", contactId: updated.contactId }, ...requestMeta(req) } });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.post("/opportunities/:opportunityId/restore", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const opportunityId = asPositiveInt(req.params.opportunityId);
+    if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid opportunity id", 400);
+    const before = await prisma.crmOpportunity.findFirst({ where: { id: opportunityId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
+    if (!before.isArchived) return res.json({ ok: true, item: before, alreadyActive: true });
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmOpportunity.update({ where: { id: opportunityId }, data: { isArchived: false, archivedAt: null }, include: opportunityInclude });
+      await tx.agencyAuditLog.create({ data: { agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId, action: "CRM_OPPORTUNITY_RESTORED", entityType: "CrmOpportunity", entityId: String(opportunityId), beforeState: opportunitySnapshot(before), afterState: opportunitySnapshot(updated), changedFields: ["isArchived", "archivedAt"], metadata: { source: "agencyContacts", contactId: updated.contactId }, ...requestMeta(req) } });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) { return handleError(res, error); }
 });
 
 /* Contact list */
@@ -715,14 +1038,22 @@ router.post("/:id/follow-ups", async (req: AgentRequest, res) => {
     const dueAt = nullableDate(req.body?.dueAt, "dueAt");
     if (!dueAt) throw new ApiError("VALIDATION_ERROR", "dueAt is required", 400);
     const userId = workspace.membership.userId;
+    const assignedMemberId = req.body?.assignedMemberId == null || req.body?.assignedMemberId === ""
+      ? workspace.membership.id
+      : asPositiveInt(req.body?.assignedMemberId);
+    if (!assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+    await assertActiveAgencyMember(assignedMemberId, workspace.agency.id);
+    const priority = parseEnumValue<CrmTaskPriority>(req.body?.priority, CRM_TASK_PRIORITIES, "priority") || CrmTaskPriority.NORMAL;
     const created = await prisma.$transaction(async (tx) => {
       const followUp = await tx.crmFollowUp.create({
         data: {
           agencyId: workspace.agency.id,
           contactId: id,
+          assignedMemberId,
           title: requiredString(req.body?.title, "title", 300),
           description: nullableString(req.body?.description, 5000),
           dueAt,
+          priority,
           createdByUserId: userId,
           updatedByUserId: userId,
         },
@@ -743,6 +1074,8 @@ router.post("/:id/follow-ups", async (req: AgentRequest, res) => {
             description: followUp.description,
             dueAt: followUp.dueAt,
             completedAt: followUp.completedAt,
+            assignedMemberId: followUp.assignedMemberId,
+            priority: followUp.priority,
           },
           changedFields: ["crmFollowUps"],
           metadata: { source: "agencyContacts", followUpId: followUp.id },
@@ -786,6 +1119,19 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
       const completed = body.completed === true || String(body.completed || "").toLowerCase() === "true";
       data.completedAt = completed ? new Date() : null;
     }
+    if ("assignedMemberId" in body) {
+      const assignedMemberId = body.assignedMemberId == null || body.assignedMemberId === "" ? null : asPositiveInt(body.assignedMemberId);
+      if (body.assignedMemberId != null && body.assignedMemberId !== "" && !assignedMemberId) {
+        throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer or null", 400);
+      }
+      await assertActiveAgencyMember(assignedMemberId, workspace.agency.id);
+      data.assignedMemberId = assignedMemberId;
+    }
+    if ("priority" in body) {
+      const priority = parseEnumValue<CrmTaskPriority>(body.priority, CRM_TASK_PRIORITIES, "priority");
+      if (!priority) throw new ApiError("VALIDATION_ERROR", "priority is required", 400);
+      data.priority = priority;
+    }
     const after = await prisma.$transaction(async (tx) => {
       const updated = await tx.crmFollowUp.update({ where: { id: followUpId }, data });
       const changed = snapshotChangedFields(before, updated);
@@ -810,6 +1156,8 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
               description: before.description,
               dueAt: before.dueAt,
               completedAt: before.completedAt,
+              assignedMemberId: before.assignedMemberId,
+              priority: before.priority,
             },
             afterState: {
               id: updated.id,
@@ -817,6 +1165,8 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
               description: updated.description,
               dueAt: updated.dueAt,
               completedAt: updated.completedAt,
+              assignedMemberId: updated.assignedMemberId,
+              priority: updated.priority,
             },
             changedFields: changed,
             metadata: { source: "agencyContacts", followUpId },
@@ -862,6 +1212,8 @@ router.delete("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
             description: before.description,
             dueAt: before.dueAt,
             completedAt: before.completedAt,
+            assignedMemberId: before.assignedMemberId,
+            priority: before.priority,
           },
           changedFields: ["crmFollowUps"],
           metadata: { source: "agencyContacts", followUpId },
