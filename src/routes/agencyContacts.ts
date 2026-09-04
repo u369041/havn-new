@@ -51,13 +51,13 @@ function parseEnumValue<T extends string>(
   return parsed as T;
 }
 
-function nullableNonNegativeInt(value: unknown, field: string): number | null {
+function nullableNonNegativeBigInt(value: unknown, field: string): bigint | null {
   if (value == null || value === "") return null;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     throw new ApiError("VALIDATION_ERROR", `${field} must be a non-negative integer`, 400);
   }
-  return parsed;
+  return BigInt(parsed);
 }
 
 function probabilityValue(value: unknown, fallback?: number): number {
@@ -206,7 +206,7 @@ function opportunitySnapshot(item: any) {
     title: item.title,
     type: item.type,
     stage: item.stage,
-    valueCents: item.valueCents,
+    valueCents: item.valueCents == null ? null : Number(item.valueCents),
     probability: item.probability,
     expectedCloseAt: item.expectedCloseAt,
     lostReason: item.lostReason,
@@ -215,6 +215,24 @@ function opportunitySnapshot(item: any) {
     archivedAt: item.archivedAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+}
+
+function opportunityForResponse(item: any) {
+  if (!item) return item;
+  return {
+    ...item,
+    valueCents: item.valueCents == null ? null : Number(item.valueCents),
+  };
+}
+
+function contactForResponse(contact: any) {
+  if (!contact) return contact;
+  return {
+    ...contact,
+    crmOpportunities: Array.isArray(contact.crmOpportunities)
+      ? contact.crmOpportunities.map(opportunityForResponse)
+      : contact.crmOpportunities,
   };
 }
 
@@ -678,7 +696,7 @@ router.get("/opportunities", async (req: AgentRequest, res) => {
       orderBy: [{ isArchived: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
       take: 1000,
     });
-    return res.json({ ok: true, items });
+    return res.json({ ok: true, items: items.map(opportunityForResponse) });
   } catch (error) {
     return handleError(res, error);
   }
@@ -711,7 +729,7 @@ router.post("/opportunities", async (req: AgentRequest, res) => {
           title: requiredString(body.title, "title", 300),
           type,
           stage,
-          valueCents: nullableNonNegativeInt(body.valueCents, "valueCents"),
+          valueCents: nullableNonNegativeBigInt(body.valueCents, "valueCents"),
           probability: probabilityValue(body.probability, stage === CrmOpportunityStage.WON ? 100 : stage === CrmOpportunityStage.LOST ? 0 : 10),
           expectedCloseAt: nullableDate(body.expectedCloseAt, "expectedCloseAt"),
           lostReason: stage === CrmOpportunityStage.LOST ? nullableString(body.lostReason, 2000) : null,
@@ -736,7 +754,7 @@ router.post("/opportunities", async (req: AgentRequest, res) => {
       });
       return item;
     });
-    return res.status(201).json({ ok: true, item: created });
+    return res.status(201).json({ ok: true, item: opportunityForResponse(created) });
   } catch (error) {
     return handleError(res, error);
   }
@@ -755,7 +773,7 @@ router.patch("/opportunities/:opportunityId", async (req: AgentRequest, res) => 
     if ("title" in body) data.title = requiredString(body.title, "title", 300);
     if ("type" in body) { const v = parseEnumValue<CrmOpportunityType>(body.type, CRM_OPPORTUNITY_TYPES, "opportunity type"); if (!v) throw new ApiError("VALIDATION_ERROR", "type is required", 400); data.type = v; }
     if ("stage" in body) { const v = parseEnumValue<CrmOpportunityStage>(body.stage, CRM_OPPORTUNITY_STAGES, "opportunity stage"); if (!v) throw new ApiError("VALIDATION_ERROR", "stage is required", 400); data.stage = v; if (v === CrmOpportunityStage.WON && !("probability" in body)) data.probability = 100; if (v === CrmOpportunityStage.LOST && !("probability" in body)) data.probability = 0; if (v !== CrmOpportunityStage.LOST && !("lostReason" in body)) data.lostReason = null; }
-    if ("valueCents" in body) data.valueCents = nullableNonNegativeInt(body.valueCents, "valueCents");
+    if ("valueCents" in body) data.valueCents = nullableNonNegativeBigInt(body.valueCents, "valueCents");
     if ("probability" in body) data.probability = probabilityValue(body.probability);
     if ("expectedCloseAt" in body) data.expectedCloseAt = nullableDate(body.expectedCloseAt, "expectedCloseAt");
     if ("lostReason" in body) data.lostReason = nullableString(body.lostReason, 2000);
@@ -792,7 +810,7 @@ router.patch("/opportunities/:opportunityId", async (req: AgentRequest, res) => 
       });
       return updated;
     });
-    return res.json({ ok: true, item: after });
+    return res.json({ ok: true, item: opportunityForResponse(after) });
   } catch (error) {
     return handleError(res, error);
   }
@@ -806,14 +824,14 @@ router.post("/opportunities/:opportunityId/archive", async (req: AgentRequest, r
     if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid opportunity id", 400);
     const before = await prisma.crmOpportunity.findFirst({ where: { id: opportunityId, agencyId: workspace.agency.id } });
     if (!before) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
-    if (before.isArchived) return res.json({ ok: true, item: before, alreadyArchived: true });
+    if (before.isArchived) return res.json({ ok: true, item: opportunityForResponse(before), alreadyArchived: true });
     const archivedAt = new Date();
     const after = await prisma.$transaction(async (tx) => {
       const updated = await tx.crmOpportunity.update({ where: { id: opportunityId }, data: { isArchived: true, archivedAt }, include: opportunityInclude });
       await tx.agencyAuditLog.create({ data: { agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId, action: "CRM_OPPORTUNITY_ARCHIVED", entityType: "CrmOpportunity", entityId: String(opportunityId), beforeState: opportunitySnapshot(before), afterState: opportunitySnapshot(updated), changedFields: ["isArchived", "archivedAt"], metadata: { source: "agencyContacts", contactId: updated.contactId }, ...requestMeta(req) } });
       return updated;
     });
-    return res.json({ ok: true, item: after });
+    return res.json({ ok: true, item: opportunityForResponse(after) });
   } catch (error) { return handleError(res, error); }
 });
 
@@ -825,13 +843,13 @@ router.post("/opportunities/:opportunityId/restore", async (req: AgentRequest, r
     if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid opportunity id", 400);
     const before = await prisma.crmOpportunity.findFirst({ where: { id: opportunityId, agencyId: workspace.agency.id } });
     if (!before) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
-    if (!before.isArchived) return res.json({ ok: true, item: before, alreadyActive: true });
+    if (!before.isArchived) return res.json({ ok: true, item: opportunityForResponse(before), alreadyActive: true });
     const after = await prisma.$transaction(async (tx) => {
       const updated = await tx.crmOpportunity.update({ where: { id: opportunityId }, data: { isArchived: false, archivedAt: null }, include: opportunityInclude });
       await tx.agencyAuditLog.create({ data: { agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId, action: "CRM_OPPORTUNITY_RESTORED", entityType: "CrmOpportunity", entityId: String(opportunityId), beforeState: opportunitySnapshot(before), afterState: opportunitySnapshot(updated), changedFields: ["isArchived", "archivedAt"], metadata: { source: "agencyContacts", contactId: updated.contactId }, ...requestMeta(req) } });
       return updated;
     });
-    return res.json({ ok: true, item: after });
+    return res.json({ ok: true, item: opportunityForResponse(after) });
   } catch (error) { return handleError(res, error); }
 });
 
@@ -1532,7 +1550,7 @@ router.get("/:id", async (req: AgentRequest, res) => {
 
     return res.json({
       ok: true,
-      item,
+      item: contactForResponse(item),
       activity: activity.map((entry) => ({
         ...entry,
         id: entry.id.toString(),

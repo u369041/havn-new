@@ -377,7 +377,7 @@ model CrmOpportunity {
   title         String
   type          CrmOpportunityType
   stage         CrmOpportunityStage @default(LEAD)
-  valueCents    Int?
+  valueCents    BigInt?
   probability   Int                 @default(10)
   expectedCloseAt DateTime?
   lostReason    String?
