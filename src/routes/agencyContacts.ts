@@ -1,5 +1,14 @@
 import { Router, Request } from "express";
-import { Prisma, ProfessionalContactRole, CrmTaskPriority, CrmOpportunityType, CrmOpportunityStage } from "@prisma/client";
+import {
+  Prisma,
+  ProfessionalContactRole,
+  CrmTaskPriority,
+  CrmOpportunityType,
+  CrmOpportunityStage,
+  CrmInteractionType,
+  CrmInteractionDirection,
+  CrmInteractionProvider,
+} from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import requireActiveAgent from "../middleware/requireActiveAgent";
@@ -37,6 +46,9 @@ const PROFESSIONAL_CONTACT_ROLES = new Set<string>(
 const CRM_TASK_PRIORITIES = new Set<string>(Object.values(CrmTaskPriority));
 const CRM_OPPORTUNITY_TYPES = new Set<string>(Object.values(CrmOpportunityType));
 const CRM_OPPORTUNITY_STAGES = new Set<string>(Object.values(CrmOpportunityStage));
+const CRM_INTERACTION_TYPES = new Set<string>(Object.values(CrmInteractionType));
+const CRM_INTERACTION_DIRECTIONS = new Set<string>(Object.values(CrmInteractionDirection));
+const CRM_INTERACTION_PROVIDERS = new Set<string>(Object.values(CrmInteractionProvider));
 
 function parseEnumValue<T extends string>(
   value: unknown,
@@ -194,6 +206,91 @@ async function assertOpportunityRelations(agencyId: number, values: {
   if (values.ownerMemberId != null) await assertActiveAgencyMember(values.ownerMemberId, agencyId);
 }
 
+
+async function assertInteractionRelations(agencyId: number, values: {
+  contactId?: number | null;
+  companyId?: number | null;
+  opportunityId?: number | null;
+  inventoryPropertyId?: number | null;
+  ownerMemberId?: number | null;
+}) {
+  if (values.contactId != null) {
+    const contact = await prisma.professionalContact.findFirst({
+      where: { id: values.contactId, agencyId, isArchived: false },
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new ApiError(
+        "CONTACT_NOT_FOUND",
+        "Interaction contact must be an active CRM contact in this agency",
+        404,
+      );
+    }
+  }
+
+  if (values.companyId != null) {
+    await assertCompanyForAgency(values.companyId, agencyId);
+  }
+
+  if (values.opportunityId != null) {
+    const opportunity = await prisma.crmOpportunity.findFirst({
+      where: { id: values.opportunityId, agencyId, isArchived: false },
+      select: { id: true },
+    });
+    if (!opportunity) {
+      throw new ApiError(
+        "CRM_OPPORTUNITY_NOT_FOUND",
+        "Interaction opportunity must be an active CRM opportunity in this agency",
+        404,
+      );
+    }
+  }
+
+  if (values.inventoryPropertyId != null) {
+    const property = await prisma.inventoryProperty.findFirst({
+      where: { id: values.inventoryPropertyId, agencyId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!property) {
+      throw new ApiError(
+        "INVENTORY_NOT_FOUND",
+        "Interaction property must be an active Inventory record in this agency",
+        404,
+      );
+    }
+  }
+
+  if (values.ownerMemberId != null) {
+    await assertActiveAgencyMember(values.ownerMemberId, agencyId);
+  }
+}
+
+function interactionSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    agencyId: item.agencyId,
+    contactId: item.contactId,
+    companyId: item.companyId,
+    opportunityId: item.opportunityId,
+    inventoryPropertyId: item.inventoryPropertyId,
+    ownerMemberId: item.ownerMemberId,
+    type: item.type,
+    direction: item.direction,
+    subject: item.subject,
+    summary: item.summary,
+    occurredAt: item.occurredAt,
+    durationMinutes: item.durationMinutes,
+    sourceProvider: item.sourceProvider,
+    externalId: item.externalId,
+    externalThreadId: item.externalThreadId,
+    externalUrl: item.externalUrl,
+    createdByUserId: item.createdByUserId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
 function opportunitySnapshot(item: any) {
   if (!item) return null;
   return {
@@ -339,6 +436,17 @@ async function crmContactForAgency(id: number, agencyId: number) {
           company: { select: { id: true, name: true, isArchived: true } },
           ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
           inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
+        },
+      },
+      crmInteractions: {
+        orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+        take: 250,
+        include: {
+          company: { select: { id: true, name: true, isArchived: true } },
+          opportunity: { select: { id: true, title: true, type: true, stage: true, isArchived: true } },
+          inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
+          ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+          createdBy: { select: { id: true, name: true, email: true } },
         },
       },
       createdBy: { select: { id: true, name: true, email: true } },
@@ -905,6 +1013,401 @@ router.get("/", async (req: AgentRequest, res) => {
       membership: { id: workspace.membership.id, role: workspace.membership.role },
       items,
     });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+
+/* CRM interactions */
+const interactionInclude = {
+  contact: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      primaryEmail: true,
+      phoneNumber: true,
+      roles: true,
+      isArchived: true,
+    },
+  },
+  company: { select: { id: true, name: true, isArchived: true } },
+  opportunity: {
+    select: { id: true, title: true, type: true, stage: true, isArchived: true },
+  },
+  inventoryProperty: {
+    select: {
+      id: true,
+      address1: true,
+      address2: true,
+      city: true,
+      county: true,
+      eircode: true,
+      stage: true,
+      transactionType: true,
+      archivedAt: true,
+    },
+  },
+  ownerMember: {
+    select: {
+      id: true,
+      role: true,
+      jobTitle: true,
+      user: { select: { id: true, name: true, email: true } },
+    },
+  },
+  createdBy: { select: { id: true, name: true, email: true } },
+} satisfies Prisma.CrmInteractionInclude;
+
+router.get("/interactions", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const contactId = req.query.contactId == null || req.query.contactId === "" ? null : asPositiveInt(req.query.contactId);
+    const companyId = req.query.companyId == null || req.query.companyId === "" ? null : asPositiveInt(req.query.companyId);
+    const opportunityId = req.query.opportunityId == null || req.query.opportunityId === "" ? null : asPositiveInt(req.query.opportunityId);
+    const inventoryPropertyId = req.query.inventoryPropertyId == null || req.query.inventoryPropertyId === "" ? null : asPositiveInt(req.query.inventoryPropertyId);
+    const ownerMemberId = req.query.ownerMemberId == null || req.query.ownerMemberId === "" ? null : asPositiveInt(req.query.ownerMemberId);
+    const type = parseEnumValue<CrmInteractionType>(req.query.type, CRM_INTERACTION_TYPES, "type");
+    const direction = parseEnumValue<CrmInteractionDirection>(req.query.direction, CRM_INTERACTION_DIRECTIONS, "direction");
+    const sourceProvider = parseEnumValue<CrmInteractionProvider>(req.query.sourceProvider, CRM_INTERACTION_PROVIDERS, "sourceProvider");
+
+    if (req.query.contactId != null && req.query.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer", 400);
+    if (req.query.companyId != null && req.query.companyId !== "" && !companyId) throw new ApiError("VALIDATION_ERROR", "companyId must be a positive integer", 400);
+    if (req.query.opportunityId != null && req.query.opportunityId !== "" && !opportunityId) throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer", 400);
+    if (req.query.inventoryPropertyId != null && req.query.inventoryPropertyId !== "" && !inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId must be a positive integer", 400);
+    if (req.query.ownerMemberId != null && req.query.ownerMemberId !== "" && !ownerMemberId) throw new ApiError("VALIDATION_ERROR", "ownerMemberId must be a positive integer", 400);
+
+    const limitRaw = req.query.limit == null || req.query.limit === "" ? 250 : Number(req.query.limit);
+    if (!Number.isSafeInteger(limitRaw) || limitRaw < 1 || limitRaw > 1000) {
+      throw new ApiError("VALIDATION_ERROR", "limit must be an integer from 1 to 1000", 400);
+    }
+
+    const items = await prisma.crmInteraction.findMany({
+      where: {
+        agencyId: workspace.agency.id,
+        ...(contactId ? { contactId } : {}),
+        ...(companyId ? { companyId } : {}),
+        ...(opportunityId ? { opportunityId } : {}),
+        ...(inventoryPropertyId ? { inventoryPropertyId } : {}),
+        ...(ownerMemberId ? { ownerMemberId } : {}),
+        ...(type ? { type } : {}),
+        ...(direction ? { direction } : {}),
+        ...(sourceProvider ? { sourceProvider } : {}),
+      },
+      include: interactionInclude,
+      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+      take: limitRaw,
+    });
+
+    return res.json({
+      ok: true,
+      agency: { id: workspace.agency.id, name: workspace.agency.name },
+      items,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get("/interactions/:interactionId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const interactionId = asPositiveInt(req.params.interactionId);
+    if (!interactionId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM interaction id", 400);
+
+    const item = await prisma.crmInteraction.findFirst({
+      where: { id: interactionId, agencyId: workspace.agency.id },
+      include: interactionInclude,
+    });
+    if (!item) throw new ApiError("CRM_INTERACTION_NOT_FOUND", "CRM interaction not found", 404);
+    return res.json({ ok: true, item });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/interactions", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const body = req.body || {};
+
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    const companyId = body.companyId == null || body.companyId === "" ? null : asPositiveInt(body.companyId);
+    const opportunityId = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+    const inventoryPropertyId = body.inventoryPropertyId == null || body.inventoryPropertyId === "" ? null : asPositiveInt(body.inventoryPropertyId);
+    const ownerMemberId = body.ownerMemberId == null || body.ownerMemberId === "" ? workspace.membership.id : asPositiveInt(body.ownerMemberId);
+
+    if (body.contactId != null && body.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+    if (body.companyId != null && body.companyId !== "" && !companyId) throw new ApiError("VALIDATION_ERROR", "companyId must be a positive integer or null", 400);
+    if (body.opportunityId != null && body.opportunityId !== "" && !opportunityId) throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer or null", 400);
+    if (body.inventoryPropertyId != null && body.inventoryPropertyId !== "" && !inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId must be a positive integer or null", 400);
+    if (!ownerMemberId) throw new ApiError("VALIDATION_ERROR", "ownerMemberId must be a positive integer", 400);
+
+    const type = parseEnumValue<CrmInteractionType>(body.type, CRM_INTERACTION_TYPES, "type");
+    if (!type) throw new ApiError("VALIDATION_ERROR", "type is required", 400);
+    const direction = parseEnumValue<CrmInteractionDirection>(body.direction, CRM_INTERACTION_DIRECTIONS, "direction") || CrmInteractionDirection.INTERNAL;
+    const sourceProvider = parseEnumValue<CrmInteractionProvider>(body.sourceProvider, CRM_INTERACTION_PROVIDERS, "sourceProvider") || CrmInteractionProvider.MANUAL;
+    const occurredAt = nullableDate(body.occurredAt, "occurredAt") || new Date();
+    const durationMinutes = body.durationMinutes == null || body.durationMinutes === "" ? null : Number(body.durationMinutes);
+    if (durationMinutes != null && (!Number.isSafeInteger(durationMinutes) || durationMinutes < 0 || durationMinutes > 14400)) {
+      throw new ApiError("VALIDATION_ERROR", "durationMinutes must be an integer from 0 to 14400", 400);
+    }
+
+    await assertInteractionRelations(workspace.agency.id, {
+      contactId,
+      companyId,
+      opportunityId,
+      inventoryPropertyId,
+      ownerMemberId,
+    });
+
+    const externalId = nullableString(body.externalId, 1000);
+    if (sourceProvider !== CrmInteractionProvider.MANUAL && !externalId) {
+      throw new ApiError("VALIDATION_ERROR", "externalId is required for synced interactions", 400);
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const interaction = await tx.crmInteraction.create({
+        data: {
+          agencyId: workspace.agency.id,
+          contactId,
+          companyId,
+          opportunityId,
+          inventoryPropertyId,
+          ownerMemberId,
+          type,
+          direction,
+          subject: nullableString(body.subject, 500),
+          summary: requiredString(body.summary, "summary", 20000),
+          occurredAt,
+          durationMinutes,
+          sourceProvider,
+          externalId,
+          externalThreadId: nullableString(body.externalThreadId, 1000),
+          externalUrl: nullableString(body.externalUrl, 2000),
+          createdByUserId: workspace.membership.userId,
+        },
+        include: interactionInclude,
+      });
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_INTERACTION_CREATED",
+          entityType: "CrmInteraction",
+          entityId: String(interaction.id),
+          afterState: interactionSnapshot(interaction),
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: "agencyContacts",
+            interactionId: interaction.id,
+            contactId,
+            companyId,
+            opportunityId,
+            inventoryPropertyId,
+          },
+          ...requestMeta(req),
+        },
+      });
+
+      return interaction;
+    });
+
+    return res.status(201).json({ ok: true, item: created });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return res.status(409).json({
+        ok: false,
+        error: "CRM_INTERACTION_DUPLICATE",
+        message: "This synced interaction has already been recorded",
+      });
+    }
+    return handleError(res, error);
+  }
+});
+
+router.patch("/interactions/:interactionId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const interactionId = asPositiveInt(req.params.interactionId);
+    if (!interactionId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM interaction id", 400);
+
+    const before = await prisma.crmInteraction.findFirst({
+      where: { id: interactionId, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_INTERACTION_NOT_FOUND", "CRM interaction not found", 404);
+
+    const body = req.body || {};
+    const data: Prisma.CrmInteractionUncheckedUpdateInput = {};
+
+    if ("contactId" in body) {
+      const value = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+      if (body.contactId != null && body.contactId !== "" && !value) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+      data.contactId = value;
+    }
+    if ("companyId" in body) {
+      const value = body.companyId == null || body.companyId === "" ? null : asPositiveInt(body.companyId);
+      if (body.companyId != null && body.companyId !== "" && !value) throw new ApiError("VALIDATION_ERROR", "companyId must be a positive integer or null", 400);
+      data.companyId = value;
+    }
+    if ("opportunityId" in body) {
+      const value = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+      if (body.opportunityId != null && body.opportunityId !== "" && !value) throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer or null", 400);
+      data.opportunityId = value;
+    }
+    if ("inventoryPropertyId" in body) {
+      const value = body.inventoryPropertyId == null || body.inventoryPropertyId === "" ? null : asPositiveInt(body.inventoryPropertyId);
+      if (body.inventoryPropertyId != null && body.inventoryPropertyId !== "" && !value) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId must be a positive integer or null", 400);
+      data.inventoryPropertyId = value;
+    }
+    if ("ownerMemberId" in body) {
+      const value = body.ownerMemberId == null || body.ownerMemberId === "" ? null : asPositiveInt(body.ownerMemberId);
+      if (body.ownerMemberId != null && body.ownerMemberId !== "" && !value) throw new ApiError("VALIDATION_ERROR", "ownerMemberId must be a positive integer or null", 400);
+      data.ownerMemberId = value;
+    }
+    if ("type" in body) {
+      const value = parseEnumValue<CrmInteractionType>(body.type, CRM_INTERACTION_TYPES, "type");
+      if (!value) throw new ApiError("VALIDATION_ERROR", "type is required", 400);
+      data.type = value;
+    }
+    if ("direction" in body) {
+      const value = parseEnumValue<CrmInteractionDirection>(body.direction, CRM_INTERACTION_DIRECTIONS, "direction");
+      if (!value) throw new ApiError("VALIDATION_ERROR", "direction is required", 400);
+      data.direction = value;
+    }
+    if ("subject" in body) data.subject = nullableString(body.subject, 500);
+    if ("summary" in body) data.summary = requiredString(body.summary, "summary", 20000);
+    if ("occurredAt" in body) {
+      const value = nullableDate(body.occurredAt, "occurredAt");
+      if (!value) throw new ApiError("VALIDATION_ERROR", "occurredAt is required", 400);
+      data.occurredAt = value;
+    }
+    if ("durationMinutes" in body) {
+      const value = body.durationMinutes == null || body.durationMinutes === "" ? null : Number(body.durationMinutes);
+      if (value != null && (!Number.isSafeInteger(value) || value < 0 || value > 14400)) {
+        throw new ApiError("VALIDATION_ERROR", "durationMinutes must be an integer from 0 to 14400", 400);
+      }
+      data.durationMinutes = value;
+    }
+    if ("sourceProvider" in body) {
+      const value = parseEnumValue<CrmInteractionProvider>(body.sourceProvider, CRM_INTERACTION_PROVIDERS, "sourceProvider");
+      if (!value) throw new ApiError("VALIDATION_ERROR", "sourceProvider is required", 400);
+      data.sourceProvider = value;
+    }
+    if ("externalId" in body) data.externalId = nullableString(body.externalId, 1000);
+    if ("externalThreadId" in body) data.externalThreadId = nullableString(body.externalThreadId, 1000);
+    if ("externalUrl" in body) data.externalUrl = nullableString(body.externalUrl, 2000);
+
+    const effective = {
+      contactId: "contactId" in body ? (data.contactId as number | null) : before.contactId,
+      companyId: "companyId" in body ? (data.companyId as number | null) : before.companyId,
+      opportunityId: "opportunityId" in body ? (data.opportunityId as number | null) : before.opportunityId,
+      inventoryPropertyId: "inventoryPropertyId" in body ? (data.inventoryPropertyId as number | null) : before.inventoryPropertyId,
+      ownerMemberId: "ownerMemberId" in body ? (data.ownerMemberId as number | null) : before.ownerMemberId,
+    };
+    await assertInteractionRelations(workspace.agency.id, effective);
+
+    const effectiveProvider = ("sourceProvider" in body ? data.sourceProvider : before.sourceProvider) as CrmInteractionProvider;
+    const effectiveExternalId = "externalId" in body ? (data.externalId as string | null) : before.externalId;
+    if (effectiveProvider !== CrmInteractionProvider.MANUAL && !effectiveExternalId) {
+      throw new ApiError("VALIDATION_ERROR", "externalId is required for synced interactions", 400);
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const item = await tx.crmInteraction.update({
+        where: { id: interactionId },
+        data,
+        include: interactionInclude,
+      });
+      const beforeSnapshot = interactionSnapshot(before);
+      const afterSnapshot = interactionSnapshot(item);
+      const changed = snapshotChangedFields(beforeSnapshot, afterSnapshot);
+      if (changed.length > 0) {
+        await tx.agencyAuditLog.create({
+          data: {
+            agencyId: workspace.agency.id,
+            actorUserId: workspace.membership.userId,
+            actorAgencyMemberId: workspace.membership.id,
+            effectiveUserId: workspace.membership.userId,
+            action: "CRM_INTERACTION_UPDATED",
+            entityType: "CrmInteraction",
+            entityId: String(interactionId),
+            beforeState: beforeSnapshot,
+            afterState: afterSnapshot,
+            changedFields: changed.map((field) => `crmInteractions.${field}`),
+            metadata: {
+              source: "agencyContacts",
+              interactionId,
+              contactId: item.contactId,
+              companyId: item.companyId,
+              opportunityId: item.opportunityId,
+              inventoryPropertyId: item.inventoryPropertyId,
+            },
+            ...requestMeta(req),
+          },
+        });
+      }
+      return item;
+    });
+
+    return res.json({ ok: true, item: updated });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return res.status(409).json({
+        ok: false,
+        error: "CRM_INTERACTION_DUPLICATE",
+        message: "This synced interaction has already been recorded",
+      });
+    }
+    return handleError(res, error);
+  }
+});
+
+router.delete("/interactions/:interactionId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const interactionId = asPositiveInt(req.params.interactionId);
+    if (!interactionId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM interaction id", 400);
+
+    const before = await prisma.crmInteraction.findFirst({
+      where: { id: interactionId, agencyId: workspace.agency.id },
+    });
+    if (!before) throw new ApiError("CRM_INTERACTION_NOT_FOUND", "CRM interaction not found", 404);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.crmInteraction.delete({ where: { id: interactionId } });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_INTERACTION_DELETED",
+          entityType: "CrmInteraction",
+          entityId: String(interactionId),
+          beforeState: interactionSnapshot(before),
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: "agencyContacts",
+            interactionId,
+            contactId: before.contactId,
+            companyId: before.companyId,
+            opportunityId: before.opportunityId,
+            inventoryPropertyId: before.inventoryPropertyId,
+          },
+          ...requestMeta(req),
+        },
+      });
+    });
+
+    return res.json({ ok: true, deletedInteractionId: interactionId });
   } catch (error) {
     return handleError(res, error);
   }
