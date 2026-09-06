@@ -1982,12 +1982,23 @@ router.patch("/:id", async (req: AgentRequest, res) => {
 
 /* CRM Google integration */
 const GOOGLE_PROVIDER = CrmIntegrationProvider.GOOGLE;
-const GOOGLE_OAUTH_SCOPES = [
+const GOOGLE_BASE_OAUTH_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/calendar.events.readonly",
 ] as const;
+const GOOGLE_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
+function googleGmailSendEnabled(): boolean {
+  return String(process.env.CRM_GOOGLE_GMAIL_SEND_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function googleOAuthScopes(): string[] {
+  return googleGmailSendEnabled()
+    ? [...GOOGLE_BASE_OAUTH_SCOPES, GOOGLE_GMAIL_SEND_SCOPE]
+    : [...GOOGLE_BASE_OAUTH_SCOPES];
+}
 const GOOGLE_INITIAL_GMAIL_QUERY = "newer_than:30d";
 const GOOGLE_INITIAL_CALENDAR_LOOKBACK_DAYS = 90;
 const GOOGLE_OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -2146,6 +2157,8 @@ async function googleConnectionForWorkspace(workspace: AgencyWorkspace) {
 }
 
 function publicGoogleConnection(connection: any) {
+  const sendEnabled = googleGmailSendEnabled();
+  const sendGranted = Boolean(connection?.scopes?.includes?.(GOOGLE_GMAIL_SEND_SCOPE));
   if (!connection) {
     return {
       provider: GOOGLE_PROVIDER,
@@ -2159,6 +2172,9 @@ function publicGoogleConnection(connection: any) {
       lastErrorAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
+      gmailSendEnabled: sendEnabled,
+      gmailSendGranted: false,
+      gmailSendAvailable: false,
     };
   }
   return {
@@ -2176,6 +2192,9 @@ function publicGoogleConnection(connection: any) {
     lastErrorCode: connection.lastErrorCode,
     lastErrorMessage: connection.lastErrorMessage,
     disconnectedAt: connection.disconnectedAt,
+    gmailSendEnabled: sendEnabled,
+    gmailSendGranted: sendGranted,
+    gmailSendAvailable: sendEnabled && sendGranted && connection.status === CrmIntegrationStatus.CONNECTED,
   };
 }
 
@@ -2290,6 +2309,9 @@ async function upsertGoogleEmailInteraction(args: {
   const participantEmails = [...extractEmails(from), ...extractEmails(to), ...extractEmails(cc)]
     .filter((email) => email !== accountEmail);
   const contact = await matchedContactForEmails(args.workspace.agency.id, participantEmails);
+  // Data minimisation: Gmail is a CRM source, not a mailbox mirror. Ignore messages
+  // that do not match an active CRM contact in this agency.
+  if (!contact) return false;
   const occurredAt = message?.internalDate && Number.isFinite(Number(message.internalDate))
     ? new Date(Number(message.internalDate))
     : new Date();
@@ -2332,6 +2354,7 @@ async function upsertGoogleEmailInteraction(args: {
       externalUrl: message?.threadId ? `https://mail.google.com/mail/#all/${encodeURIComponent(String(message.threadId))}` : null,
     },
   });
+  return true;
 }
 
 async function fullGmailSync(workspace: AgencyWorkspace, connection: any, token: string) {
@@ -2353,21 +2376,23 @@ async function fullGmailSync(workspace: AgencyWorkspace, connection: any, token:
   } while (pageToken && pages < 10);
 
   let imported = 0;
+  let skipped = 0;
   for (const messageId of messageIds) {
-    await upsertGoogleEmailInteraction({
+    const matched = await upsertGoogleEmailInteraction({
       workspace,
       connection,
       accountEmail: connection.accountEmail,
       token,
       messageId,
     });
-    imported += 1;
+    if (matched) imported += 1;
+    else skipped += 1;
   }
   const profile = await googleJson<any>(
     "https://gmail.googleapis.com/gmail/v1/users/me/profile",
     { headers: { Authorization: `Bearer ${token}` } },
   );
-  return { imported, historyId: profile?.historyId ? String(profile.historyId) : null, mode: "full" };
+  return { imported, skipped, historyId: profile?.historyId ? String(profile.historyId) : null, mode: "full" };
 }
 
 async function incrementalGmailSync(workspace: AgencyWorkspace, connection: any, token: string) {
@@ -2399,17 +2424,19 @@ async function incrementalGmailSync(workspace: AgencyWorkspace, connection: any,
     } while (pageToken && pages < 20);
 
     let imported = 0;
+    let skipped = 0;
     for (const messageId of messageIds) {
-      await upsertGoogleEmailInteraction({
+      const matched = await upsertGoogleEmailInteraction({
         workspace,
         connection,
         accountEmail: connection.accountEmail,
         token,
         messageId,
       });
-      imported += 1;
+      if (matched) imported += 1;
+      else skipped += 1;
     }
-    return { imported, historyId: latestHistoryId, mode: "incremental" };
+    return { imported, skipped, historyId: latestHistoryId, mode: "incremental" };
   } catch (error) {
     const err: any = error;
     if (err?.googleStatus === 404) {
@@ -2447,6 +2474,8 @@ async function upsertGoogleCalendarInteraction(args: {
     .map((attendee: any) => String(attendee?.email || "").toLowerCase())
     .filter((email: string) => email && email !== args.accountEmail.toLowerCase());
   const contact = await matchedContactForEmails(args.workspace.agency.id, attendeeEmails);
+  // Data minimisation: only retain calendar events involving an active CRM contact.
+  if (!contact) return false;
   const subject = String(event?.summary || "Meeting").trim().slice(0, 500) || "Meeting";
   const description = String(event?.description || "").trim();
   const location = String(event?.location || "").trim();
@@ -2581,7 +2610,7 @@ router.post("/integrations/google/connect", async (req: AgentRequest, res) => {
       client_id: requiredEnv("GOOGLE_CLIENT_ID"),
       redirect_uri: googleRedirectUri(),
       response_type: "code",
-      scope: GOOGLE_OAUTH_SCOPES.join(" "),
+      scope: googleOAuthScopes().join(" "),
       access_type: "offline",
       include_granted_scopes: "true",
       prompt: "consent",
@@ -2591,7 +2620,7 @@ router.post("/integrations/google/connect", async (req: AgentRequest, res) => {
       ok: true,
       authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
       redirectUri: googleRedirectUri(),
-      scopes: [...GOOGLE_OAUTH_SCOPES],
+      scopes: googleOAuthScopes(),
     });
   } catch (error) {
     return handleError(res, error);
@@ -2632,7 +2661,7 @@ router.post("/integrations/google/exchange", async (req: AgentRequest, res) => {
     if (!accountEmail) {
       throw new ApiError("CRM_GOOGLE_ACCOUNT_EMAIL_MISSING", "Google account email could not be resolved", 400);
     }
-    const grantedScopes = String(tokens.scope || GOOGLE_OAUTH_SCOPES.join(" "))
+    const grantedScopes = String(tokens.scope || googleOAuthScopes().join(" "))
       .split(/\s+/)
       .map((scope) => scope.trim())
       .filter(Boolean);
@@ -2695,6 +2724,203 @@ router.post("/integrations/google/exchange", async (req: AgentRequest, res) => {
     });
 
     return res.json({ ok: true, connection: publicGoogleConnection(connection) });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+
+function gmailAddressList(value: unknown, field: string, max = 50): string[] {
+  if (value == null || value === "") return [];
+  const raw = Array.isArray(value) ? value.map(String).join(",") : String(value);
+  const emails = extractEmails(raw);
+  if (emails.length === 0 && raw.trim()) {
+    throw new ApiError("VALIDATION_ERROR", `${field} must contain a valid email address`, 400);
+  }
+  if (emails.length > max) {
+    throw new ApiError("VALIDATION_ERROR", `${field} cannot contain more than ${max} email addresses`, 400);
+  }
+  return emails;
+}
+
+function mimeHeaderValue(value: string): string {
+  return String(value || "").replace(/[\r\n]+/g, " ").trim();
+}
+
+function base64UrlEncodeUtf8(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function buildPlainTextGmailMessage(args: {
+  from: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  inReplyTo?: string | null;
+  references?: string | null;
+}) {
+  const headers = [
+    `From: ${mimeHeaderValue(args.from)}`,
+    `To: ${args.to.map(mimeHeaderValue).join(", ")}`,
+    args.cc.length ? `Cc: ${args.cc.map(mimeHeaderValue).join(", ")}` : "",
+    args.bcc.length ? `Bcc: ${args.bcc.map(mimeHeaderValue).join(", ")}` : "",
+    `Subject: ${mimeHeaderValue(args.subject)}`,
+    args.inReplyTo ? `In-Reply-To: ${mimeHeaderValue(args.inReplyTo)}` : "",
+    args.references ? `References: ${mimeHeaderValue(args.references)}` : "",
+    "MIME-Version: 1.0",
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 8bit",
+  ].filter(Boolean);
+  return `${headers.join("\r\n")}\r\n\r\n${args.body}`;
+}
+
+router.post("/integrations/google/send", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    if (!googleGmailSendEnabled()) {
+      throw new ApiError("CRM_GOOGLE_SEND_DISABLED", "Gmail sending is not enabled for this HAVN environment", 503);
+    }
+
+    const connection = await googleConnectionForWorkspace(workspace);
+    if (!connection || connection.status !== CrmIntegrationStatus.CONNECTED) {
+      throw new ApiError("CRM_GOOGLE_NOT_CONNECTED", "Connect Google before sending email from HAVN", 409);
+    }
+    if (!connection.scopes.includes(GOOGLE_GMAIL_SEND_SCOPE)) {
+      throw new ApiError("CRM_GOOGLE_SEND_PERMISSION_REQUIRED", "Reconnect Google and approve Gmail send access before sending from HAVN", 409);
+    }
+
+    const to = gmailAddressList(req.body?.to, "to");
+    const cc = gmailAddressList(req.body?.cc, "cc");
+    const bcc = gmailAddressList(req.body?.bcc, "bcc");
+    if (to.length === 0) throw new ApiError("VALIDATION_ERROR", "At least one recipient is required", 400);
+    const subject = requiredString(req.body?.subject, "subject", 500);
+    const body = requiredString(req.body?.body, "body", 50000);
+
+    const contactId = req.body?.contactId == null || req.body?.contactId === "" ? null : asPositiveInt(req.body.contactId);
+    const companyId = req.body?.companyId == null || req.body?.companyId === "" ? null : asPositiveInt(req.body.companyId);
+    const opportunityId = req.body?.opportunityId == null || req.body?.opportunityId === "" ? null : asPositiveInt(req.body.opportunityId);
+    const inventoryPropertyId = req.body?.inventoryPropertyId == null || req.body?.inventoryPropertyId === "" ? null : asPositiveInt(req.body.inventoryPropertyId);
+    for (const [field, raw, parsed] of [
+      ["contactId", req.body?.contactId, contactId],
+      ["companyId", req.body?.companyId, companyId],
+      ["opportunityId", req.body?.opportunityId, opportunityId],
+      ["inventoryPropertyId", req.body?.inventoryPropertyId, inventoryPropertyId],
+    ] as const) {
+      if (raw != null && raw !== "" && !parsed) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+    }
+    await assertInteractionRelations(workspace.agency.id, {
+      contactId,
+      companyId,
+      opportunityId,
+      inventoryPropertyId,
+      ownerMemberId: workspace.membership.id,
+    });
+
+    const access = await usableGoogleAccessToken(connection);
+    const rawMime = buildPlainTextGmailMessage({
+      from: access.connection.accountEmail,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      inReplyTo: nullableString(req.body?.inReplyTo, 2000),
+      references: nullableString(req.body?.references, 5000),
+    });
+    const sent = await googleJson<any>("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${access.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        raw: base64UrlEncodeUtf8(rawMime),
+        ...(req.body?.threadId ? { threadId: String(req.body.threadId) } : {}),
+      }),
+    });
+    if (!sent?.id) throw new ApiError("CRM_GOOGLE_SEND_FAILED", "Google did not return a sent message id", 502);
+
+    const accountEmail = String(access.connection.accountEmail || "").toLowerCase();
+    const externalId = `${accountEmail}:gmail:${String(sent.id)}`;
+    const externalThreadId = sent?.threadId ? `${accountEmail}:gmail:${String(sent.threadId)}` : null;
+    const externalUrl = sent?.threadId ? `https://mail.google.com/mail/#sent/${encodeURIComponent(String(sent.threadId))}` : null;
+    const occurredAt = new Date();
+
+    const interaction = await prisma.$transaction(async (tx) => {
+      const created = await tx.crmInteraction.upsert({
+        where: {
+          agencyId_sourceProvider_externalId: {
+            agencyId: workspace.agency.id,
+            sourceProvider: CrmInteractionProvider.GOOGLE,
+            externalId,
+          },
+        },
+        create: {
+          agencyId: workspace.agency.id,
+          contactId,
+          companyId,
+          opportunityId,
+          inventoryPropertyId,
+          ownerMemberId: workspace.membership.id,
+          type: CrmInteractionType.EMAIL,
+          direction: CrmInteractionDirection.OUTBOUND,
+          subject,
+          summary: body.slice(0, 20000),
+          occurredAt,
+          sourceProvider: CrmInteractionProvider.GOOGLE,
+          externalId,
+          externalThreadId,
+          externalUrl,
+          createdByUserId: workspace.membership.userId,
+        },
+        update: {
+          contactId,
+          companyId,
+          opportunityId,
+          inventoryPropertyId,
+          ownerMemberId: workspace.membership.id,
+          direction: CrmInteractionDirection.OUTBOUND,
+          subject,
+          summary: body.slice(0, 20000),
+          occurredAt,
+          externalThreadId,
+          externalUrl,
+        },
+        include: interactionInclude,
+      });
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_GOOGLE_EMAIL_SENT",
+          entityType: "CrmInteraction",
+          entityId: String(created.id),
+          afterState: {
+            interactionId: created.id,
+            contactId,
+            companyId,
+            opportunityId,
+            inventoryPropertyId,
+            subject,
+            to,
+            cc,
+            bccCount: bcc.length,
+            provider: "GOOGLE",
+          },
+          changedFields: ["crmInteractions"],
+          metadata: { source: "agencyContacts", provider: "GOOGLE", googleMessageId: String(sent.id), googleThreadId: sent?.threadId ? String(sent.threadId) : null },
+          ...requestMeta(req),
+        },
+      });
+      return created;
+    });
+
+    return res.status(201).json({ ok: true, item: interaction, sent: { id: String(sent.id), threadId: sent?.threadId ? String(sent.threadId) : null } });
   } catch (error) {
     return handleError(res, error);
   }
