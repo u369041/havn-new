@@ -65,6 +65,7 @@ model User {
   crmFollowUpsCreated          CrmFollowUp[]              @relation("CrmFollowUpCreatedBy")
   crmFollowUpsUpdated          CrmFollowUp[]              @relation("CrmFollowUpUpdatedBy")
   crmInteractionsCreated       CrmInteraction[]           @relation("CrmInteractionCreatedBy")
+  crmIntegrationConnections    CrmIntegrationConnection[] @relation("CrmIntegrationConnectionUser")
   inventoryContactLinksCreated InventoryPropertyContact[] @relation("InventoryPropertyContactCreatedBy")
   inventoryContactLinksUpdated InventoryPropertyContact[] @relation("InventoryPropertyContactUpdatedBy")
   inventoryPropertiesCreated   InventoryProperty[]        @relation("InventoryPropertyCreatedBy")
@@ -180,6 +181,7 @@ model Agency {
   crmFollowUps              CrmFollowUp[]
   crmOpportunities          CrmOpportunity[]
   crmInteractions           CrmInteraction[]
+  crmIntegrationConnections CrmIntegrationConnection[]
   inventoryProperties       InventoryProperty[]
   inventoryPropertyContacts InventoryPropertyContact[]
   inventoryMedia            InventoryMedia[]
@@ -217,6 +219,7 @@ model AgencyMember {
   crmFollowUpsAssigned        CrmFollowUp[]        @relation("CrmFollowUpAssignedMember")
   crmOpportunitiesOwned       CrmOpportunity[]     @relation("CrmOpportunityOwner")
   crmInteractionsOwned        CrmInteraction[]     @relation("CrmInteractionOwner")
+  crmIntegrationConnections   CrmIntegrationConnection[] @relation("CrmIntegrationConnectionMember")
 
   @@unique([agencyId, userId])
   @@index([agencyId])
@@ -459,6 +462,51 @@ model CrmInteraction {
   @@index([agencyId, contactId, occurredAt])
   @@index([agencyId, opportunityId, occurredAt])
   @@unique([agencyId, sourceProvider, externalId])
+}
+
+model CrmIntegrationConnection {
+  id       Int @id @default(autoincrement())
+  agencyId Int
+  memberId Int
+  userId   Int
+
+  provider CrmIntegrationProvider
+  status   CrmIntegrationStatus @default(CONNECTED)
+
+  accountEmail      String?
+  externalAccountId String?
+  scopes            String[]
+
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+
+  gmailHistoryId    String?
+  calendarSyncToken String?
+
+  lastEmailSyncAt    DateTime?
+  lastCalendarSyncAt DateTime?
+  lastSyncAt         DateTime?
+  lastErrorAt        DateTime?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  disconnectedAt DateTime?
+
+  agency Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  member AgencyMember @relation("CrmIntegrationConnectionMember", fields: [memberId], references: [id], onDelete: Cascade)
+  user   User         @relation("CrmIntegrationConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, memberId, provider])
+  @@index([agencyId])
+  @@index([memberId])
+  @@index([userId])
+  @@index([provider])
+  @@index([status])
+  @@index([accountEmail])
+  @@index([agencyId, status])
 }
 
 model InventoryPropertyContact {
@@ -1072,6 +1120,17 @@ enum CrmInteractionProvider {
   MANUAL
   GOOGLE
   MICROSOFT
+}
+
+enum CrmIntegrationProvider {
+  GOOGLE
+  MICROSOFT
+}
+
+enum CrmIntegrationStatus {
+  CONNECTED
+  ERROR
+  DISCONNECTED
 }
 
 enum CrmTaskPriority {
