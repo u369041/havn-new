@@ -1,4 +1,5 @@
 import { Router, Request } from "express";
+import crypto from "crypto";
 import {
   Prisma,
   ProfessionalContactRole,
@@ -8,6 +9,8 @@ import {
   CrmInteractionType,
   CrmInteractionDirection,
   CrmInteractionProvider,
+  CrmIntegrationProvider,
+  CrmIntegrationStatus,
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
@@ -1970,6 +1973,874 @@ router.patch("/:id", async (req: AgentRequest, res) => {
       return updated;
     });
     return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+
+
+/* CRM Google integration */
+const GOOGLE_PROVIDER = CrmIntegrationProvider.GOOGLE;
+const GOOGLE_OAUTH_SCOPES = [
+  "openid",
+  "email",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
+] as const;
+const GOOGLE_INITIAL_GMAIL_QUERY = "newer_than:30d";
+const GOOGLE_INITIAL_CALENDAR_LOOKBACK_DAYS = 90;
+const GOOGLE_OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+type GoogleTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+  id_token?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type GoogleConnectionRecord = Awaited<ReturnType<typeof googleConnectionForWorkspace>>;
+
+function requiredEnv(name: string): string {
+  const value = String(process.env[name] || "").trim();
+  if (!value) {
+    throw new ApiError(
+      "CRM_GOOGLE_CONFIGURATION_ERROR",
+      `${name} is not configured`,
+      503,
+    );
+  }
+  return value;
+}
+
+function googleEncryptionKey(): Buffer {
+  const raw = requiredEnv("CRM_GOOGLE_TOKEN_ENCRYPTION_KEY");
+  let key: Buffer;
+  try {
+    key = Buffer.from(raw, "base64");
+  } catch {
+    key = Buffer.alloc(0);
+  }
+  if (key.length !== 32) {
+    throw new ApiError(
+      "CRM_GOOGLE_CONFIGURATION_ERROR",
+      "CRM_GOOGLE_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      503,
+    );
+  }
+  return key;
+}
+
+function encryptGoogleSecret(value: string): string {
+  const key = googleEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ["v1", iv.toString("base64url"), tag.toString("base64url"), encrypted.toString("base64url")].join(":");
+}
+
+function decryptGoogleSecret(value: string): string {
+  const [version, ivRaw, tagRaw, encryptedRaw] = String(value || "").split(":");
+  if (version !== "v1" || !ivRaw || !tagRaw || encryptedRaw == null) {
+    throw new ApiError("CRM_GOOGLE_TOKEN_INVALID", "Stored Google token could not be read", 500);
+  }
+  try {
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      googleEncryptionKey(),
+      Buffer.from(ivRaw, "base64url"),
+    );
+    decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encryptedRaw, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw new ApiError("CRM_GOOGLE_TOKEN_INVALID", "Stored Google token could not be decrypted", 500);
+  }
+}
+
+function googleRedirectUri(): string {
+  return requiredEnv("GOOGLE_OAUTH_REDIRECT_URI");
+}
+
+function encodeGoogleState(payload: Record<string, unknown>): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", googleEncryptionKey())
+    .update(body)
+    .digest("base64url");
+  return `${body}.${signature}`;
+}
+
+function decodeGoogleState(state: string): any {
+  const [body, signature] = String(state || "").split(".");
+  if (!body || !signature) {
+    throw new ApiError("CRM_GOOGLE_OAUTH_STATE_INVALID", "Google connection state is invalid", 400);
+  }
+  const expected = crypto
+    .createHmac("sha256", googleEncryptionKey())
+    .update(body)
+    .digest();
+  let received: Buffer;
+  try {
+    received = Buffer.from(signature, "base64url");
+  } catch {
+    received = Buffer.alloc(0);
+  }
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    throw new ApiError("CRM_GOOGLE_OAUTH_STATE_INVALID", "Google connection state is invalid", 400);
+  }
+  let payload: any;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    throw new ApiError("CRM_GOOGLE_OAUTH_STATE_INVALID", "Google connection state is invalid", 400);
+  }
+  if (!payload?.exp || Number(payload.exp) < Date.now()) {
+    throw new ApiError("CRM_GOOGLE_OAUTH_STATE_EXPIRED", "Google connection request has expired", 400);
+  }
+  return payload;
+}
+
+async function googleJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let body: any = null;
+  if (text) {
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  }
+  if (!response.ok) {
+    const message = body?.error_description || body?.error?.message || body?.error || `Google request failed (${response.status})`;
+    const error = new ApiError("CRM_GOOGLE_API_ERROR", String(message), response.status >= 500 ? 502 : 400) as ApiError & { googleStatus?: number; googleBody?: any };
+    error.googleStatus = response.status;
+    error.googleBody = body;
+    throw error;
+  }
+  return body as T;
+}
+
+async function googleTokenExchange(params: URLSearchParams): Promise<GoogleTokenResponse> {
+  return googleJson<GoogleTokenResponse>("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+}
+
+async function googleConnectionForWorkspace(workspace: AgencyWorkspace) {
+  return prisma.crmIntegrationConnection.findUnique({
+    where: {
+      agencyId_memberId_provider: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        provider: GOOGLE_PROVIDER,
+      },
+    },
+  });
+}
+
+function publicGoogleConnection(connection: any) {
+  if (!connection) {
+    return {
+      provider: GOOGLE_PROVIDER,
+      connected: false,
+      status: CrmIntegrationStatus.DISCONNECTED,
+      accountEmail: null,
+      scopes: [],
+      lastEmailSyncAt: null,
+      lastCalendarSyncAt: null,
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+  }
+  return {
+    id: connection.id,
+    provider: connection.provider,
+    connected: connection.status === CrmIntegrationStatus.CONNECTED,
+    status: connection.status,
+    accountEmail: connection.accountEmail,
+    scopes: connection.scopes,
+    tokenExpiresAt: connection.tokenExpiresAt,
+    lastEmailSyncAt: connection.lastEmailSyncAt,
+    lastCalendarSyncAt: connection.lastCalendarSyncAt,
+    lastSyncAt: connection.lastSyncAt,
+    lastErrorAt: connection.lastErrorAt,
+    lastErrorCode: connection.lastErrorCode,
+    lastErrorMessage: connection.lastErrorMessage,
+    disconnectedAt: connection.disconnectedAt,
+  };
+}
+
+async function usableGoogleAccessToken(connection: NonNullable<GoogleConnectionRecord>): Promise<{ token: string; connection: any }> {
+  const expiresAt = connection.tokenExpiresAt ? new Date(connection.tokenExpiresAt).getTime() : 0;
+  const currentToken = decryptGoogleSecret(connection.accessTokenEncrypted);
+  if (currentToken && expiresAt > Date.now() + 60_000) {
+    return { token: currentToken, connection };
+  }
+  if (!connection.refreshTokenEncrypted) {
+    throw new ApiError(
+      "CRM_GOOGLE_RECONNECT_REQUIRED",
+      "Google access has expired. Reconnect the account.",
+      401,
+    );
+  }
+  const refreshToken = decryptGoogleSecret(connection.refreshTokenEncrypted);
+  const tokens = await googleTokenExchange(new URLSearchParams({
+    client_id: requiredEnv("GOOGLE_CLIENT_ID"),
+    client_secret: requiredEnv("GOOGLE_CLIENT_SECRET"),
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  }));
+  if (!tokens.access_token) {
+    throw new ApiError("CRM_GOOGLE_RECONNECT_REQUIRED", "Google did not return a refreshed access token", 401);
+  }
+  const updated = await prisma.crmIntegrationConnection.update({
+    where: { id: connection.id },
+    data: {
+      accessTokenEncrypted: encryptGoogleSecret(tokens.access_token),
+      tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+      status: CrmIntegrationStatus.CONNECTED,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      disconnectedAt: null,
+    },
+  });
+  return { token: tokens.access_token, connection: updated };
+}
+
+async function markGoogleConnectionError(connectionId: number, error: unknown) {
+  const err: any = error;
+  try {
+    await prisma.crmIntegrationConnection.update({
+      where: { id: connectionId },
+      data: {
+        status: CrmIntegrationStatus.ERROR,
+        lastErrorAt: new Date(),
+        lastErrorCode: nullableString(err?.code || err?.googleBody?.error || "GOOGLE_SYNC_ERROR", 200),
+        lastErrorMessage: nullableString(err?.message || "Google synchronization failed", 2000),
+      },
+    });
+  } catch (markError) {
+    console.error("Failed to record Google CRM integration error", markError);
+  }
+}
+
+function headerValue(headers: any[], name: string): string {
+  const target = name.toLowerCase();
+  const item = Array.isArray(headers)
+    ? headers.find((header) => String(header?.name || "").toLowerCase() === target)
+    : null;
+  return String(item?.value || "").trim();
+}
+
+function extractEmails(value: string): string[] {
+  const matches = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  return [...new Set(matches.map((email) => email.trim().toLowerCase()))];
+}
+
+async function matchedContactForEmails(agencyId: number, emails: string[]) {
+  for (const email of [...new Set(emails.map((value) => value.toLowerCase()).filter(Boolean))]) {
+    const contact = await prisma.professionalContact.findFirst({
+      where: {
+        agencyId,
+        isArchived: false,
+        primaryEmail: { equals: email, mode: "insensitive" },
+      },
+      select: { id: true, companyId: true },
+    });
+    if (contact) return contact;
+  }
+  return null;
+}
+
+function gmailDirection(accountEmail: string, from: string): CrmInteractionDirection {
+  const account = accountEmail.toLowerCase();
+  const fromEmails = extractEmails(from);
+  return fromEmails.includes(account)
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertGoogleEmailInteraction(args: {
+  workspace: AgencyWorkspace;
+  connection: any;
+  accountEmail: string;
+  token: string;
+  messageId: string;
+}) {
+  const message = await googleJson<any>(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(args.messageId)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date`,
+    { headers: { Authorization: `Bearer ${args.token}` } },
+  );
+  const headers = message?.payload?.headers || [];
+  const from = headerValue(headers, "From");
+  const to = headerValue(headers, "To");
+  const cc = headerValue(headers, "Cc");
+  const subject = headerValue(headers, "Subject") || "Email";
+  const accountEmail = args.accountEmail.toLowerCase();
+  const participantEmails = [...extractEmails(from), ...extractEmails(to), ...extractEmails(cc)]
+    .filter((email) => email !== accountEmail);
+  const contact = await matchedContactForEmails(args.workspace.agency.id, participantEmails);
+  const occurredAt = message?.internalDate && Number.isFinite(Number(message.internalDate))
+    ? new Date(Number(message.internalDate))
+    : new Date();
+  const externalId = `${accountEmail}:gmail:${String(message.id)}`;
+  const summary = String(message?.snippet || subject || "Email").trim().slice(0, 20000) || "Email";
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId: args.workspace.agency.id,
+        sourceProvider: CrmInteractionProvider.GOOGLE,
+        externalId,
+      },
+    },
+    create: {
+      agencyId: args.workspace.agency.id,
+      contactId: contact?.id || null,
+      companyId: contact?.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      type: CrmInteractionType.EMAIL,
+      direction: gmailDirection(accountEmail, from),
+      subject: subject.slice(0, 500),
+      summary,
+      occurredAt,
+      sourceProvider: CrmInteractionProvider.GOOGLE,
+      externalId,
+      externalThreadId: message?.threadId ? `${accountEmail}:gmail:${String(message.threadId)}` : null,
+      externalUrl: message?.threadId ? `https://mail.google.com/mail/#all/${encodeURIComponent(String(message.threadId))}` : null,
+      createdByUserId: args.connection.userId,
+    },
+    update: {
+      contactId: contact?.id || null,
+      companyId: contact?.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      direction: gmailDirection(accountEmail, from),
+      subject: subject.slice(0, 500),
+      summary,
+      occurredAt,
+      externalThreadId: message?.threadId ? `${accountEmail}:gmail:${String(message.threadId)}` : null,
+      externalUrl: message?.threadId ? `https://mail.google.com/mail/#all/${encodeURIComponent(String(message.threadId))}` : null,
+    },
+  });
+}
+
+async function fullGmailSync(workspace: AgencyWorkspace, connection: any, token: string) {
+  let pageToken: string | null = null;
+  const messageIds = new Set<string>();
+  let pages = 0;
+  do {
+    const params = new URLSearchParams({ maxResults: "100", q: GOOGLE_INITIAL_GMAIL_QUERY });
+    if (pageToken) params.set("pageToken", pageToken);
+    const page = await googleJson<any>(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    for (const message of Array.isArray(page?.messages) ? page.messages : []) {
+      if (message?.id) messageIds.add(String(message.id));
+    }
+    pageToken = page?.nextPageToken ? String(page.nextPageToken) : null;
+    pages += 1;
+  } while (pageToken && pages < 10);
+
+  let imported = 0;
+  for (const messageId of messageIds) {
+    await upsertGoogleEmailInteraction({
+      workspace,
+      connection,
+      accountEmail: connection.accountEmail,
+      token,
+      messageId,
+    });
+    imported += 1;
+  }
+  const profile = await googleJson<any>(
+    "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  return { imported, historyId: profile?.historyId ? String(profile.historyId) : null, mode: "full" };
+}
+
+async function incrementalGmailSync(workspace: AgencyWorkspace, connection: any, token: string) {
+  if (!connection.gmailHistoryId) return fullGmailSync(workspace, connection, token);
+  try {
+    let pageToken: string | null = null;
+    let latestHistoryId = connection.gmailHistoryId;
+    const messageIds = new Set<string>();
+    let pages = 0;
+    do {
+      const params = new URLSearchParams({
+        startHistoryId: String(connection.gmailHistoryId),
+        maxResults: "100",
+        historyTypes: "messageAdded",
+      });
+      if (pageToken) params.set("pageToken", pageToken);
+      const page = await googleJson<any>(
+        `https://gmail.googleapis.com/gmail/v1/users/me/history?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      for (const history of Array.isArray(page?.history) ? page.history : []) {
+        for (const added of Array.isArray(history?.messagesAdded) ? history.messagesAdded : []) {
+          if (added?.message?.id) messageIds.add(String(added.message.id));
+        }
+      }
+      if (page?.historyId) latestHistoryId = String(page.historyId);
+      pageToken = page?.nextPageToken ? String(page.nextPageToken) : null;
+      pages += 1;
+    } while (pageToken && pages < 20);
+
+    let imported = 0;
+    for (const messageId of messageIds) {
+      await upsertGoogleEmailInteraction({
+        workspace,
+        connection,
+        accountEmail: connection.accountEmail,
+        token,
+        messageId,
+      });
+      imported += 1;
+    }
+    return { imported, historyId: latestHistoryId, mode: "incremental" };
+  } catch (error) {
+    const err: any = error;
+    if (err?.googleStatus === 404) {
+      return fullGmailSync(workspace, connection, token);
+    }
+    throw error;
+  }
+}
+
+function calendarEventDirection(accountEmail: string, event: any): CrmInteractionDirection {
+  const organizer = String(event?.organizer?.email || "").toLowerCase();
+  return organizer && organizer === accountEmail.toLowerCase()
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertGoogleCalendarInteraction(args: {
+  workspace: AgencyWorkspace;
+  connection: any;
+  accountEmail: string;
+  event: any;
+}) {
+  const event = args.event;
+  if (!event?.id || event?.status === "cancelled") return false;
+  const startRaw = event?.start?.dateTime || event?.start?.date;
+  if (!startRaw) return false;
+  const occurredAt = new Date(startRaw);
+  if (Number.isNaN(occurredAt.getTime())) return false;
+  const endRaw = event?.end?.dateTime || event?.end?.date;
+  const endAt = endRaw ? new Date(endRaw) : null;
+  const durationMinutes = endAt && !Number.isNaN(endAt.getTime())
+    ? Math.max(0, Math.round((endAt.getTime() - occurredAt.getTime()) / 60000))
+    : null;
+  const attendeeEmails = (Array.isArray(event?.attendees) ? event.attendees : [])
+    .map((attendee: any) => String(attendee?.email || "").toLowerCase())
+    .filter((email: string) => email && email !== args.accountEmail.toLowerCase());
+  const contact = await matchedContactForEmails(args.workspace.agency.id, attendeeEmails);
+  const subject = String(event?.summary || "Meeting").trim().slice(0, 500) || "Meeting";
+  const description = String(event?.description || "").trim();
+  const location = String(event?.location || "").trim();
+  const summaryParts = [description, location ? `Location: ${location}` : ""].filter(Boolean);
+  const summary = (summaryParts.join("\n\n") || subject).slice(0, 20000);
+  const externalId = `${args.accountEmail.toLowerCase()}:calendar:${String(event.id)}`;
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId: args.workspace.agency.id,
+        sourceProvider: CrmInteractionProvider.GOOGLE,
+        externalId,
+      },
+    },
+    create: {
+      agencyId: args.workspace.agency.id,
+      contactId: contact?.id || null,
+      companyId: contact?.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      type: CrmInteractionType.MEETING,
+      direction: calendarEventDirection(args.accountEmail, event),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      sourceProvider: CrmInteractionProvider.GOOGLE,
+      externalId,
+      externalThreadId: event?.recurringEventId ? `${args.accountEmail.toLowerCase()}:calendar-series:${String(event.recurringEventId)}` : null,
+      externalUrl: nullableString(event?.htmlLink, 2000),
+      createdByUserId: args.connection.userId,
+    },
+    update: {
+      contactId: contact?.id || null,
+      companyId: contact?.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      direction: calendarEventDirection(args.accountEmail, event),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      externalThreadId: event?.recurringEventId ? `${args.accountEmail.toLowerCase()}:calendar-series:${String(event.recurringEventId)}` : null,
+      externalUrl: nullableString(event?.htmlLink, 2000),
+    },
+  });
+  return true;
+}
+
+async function googleCalendarSync(workspace: AgencyWorkspace, connection: any, token: string) {
+  let syncToken = connection.calendarSyncToken ? String(connection.calendarSyncToken) : null;
+  let pageToken: string | null = null;
+  let nextSyncToken: string | null = null;
+  let imported = 0;
+  let pages = 0;
+  const run = async (useSyncToken: boolean) => {
+    pageToken = null;
+    nextSyncToken = null;
+    pages = 0;
+    do {
+      const params = new URLSearchParams({
+        maxResults: "2500",
+        singleEvents: "true",
+        showDeleted: "true",
+      });
+      if (useSyncToken && syncToken) {
+        params.set("syncToken", syncToken);
+      } else {
+        params.set("timeMin", new Date(Date.now() - GOOGLE_INITIAL_CALENDAR_LOOKBACK_DAYS * 86400000).toISOString());
+      }
+      if (pageToken) params.set("pageToken", pageToken);
+      const page = await googleJson<any>(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      for (const event of Array.isArray(page?.items) ? page.items : []) {
+        if (await upsertGoogleCalendarInteraction({ workspace, connection, accountEmail: connection.accountEmail, event })) {
+          imported += 1;
+        }
+      }
+      pageToken = page?.nextPageToken ? String(page.nextPageToken) : null;
+      if (page?.nextSyncToken) nextSyncToken = String(page.nextSyncToken);
+      pages += 1;
+    } while (pageToken && pages < 20);
+  };
+
+  try {
+    await run(Boolean(syncToken));
+  } catch (error) {
+    const err: any = error;
+    if (syncToken && err?.googleStatus === 410) {
+      syncToken = null;
+      imported = 0;
+      await run(false);
+    } else {
+      throw error;
+    }
+  }
+  return { imported, syncToken: nextSyncToken || syncToken, mode: connection.calendarSyncToken ? "incremental" : "full" };
+}
+
+router.get("/integrations/google/status", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const connection = await googleConnectionForWorkspace(workspace);
+    return res.json({
+      ok: true,
+      configured: Boolean(
+        process.env.GOOGLE_CLIENT_ID &&
+        process.env.GOOGLE_CLIENT_SECRET &&
+        process.env.GOOGLE_OAUTH_REDIRECT_URI &&
+        process.env.CRM_GOOGLE_TOKEN_ENCRYPTION_KEY
+      ),
+      connection: publicGoogleConnection(connection),
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/google/connect", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const state = encodeGoogleState({
+      agencyId: workspace.agency.id,
+      memberId: workspace.membership.id,
+      userId: workspace.membership.userId,
+      nonce: crypto.randomBytes(18).toString("base64url"),
+      exp: Date.now() + GOOGLE_OAUTH_STATE_TTL_MS,
+    });
+    const params = new URLSearchParams({
+      client_id: requiredEnv("GOOGLE_CLIENT_ID"),
+      redirect_uri: googleRedirectUri(),
+      response_type: "code",
+      scope: GOOGLE_OAUTH_SCOPES.join(" "),
+      access_type: "offline",
+      include_granted_scopes: "true",
+      prompt: "consent",
+      state,
+    });
+    return res.json({
+      ok: true,
+      authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+      redirectUri: googleRedirectUri(),
+      scopes: [...GOOGLE_OAUTH_SCOPES],
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/google/exchange", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const code = requiredString(req.body?.code, "code", 5000);
+    const state = requiredString(req.body?.state, "state", 10000);
+    const payload = decodeGoogleState(state);
+    if (
+      Number(payload.agencyId) !== workspace.agency.id ||
+      Number(payload.memberId) !== workspace.membership.id ||
+      Number(payload.userId) !== workspace.membership.userId
+    ) {
+      throw new ApiError("CRM_GOOGLE_OAUTH_STATE_INVALID", "Google connection state does not match this user", 403);
+    }
+
+    const existing = await googleConnectionForWorkspace(workspace);
+    const tokens = await googleTokenExchange(new URLSearchParams({
+      client_id: requiredEnv("GOOGLE_CLIENT_ID"),
+      client_secret: requiredEnv("GOOGLE_CLIENT_SECRET"),
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: googleRedirectUri(),
+    }));
+    if (!tokens.access_token) {
+      throw new ApiError("CRM_GOOGLE_OAUTH_FAILED", "Google did not return an access token", 400);
+    }
+
+    const profile = await googleJson<any>("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const accountEmail = String(profile?.email || "").trim().toLowerCase();
+    if (!accountEmail) {
+      throw new ApiError("CRM_GOOGLE_ACCOUNT_EMAIL_MISSING", "Google account email could not be resolved", 400);
+    }
+    const grantedScopes = String(tokens.scope || GOOGLE_OAUTH_SCOPES.join(" "))
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+
+    const connection = await prisma.crmIntegrationConnection.upsert({
+      where: {
+        agencyId_memberId_provider: {
+          agencyId: workspace.agency.id,
+          memberId: workspace.membership.id,
+          provider: GOOGLE_PROVIDER,
+        },
+      },
+      create: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        userId: workspace.membership.userId,
+        provider: GOOGLE_PROVIDER,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.sub, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptGoogleSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token ? encryptGoogleSecret(tokens.refresh_token) : null,
+        tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+      },
+      update: {
+        userId: workspace.membership.userId,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.sub, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptGoogleSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token
+          ? encryptGoogleSecret(tokens.refresh_token)
+          : existing?.refreshTokenEncrypted || null,
+        tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+        gmailHistoryId: existing?.accountEmail && existing.accountEmail !== accountEmail ? null : existing?.gmailHistoryId,
+        calendarSyncToken: existing?.accountEmail && existing.accountEmail !== accountEmail ? null : existing?.calendarSyncToken,
+        lastErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        disconnectedAt: null,
+      },
+    });
+
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_GOOGLE_CONNECTED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        afterState: { provider: connection.provider, status: connection.status, accountEmail },
+        changedFields: ["crmIntegrationConnections"],
+        metadata: { source: "agencyContacts", provider: "GOOGLE", accountEmail },
+        ...requestMeta(req),
+      },
+    });
+
+    return res.json({ ok: true, connection: publicGoogleConnection(connection) });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/google/sync", async (req: AgentRequest, res) => {
+  let connectionId: number | null = null;
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await googleConnectionForWorkspace(workspace);
+    if (!connection || connection.status === CrmIntegrationStatus.DISCONNECTED) {
+      throw new ApiError("CRM_GOOGLE_NOT_CONNECTED", "Connect a Google account before synchronizing", 409);
+    }
+    connectionId = connection.id;
+    const requestedGmail = req.body?.gmail !== false;
+    const requestedCalendar = req.body?.calendar !== false;
+    if (!requestedGmail && !requestedCalendar) {
+      throw new ApiError("VALIDATION_ERROR", "Select Gmail, Calendar, or both to synchronize", 400);
+    }
+
+    const access = await usableGoogleAccessToken(connection);
+    let liveConnection: any = access.connection;
+    const result: any = { gmail: null, calendar: null };
+    const now = new Date();
+
+    if (requestedGmail) {
+      result.gmail = await incrementalGmailSync(workspace, liveConnection, access.token);
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          gmailHistoryId: result.gmail.historyId,
+          lastEmailSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
+      });
+    }
+
+    if (requestedCalendar) {
+      result.calendar = await googleCalendarSync(workspace, liveConnection, access.token);
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          calendarSyncToken: result.calendar.syncToken,
+          lastCalendarSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
+      });
+    }
+
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_GOOGLE_SYNCED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        changedFields: ["crmInteractions"],
+        metadata: {
+          source: "agencyContacts",
+          provider: "GOOGLE",
+          gmailImported: result.gmail?.imported ?? null,
+          calendarImported: result.calendar?.imported ?? null,
+        },
+        ...requestMeta(req),
+      },
+    });
+
+    return res.json({
+      ok: true,
+      result,
+      connection: publicGoogleConnection(liveConnection),
+    });
+  } catch (error) {
+    if (connectionId) await markGoogleConnectionError(connectionId, error);
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/google/disconnect", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await googleConnectionForWorkspace(workspace);
+    if (!connection) {
+      return res.json({ ok: true, connection: publicGoogleConnection(null) });
+    }
+
+    let revokeToken = "";
+    try {
+      revokeToken = connection.refreshTokenEncrypted
+        ? decryptGoogleSecret(connection.refreshTokenEncrypted)
+        : decryptGoogleSecret(connection.accessTokenEncrypted);
+    } catch {
+      revokeToken = "";
+    }
+    if (revokeToken) {
+      try {
+        await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(revokeToken)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        });
+      } catch (error) {
+        console.warn("Google token revocation request failed", error);
+      }
+    }
+
+    const updated = await prisma.crmIntegrationConnection.update({
+      where: { id: connection.id },
+      data: {
+        status: CrmIntegrationStatus.DISCONNECTED,
+        accessTokenEncrypted: encryptGoogleSecret(""),
+        refreshTokenEncrypted: null,
+        tokenExpiresAt: null,
+        gmailHistoryId: null,
+        calendarSyncToken: null,
+        disconnectedAt: new Date(),
+      },
+    });
+
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_GOOGLE_DISCONNECTED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        changedFields: ["crmIntegrationConnections"],
+        metadata: { source: "agencyContacts", provider: "GOOGLE", accountEmail: connection.accountEmail },
+        ...requestMeta(req),
+      },
+    });
+
+    return res.json({ ok: true, connection: publicGoogleConnection(updated) });
   } catch (error) {
     return handleError(res, error);
   }
