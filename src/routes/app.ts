@@ -40,6 +40,23 @@ function getSuperAdminUserIds(): Set<number> {
   return new Set(ids);
 }
 
+function getReviewerAgentEmails(): Set<string> {
+  const raw = String(
+    process.env.HAVN_REVIEWER_AGENT_EMAILS || ""
+  ).trim();
+
+  if (!raw) {
+    return new Set();
+  }
+
+  const emails = raw
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return new Set(emails);
+}
+
 /**
  * GET /api/app/session
  *
@@ -101,6 +118,9 @@ const getAppSession: RequestHandler = async (
     const superAdminUserIds =
       getSuperAdminUserIds();
 
+    const reviewerAgentEmails =
+      getReviewerAgentEmails();
+
     const isSuperAdmin =
       user.role === "admin" &&
       superAdminUserIds.has(user.id);
@@ -112,13 +132,21 @@ const getAppSession: RequestHandler = async (
       user.agentProfile?.subscriptionStatus ===
       "ACTIVE";
 
+    const isReviewerAgent =
+      reviewerAgentEmails.has(
+        String(user.email || "").trim().toLowerCase()
+      );
+
+    const hasProfessionalAccess =
+      hasActiveAgentSubscription || isReviewerAgent;
+
     const canAccessAgentHub =
       isSuperAdmin ||
       (
         user.role === "agent" &&
         user.emailVerified === true &&
         hasApprovedAgentProfile &&
-        hasActiveAgentSubscription
+        hasProfessionalAccess
       );
 
     const canAccessAdmin =
