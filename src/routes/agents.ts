@@ -30,6 +30,34 @@ const STRIPE_AGENT_MONTHLY_PRICE_ID = String(
   process.env.STRIPE_AGENT_MONTHLY_PRICE_ID || ""
 ).trim();
 
+function getReviewerAgentEmails(): Set<string> {
+  const raw = String(
+    process.env.HAVN_REVIEWER_AGENT_EMAILS || ""
+  ).trim();
+
+  if (!raw) {
+    return new Set();
+  }
+
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function isReviewerAgentEmail(email: unknown): boolean {
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(
+    normalizedEmail &&
+      getReviewerAgentEmails().has(normalizedEmail)
+  );
+}
+
 const stripe = STRIPE_SECRET_KEY
   ? new Stripe(STRIPE_SECRET_KEY)
   : null;
@@ -618,6 +646,13 @@ router.get("/me", requireAuth, async (req: any, res) => {
     const isAdmin =
       String(user.role || "").toLowerCase() === "admin";
 
+    const reviewerAccess = Boolean(
+      isReviewerAgentEmail(user.email) &&
+        user.emailVerified === true &&
+        String(user.role || "").toLowerCase() === "agent" &&
+        user.agentProfile?.status === "APPROVED"
+    );
+
     if (!user.agentProfile && !isAdmin) {
       return res.status(404).json({
         ok: false,
@@ -640,6 +675,7 @@ router.get("/me", requireAuth, async (req: any, res) => {
       },
       application: user.agentProfile,
       adminAccess: isAdmin,
+      reviewerAccess,
     });
   } catch (error) {
     console.error("GET /api/agents/me error", error);
@@ -1147,6 +1183,15 @@ router.post(
         return res.status(404).json({
           ok: false,
           message: "Account not found",
+        });
+      }
+
+      if (isReviewerAgentEmail(user.email)) {
+        return res.status(409).json({
+          ok: false,
+          error: "REVIEWER_ACCESS_DOES_NOT_REQUIRE_SUBSCRIPTION",
+          message:
+            "This account has complimentary HAVN reviewer access and does not require a paid subscription.",
         });
       }
 
