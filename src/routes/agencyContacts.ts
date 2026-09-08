@@ -2751,17 +2751,52 @@ function base64UrlEncodeUtf8(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
 }
 
-function buildPlainTextGmailMessage(args: {
+type GmailAttachmentInput = {
+  name: string;
+  mimeType: string;
+  bytes: Buffer;
+};
+
+function gmailAttachmentList(value: unknown): GmailAttachmentInput[] {
+  if (value == null || value === "") return [];
+  if (!Array.isArray(value)) throw new ApiError("VALIDATION_ERROR", "attachments must be an array", 400);
+  if (value.length > 10) throw new ApiError("VALIDATION_ERROR", "A maximum of 10 attachments is allowed", 400);
+  let totalBytes = 0;
+  const attachments = value.map((item: any, index: number) => {
+    const name = requiredString(item?.name, `attachments[${index}].name`, 255).replace(/[\r\n"]/g, "_");
+    const mimeType = nullableString(item?.mimeType, 200) || "application/octet-stream";
+    const data = requiredString(item?.data, `attachments[${index}].data`, 30_000_000);
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length % 4 === 1) {
+      throw new ApiError("VALIDATION_ERROR", `attachments[${index}].data must be base64 encoded`, 400);
+    }
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length === 0) throw new ApiError("VALIDATION_ERROR", `attachments[${index}] is empty`, 400);
+    if (bytes.length > 8 * 1024 * 1024) throw new ApiError("VALIDATION_ERROR", `${name} is larger than the 8 MB attachment limit`, 400);
+    totalBytes += bytes.length;
+    return { name, mimeType, bytes };
+  });
+  if (totalBytes > 15 * 1024 * 1024) {
+    throw new ApiError("VALIDATION_ERROR", "Attachments cannot exceed 15 MB in total", 400);
+  }
+  return attachments;
+}
+
+function wrapBase64(value: string): string {
+  return value.match(/.{1,76}/g)?.join("\r\n") || "";
+}
+
+function buildGmailMessage(args: {
   from: string;
   to: string[];
   cc: string[];
   bcc: string[];
   subject: string;
   body: string;
+  attachments: GmailAttachmentInput[];
   inReplyTo?: string | null;
   references?: string | null;
 }) {
-  const headers = [
+  const commonHeaders = [
     `From: ${mimeHeaderValue(args.from)}`,
     `To: ${args.to.map(mimeHeaderValue).join(", ")}`,
     args.cc.length ? `Cc: ${args.cc.map(mimeHeaderValue).join(", ")}` : "",
@@ -2770,10 +2805,22 @@ function buildPlainTextGmailMessage(args: {
     args.inReplyTo ? `In-Reply-To: ${mimeHeaderValue(args.inReplyTo)}` : "",
     args.references ? `References: ${mimeHeaderValue(args.references)}` : "",
     "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
   ].filter(Boolean);
-  return `${headers.join("\r\n")}\r\n\r\n${args.body}`;
+
+  if (args.attachments.length === 0) {
+    return `${commonHeaders.concat(['Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: 8bit"]).join("\r\n")}\r\n\r\n${args.body}`;
+  }
+
+  const boundary = `havn_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const parts = [
+    `${commonHeaders.join("\r\n")}\r\nContent-Type: multipart/mixed; boundary="${boundary}"`,
+    `--${boundary}\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${args.body}`,
+    ...args.attachments.map((attachment) =>
+      `--${boundary}\r\nContent-Type: ${mimeHeaderValue(attachment.mimeType)}; name="${attachment.name}"\r\nContent-Disposition: attachment; filename="${attachment.name}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrapBase64(attachment.bytes.toString("base64"))}`
+    ),
+    `--${boundary}--`,
+  ];
+  return parts.join("\r\n");
 }
 
 router.post("/integrations/google/send", async (req: AgentRequest, res) => {
@@ -2798,6 +2845,7 @@ router.post("/integrations/google/send", async (req: AgentRequest, res) => {
     if (to.length === 0) throw new ApiError("VALIDATION_ERROR", "At least one recipient is required", 400);
     const subject = requiredString(req.body?.subject, "subject", 500);
     const body = requiredString(req.body?.body, "body", 50000);
+    const attachments = gmailAttachmentList(req.body?.attachments);
 
     const contactId = req.body?.contactId == null || req.body?.contactId === "" ? null : asPositiveInt(req.body.contactId);
     const companyId = req.body?.companyId == null || req.body?.companyId === "" ? null : asPositiveInt(req.body.companyId);
@@ -2820,13 +2868,14 @@ router.post("/integrations/google/send", async (req: AgentRequest, res) => {
     });
 
     const access = await usableGoogleAccessToken(connection);
-    const rawMime = buildPlainTextGmailMessage({
+    const rawMime = buildGmailMessage({
       from: access.connection.accountEmail,
       to,
       cc,
       bcc,
       subject,
       body,
+      attachments,
       inReplyTo: nullableString(req.body?.inReplyTo, 2000),
       references: nullableString(req.body?.references, 5000),
     });
@@ -2910,6 +2959,9 @@ router.post("/integrations/google/send", async (req: AgentRequest, res) => {
             to,
             cc,
             bccCount: bcc.length,
+            attachmentCount: attachments.length,
+            attachmentNames: attachments.map((attachment) => attachment.name),
+            attachmentBytes: attachments.reduce((sum, attachment) => sum + attachment.bytes.length, 0),
             provider: "GOOGLE",
           },
           changedFields: ["crmInteractions"],
