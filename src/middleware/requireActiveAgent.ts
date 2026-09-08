@@ -43,6 +43,23 @@ function getSuperAdminUserIds(): Set<number> {
   return new Set(ids);
 }
 
+function getReviewerAgentEmails(): Set<string> {
+  const raw = String(
+    process.env.HAVN_REVIEWER_AGENT_EMAILS || ""
+  ).trim();
+
+  if (!raw) {
+    return new Set();
+  }
+
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 /**
  * Strict professional Agent Hub access middleware.
  *
@@ -83,6 +100,7 @@ const requireActiveAgent: RequestHandler = (
         select: {
           id: true,
           role: true,
+          email: true,
           emailVerified: true,
 
           agentProfile: {
@@ -110,6 +128,17 @@ const requireActiveAgent: RequestHandler = (
       const isSuperAdmin =
         user.role === "admin" &&
         superAdminUserIds.has(user.id);
+
+      const reviewerAgentEmails =
+        getReviewerAgentEmails();
+
+      const isReviewerAgent =
+        user.role === "agent" &&
+        user.emailVerified === true &&
+        user.agentProfile?.status === "APPROVED" &&
+        reviewerAgentEmails.has(
+          String(user.email || "").trim().toLowerCase()
+        );
 
       if (isSuperAdmin) {
         req.agentAccess = {
@@ -156,6 +185,7 @@ const requireActiveAgent: RequestHandler = (
       }
 
       if (
+        !isReviewerAgent &&
         user.agentProfile.subscriptionStatus !==
         "ACTIVE"
       ) {
