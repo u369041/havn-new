@@ -3124,6 +3124,815 @@ router.post("/integrations/google/disconnect", async (req: AgentRequest, res) =>
   }
 });
 
+
+/* CRM Microsoft 365 integration */
+const MICROSOFT_PROVIDER = CrmIntegrationProvider.MICROSOFT;
+const MICROSOFT_OAUTH_SCOPES = [
+  "openid",
+  "email",
+  "offline_access",
+  "User.Read",
+  "Mail.Read",
+  "Calendars.Read",
+] as const;
+const MICROSOFT_INITIAL_MAIL_LOOKBACK_DAYS = 30;
+const MICROSOFT_INITIAL_CALENDAR_LOOKBACK_DAYS = 90;
+const MICROSOFT_INITIAL_CALENDAR_FORWARD_DAYS = 365;
+const MICROSOFT_OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+type MicrosoftTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+  id_token?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type MicrosoftConnectionRecord = Awaited<ReturnType<typeof microsoftConnectionForWorkspace>>;
+
+function requiredMicrosoftEnv(name: string): string {
+  const value = String(process.env[name] || "").trim();
+  if (!value) {
+    throw new ApiError(
+      "CRM_MICROSOFT_CONFIGURATION_ERROR",
+      `${name} is not configured`,
+      503,
+    );
+  }
+  return value;
+}
+
+function microsoftTenant(): string {
+  return String(process.env.MICROSOFT_TENANT_ID || "common").trim() || "common";
+}
+
+function microsoftEncryptionKey(): Buffer {
+  const raw = requiredMicrosoftEnv("CRM_MICROSOFT_TOKEN_ENCRYPTION_KEY");
+  let key: Buffer;
+  try {
+    key = Buffer.from(raw, "base64");
+  } catch {
+    key = Buffer.alloc(0);
+  }
+  if (key.length !== 32) {
+    throw new ApiError(
+      "CRM_MICROSOFT_CONFIGURATION_ERROR",
+      "CRM_MICROSOFT_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      503,
+    );
+  }
+  return key;
+}
+
+function encryptMicrosoftSecret(value: string): string {
+  const key = microsoftEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ["v1", iv.toString("base64url"), tag.toString("base64url"), encrypted.toString("base64url")].join(":");
+}
+
+function decryptMicrosoftSecret(value: string): string {
+  const [version, ivRaw, tagRaw, encryptedRaw] = String(value || "").split(":");
+  if (version !== "v1" || !ivRaw || !tagRaw || encryptedRaw == null) {
+    throw new ApiError("CRM_MICROSOFT_TOKEN_INVALID", "Stored Microsoft token could not be read", 500);
+  }
+  try {
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      microsoftEncryptionKey(),
+      Buffer.from(ivRaw, "base64url"),
+    );
+    decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encryptedRaw, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw new ApiError("CRM_MICROSOFT_TOKEN_INVALID", "Stored Microsoft token could not be decrypted", 500);
+  }
+}
+
+function microsoftRedirectUri(): string {
+  return requiredMicrosoftEnv("MICROSOFT_OAUTH_REDIRECT_URI");
+}
+
+function encodeMicrosoftState(payload: Record<string, unknown>): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", microsoftEncryptionKey())
+    .update(body)
+    .digest("base64url");
+  return `${body}.${signature}`;
+}
+
+function decodeMicrosoftState(state: string): any {
+  const [body, signature] = String(state || "").split(".");
+  if (!body || !signature) {
+    throw new ApiError("CRM_MICROSOFT_OAUTH_STATE_INVALID", "Microsoft connection state is invalid", 400);
+  }
+  const expected = crypto
+    .createHmac("sha256", microsoftEncryptionKey())
+    .update(body)
+    .digest();
+  let received: Buffer;
+  try {
+    received = Buffer.from(signature, "base64url");
+  } catch {
+    received = Buffer.alloc(0);
+  }
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    throw new ApiError("CRM_MICROSOFT_OAUTH_STATE_INVALID", "Microsoft connection state is invalid", 400);
+  }
+  let payload: any;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    throw new ApiError("CRM_MICROSOFT_OAUTH_STATE_INVALID", "Microsoft connection state is invalid", 400);
+  }
+  if (!payload?.exp || Number(payload.exp) < Date.now()) {
+    throw new ApiError("CRM_MICROSOFT_OAUTH_STATE_EXPIRED", "Microsoft connection request has expired", 400);
+  }
+  return payload;
+}
+
+async function microsoftJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let body: any = null;
+  if (text) {
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  }
+  if (!response.ok) {
+    const message = body?.error_description || body?.error?.message || body?.error_description || body?.error || `Microsoft request failed (${response.status})`;
+    const error = new ApiError(
+      "CRM_MICROSOFT_API_ERROR",
+      String(message),
+      response.status >= 500 ? 502 : 400,
+    ) as ApiError & { microsoftStatus?: number; microsoftBody?: any };
+    error.microsoftStatus = response.status;
+    error.microsoftBody = body;
+    throw error;
+  }
+  return body as T;
+}
+
+async function microsoftTokenExchange(params: URLSearchParams): Promise<MicrosoftTokenResponse> {
+  return microsoftJson<MicrosoftTokenResponse>(
+    `https://login.microsoftonline.com/${encodeURIComponent(microsoftTenant())}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+  );
+}
+
+async function microsoftConnectionForWorkspace(workspace: AgencyWorkspace) {
+  return prisma.crmIntegrationConnection.findUnique({
+    where: {
+      agencyId_memberId_provider: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        provider: MICROSOFT_PROVIDER,
+      },
+    },
+  });
+}
+
+function publicMicrosoftConnection(connection: any) {
+  if (!connection) {
+    return {
+      provider: MICROSOFT_PROVIDER,
+      connected: false,
+      status: CrmIntegrationStatus.DISCONNECTED,
+      accountEmail: null,
+      scopes: [],
+      lastEmailSyncAt: null,
+      lastCalendarSyncAt: null,
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      disconnectedAt: null,
+      emailSendEnabled: false,
+      emailSendAvailable: false,
+    };
+  }
+  return {
+    id: connection.id,
+    provider: connection.provider,
+    connected: connection.status === CrmIntegrationStatus.CONNECTED,
+    status: connection.status,
+    accountEmail: connection.accountEmail,
+    scopes: connection.scopes,
+    tokenExpiresAt: connection.tokenExpiresAt,
+    lastEmailSyncAt: connection.lastEmailSyncAt,
+    lastCalendarSyncAt: connection.lastCalendarSyncAt,
+    lastSyncAt: connection.lastSyncAt,
+    lastErrorAt: connection.lastErrorAt,
+    lastErrorCode: connection.lastErrorCode,
+    lastErrorMessage: connection.lastErrorMessage,
+    disconnectedAt: connection.disconnectedAt,
+    emailSendEnabled: false,
+    emailSendAvailable: false,
+  };
+}
+
+async function usableMicrosoftAccessToken(
+  connection: NonNullable<MicrosoftConnectionRecord>,
+): Promise<{ token: string; connection: any }> {
+  const expiresAt = connection.tokenExpiresAt ? new Date(connection.tokenExpiresAt).getTime() : 0;
+  const currentToken = decryptMicrosoftSecret(connection.accessTokenEncrypted);
+  if (currentToken && expiresAt > Date.now() + 60_000) {
+    return { token: currentToken, connection };
+  }
+  if (!connection.refreshTokenEncrypted) {
+    throw new ApiError(
+      "CRM_MICROSOFT_RECONNECT_REQUIRED",
+      "Microsoft access has expired. Reconnect the account.",
+      401,
+    );
+  }
+  const refreshToken = decryptMicrosoftSecret(connection.refreshTokenEncrypted);
+  const tokens = await microsoftTokenExchange(new URLSearchParams({
+    client_id: requiredMicrosoftEnv("MICROSOFT_CLIENT_ID"),
+    client_secret: requiredMicrosoftEnv("MICROSOFT_CLIENT_SECRET"),
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+    scope: MICROSOFT_OAUTH_SCOPES.join(" "),
+  }));
+  if (!tokens.access_token) {
+    throw new ApiError(
+      "CRM_MICROSOFT_RECONNECT_REQUIRED",
+      "Microsoft did not return a refreshed access token",
+      401,
+    );
+  }
+  const updated = await prisma.crmIntegrationConnection.update({
+    where: { id: connection.id },
+    data: {
+      accessTokenEncrypted: encryptMicrosoftSecret(tokens.access_token),
+      refreshTokenEncrypted: tokens.refresh_token
+        ? encryptMicrosoftSecret(tokens.refresh_token)
+        : connection.refreshTokenEncrypted,
+      tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+      scopes: String(tokens.scope || connection.scopes.join(" ")).split(/\s+/).filter(Boolean),
+      status: CrmIntegrationStatus.CONNECTED,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      disconnectedAt: null,
+    },
+  });
+  return { token: tokens.access_token, connection: updated };
+}
+
+async function markMicrosoftConnectionError(connectionId: number, error: unknown) {
+  const err: any = error;
+  try {
+    await prisma.crmIntegrationConnection.update({
+      where: { id: connectionId },
+      data: {
+        status: CrmIntegrationStatus.ERROR,
+        lastErrorAt: new Date(),
+        lastErrorCode: nullableString(
+          err?.code || err?.microsoftBody?.error?.code || "MICROSOFT_SYNC_ERROR",
+          200,
+        ),
+        lastErrorMessage: nullableString(err?.message || "Microsoft synchronization failed", 2000),
+      },
+    });
+  } catch (markError) {
+    console.error("Failed to record Microsoft CRM integration error", markError);
+  }
+}
+
+function microsoftRecipientEmails(values: any): string[] {
+  return (Array.isArray(values) ? values : [])
+    .map((item: any) => String(item?.emailAddress?.address || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function microsoftMailDirection(accountEmail: string, message: any): CrmInteractionDirection {
+  const account = accountEmail.toLowerCase();
+  const from = String(message?.from?.emailAddress?.address || "").trim().toLowerCase();
+  const sender = String(message?.sender?.emailAddress?.address || "").trim().toLowerCase();
+  return from === account || sender === account
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertMicrosoftEmailInteraction(args: {
+  workspace: AgencyWorkspace;
+  connection: any;
+  accountEmail: string;
+  message: any;
+}) {
+  const message = args.message;
+  if (!message?.id) return false;
+  const accountEmail = args.accountEmail.toLowerCase();
+  const participantEmails = [
+    String(message?.from?.emailAddress?.address || "").trim().toLowerCase(),
+    String(message?.sender?.emailAddress?.address || "").trim().toLowerCase(),
+    ...microsoftRecipientEmails(message?.toRecipients),
+    ...microsoftRecipientEmails(message?.ccRecipients),
+  ].filter((email) => email && email !== accountEmail);
+  const contact = await matchedContactForEmails(args.workspace.agency.id, participantEmails);
+  // Data minimisation: Outlook is a CRM source, not a mailbox mirror. Only retain
+  // messages involving an active CRM contact in this agency.
+  if (!contact) return false;
+  const occurredRaw = message?.sentDateTime || message?.receivedDateTime || message?.createdDateTime;
+  const occurredAt = occurredRaw ? new Date(occurredRaw) : new Date();
+  if (Number.isNaN(occurredAt.getTime())) return false;
+  const subject = String(message?.subject || "Email").trim().slice(0, 500) || "Email";
+  const summary = String(message?.bodyPreview || subject).trim().slice(0, 20000) || subject;
+  const externalId = `${accountEmail}:outlook:${String(message.id)}`;
+  const conversationId = nullableString(message?.conversationId, 1000);
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId: args.workspace.agency.id,
+        sourceProvider: CrmInteractionProvider.MICROSOFT,
+        externalId,
+      },
+    },
+    create: {
+      agencyId: args.workspace.agency.id,
+      contactId: contact.id,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      type: CrmInteractionType.EMAIL,
+      direction: microsoftMailDirection(accountEmail, message),
+      subject,
+      summary,
+      occurredAt,
+      sourceProvider: CrmInteractionProvider.MICROSOFT,
+      externalId,
+      externalThreadId: conversationId ? `${accountEmail}:outlook-conversation:${conversationId}` : null,
+      externalUrl: nullableString(message?.webLink, 2000),
+      createdByUserId: args.connection.userId,
+    },
+    update: {
+      contactId: contact.id,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      direction: microsoftMailDirection(accountEmail, message),
+      subject,
+      summary,
+      occurredAt,
+      externalThreadId: conversationId ? `${accountEmail}:outlook-conversation:${conversationId}` : null,
+      externalUrl: nullableString(message?.webLink, 2000),
+    },
+  });
+  return true;
+}
+
+async function microsoftMailSync(workspace: AgencyWorkspace, connection: any, token: string) {
+  const since = new Date(Date.now() - MICROSOFT_INITIAL_MAIL_LOOKBACK_DAYS * 86400000).toISOString();
+  const params = new URLSearchParams({
+    "$select": "id,conversationId,subject,bodyPreview,from,sender,toRecipients,ccRecipients,receivedDateTime,sentDateTime,createdDateTime,webLink",
+    "$filter": `receivedDateTime ge ${since}`,
+    "$orderby": "receivedDateTime desc",
+    "$top": "100",
+  });
+  let nextUrl: string | null = `https://graph.microsoft.com/v1.0/me/messages?${params.toString()}`;
+  let pages = 0;
+  let imported = 0;
+  let skipped = 0;
+  while (nextUrl && pages < 10) {
+    const page = await microsoftJson<any>(nextUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    for (const message of Array.isArray(page?.value) ? page.value : []) {
+      const matched = await upsertMicrosoftEmailInteraction({
+        workspace,
+        connection,
+        accountEmail: connection.accountEmail,
+        message,
+      });
+      if (matched) imported += 1;
+      else skipped += 1;
+    }
+    nextUrl = page?.["@odata.nextLink"] ? String(page["@odata.nextLink"]) : null;
+    pages += 1;
+  }
+  return { imported, skipped, mode: "window", lookbackDays: MICROSOFT_INITIAL_MAIL_LOOKBACK_DAYS };
+}
+
+function microsoftCalendarDirection(accountEmail: string, event: any): CrmInteractionDirection {
+  const organizer = String(event?.organizer?.emailAddress?.address || "").trim().toLowerCase();
+  return organizer && organizer === accountEmail.toLowerCase()
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertMicrosoftCalendarInteraction(args: {
+  workspace: AgencyWorkspace;
+  connection: any;
+  accountEmail: string;
+  event: any;
+}) {
+  const event = args.event;
+  if (!event?.id || event?.isCancelled === true || event?.["@removed"]) return false;
+  const startRaw = event?.start?.dateTime;
+  if (!startRaw) return false;
+  const occurredAt = new Date(startRaw);
+  if (Number.isNaN(occurredAt.getTime())) return false;
+  const endRaw = event?.end?.dateTime;
+  const endAt = endRaw ? new Date(endRaw) : null;
+  const durationMinutes = endAt && !Number.isNaN(endAt.getTime())
+    ? Math.max(0, Math.round((endAt.getTime() - occurredAt.getTime()) / 60000))
+    : null;
+  const attendeeEmails = (Array.isArray(event?.attendees) ? event.attendees : [])
+    .map((attendee: any) => String(attendee?.emailAddress?.address || "").trim().toLowerCase())
+    .filter((email: string) => email && email !== args.accountEmail.toLowerCase());
+  const organizerEmail = String(event?.organizer?.emailAddress?.address || "").trim().toLowerCase();
+  if (organizerEmail && organizerEmail !== args.accountEmail.toLowerCase()) attendeeEmails.push(organizerEmail);
+  const contact = await matchedContactForEmails(args.workspace.agency.id, attendeeEmails);
+  // Data minimisation: only retain Microsoft calendar events involving an active CRM contact.
+  if (!contact) return false;
+  const subject = String(event?.subject || "Meeting").trim().slice(0, 500) || "Meeting";
+  const bodyPreview = String(event?.bodyPreview || "").trim();
+  const location = String(event?.location?.displayName || "").trim();
+  const summary = ([bodyPreview, location ? `Location: ${location}` : ""].filter(Boolean).join("\n\n") || subject).slice(0, 20000);
+  const accountEmail = args.accountEmail.toLowerCase();
+  const externalId = `${accountEmail}:outlook-calendar:${String(event.id)}`;
+  const seriesMasterId = nullableString(event?.seriesMasterId, 1000);
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId: args.workspace.agency.id,
+        sourceProvider: CrmInteractionProvider.MICROSOFT,
+        externalId,
+      },
+    },
+    create: {
+      agencyId: args.workspace.agency.id,
+      contactId: contact.id,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      type: CrmInteractionType.MEETING,
+      direction: microsoftCalendarDirection(accountEmail, event),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      sourceProvider: CrmInteractionProvider.MICROSOFT,
+      externalId,
+      externalThreadId: seriesMasterId ? `${accountEmail}:outlook-calendar-series:${seriesMasterId}` : null,
+      externalUrl: nullableString(event?.webLink, 2000),
+      createdByUserId: args.connection.userId,
+    },
+    update: {
+      contactId: contact.id,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
+      direction: microsoftCalendarDirection(accountEmail, event),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      externalThreadId: seriesMasterId ? `${accountEmail}:outlook-calendar-series:${seriesMasterId}` : null,
+      externalUrl: nullableString(event?.webLink, 2000),
+    },
+  });
+  return true;
+}
+
+async function microsoftCalendarSync(workspace: AgencyWorkspace, connection: any, token: string) {
+  const startDateTime = new Date(Date.now() - MICROSOFT_INITIAL_CALENDAR_LOOKBACK_DAYS * 86400000).toISOString();
+  const endDateTime = new Date(Date.now() + MICROSOFT_INITIAL_CALENDAR_FORWARD_DAYS * 86400000).toISOString();
+  const params = new URLSearchParams({
+    startDateTime,
+    endDateTime,
+    "$top": "250",
+  });
+  let nextUrl: string | null = `https://graph.microsoft.com/v1.0/me/calendarView?${params.toString()}`;
+  let pages = 0;
+  let imported = 0;
+  let skipped = 0;
+  while (nextUrl && pages < 20) {
+    const page = await microsoftJson<any>(nextUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Prefer: 'outlook.timezone="UTC"',
+      },
+    });
+    for (const event of Array.isArray(page?.value) ? page.value : []) {
+      const matched = await upsertMicrosoftCalendarInteraction({
+        workspace,
+        connection,
+        accountEmail: connection.accountEmail,
+        event,
+      });
+      if (matched) imported += 1;
+      else skipped += 1;
+    }
+    nextUrl = page?.["@odata.nextLink"] ? String(page["@odata.nextLink"]) : null;
+    pages += 1;
+  }
+  return {
+    imported,
+    skipped,
+    mode: "window",
+    lookbackDays: MICROSOFT_INITIAL_CALENDAR_LOOKBACK_DAYS,
+    forwardDays: MICROSOFT_INITIAL_CALENDAR_FORWARD_DAYS,
+  };
+}
+
+router.get("/integrations/microsoft/status", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const connection = await microsoftConnectionForWorkspace(workspace);
+    return res.json({
+      ok: true,
+      configured: Boolean(
+        process.env.MICROSOFT_CLIENT_ID &&
+        process.env.MICROSOFT_CLIENT_SECRET &&
+        process.env.MICROSOFT_OAUTH_REDIRECT_URI &&
+        process.env.CRM_MICROSOFT_TOKEN_ENCRYPTION_KEY
+      ),
+      tenant: microsoftTenant(),
+      connection: publicMicrosoftConnection(connection),
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/microsoft/connect", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const state = encodeMicrosoftState({
+      agencyId: workspace.agency.id,
+      memberId: workspace.membership.id,
+      userId: workspace.membership.userId,
+      nonce: crypto.randomBytes(18).toString("base64url"),
+      exp: Date.now() + MICROSOFT_OAUTH_STATE_TTL_MS,
+    });
+    const params = new URLSearchParams({
+      client_id: requiredMicrosoftEnv("MICROSOFT_CLIENT_ID"),
+      response_type: "code",
+      redirect_uri: microsoftRedirectUri(),
+      response_mode: "query",
+      scope: MICROSOFT_OAUTH_SCOPES.join(" "),
+      state,
+      prompt: "select_account",
+    });
+    return res.json({
+      ok: true,
+      authorizationUrl: `https://login.microsoftonline.com/${encodeURIComponent(microsoftTenant())}/oauth2/v2.0/authorize?${params.toString()}`,
+      redirectUri: microsoftRedirectUri(),
+      scopes: [...MICROSOFT_OAUTH_SCOPES],
+      tenant: microsoftTenant(),
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/microsoft/exchange", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const code = requiredString(req.body?.code, "code", 10000);
+    const state = requiredString(req.body?.state, "state", 10000);
+    const payload = decodeMicrosoftState(state);
+    if (
+      Number(payload.agencyId) !== workspace.agency.id ||
+      Number(payload.memberId) !== workspace.membership.id ||
+      Number(payload.userId) !== workspace.membership.userId
+    ) {
+      throw new ApiError(
+        "CRM_MICROSOFT_OAUTH_STATE_INVALID",
+        "Microsoft connection state does not match this user",
+        403,
+      );
+    }
+    const existing = await microsoftConnectionForWorkspace(workspace);
+    const tokens = await microsoftTokenExchange(new URLSearchParams({
+      client_id: requiredMicrosoftEnv("MICROSOFT_CLIENT_ID"),
+      client_secret: requiredMicrosoftEnv("MICROSOFT_CLIENT_SECRET"),
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: microsoftRedirectUri(),
+      scope: MICROSOFT_OAUTH_SCOPES.join(" "),
+    }));
+    if (!tokens.access_token) {
+      throw new ApiError("CRM_MICROSOFT_OAUTH_FAILED", "Microsoft did not return an access token", 400);
+    }
+    const profile = await microsoftJson<any>(
+      "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
+      { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+    );
+    const accountEmail = String(profile?.mail || profile?.userPrincipalName || "").trim().toLowerCase();
+    if (!accountEmail) {
+      throw new ApiError(
+        "CRM_MICROSOFT_ACCOUNT_EMAIL_MISSING",
+        "Microsoft account email could not be resolved",
+        400,
+      );
+    }
+    const grantedScopes = String(tokens.scope || MICROSOFT_OAUTH_SCOPES.join(" "))
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    const connection = await prisma.crmIntegrationConnection.upsert({
+      where: {
+        agencyId_memberId_provider: {
+          agencyId: workspace.agency.id,
+          memberId: workspace.membership.id,
+          provider: MICROSOFT_PROVIDER,
+        },
+      },
+      create: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        userId: workspace.membership.userId,
+        provider: MICROSOFT_PROVIDER,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.id, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptMicrosoftSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token ? encryptMicrosoftSecret(tokens.refresh_token) : null,
+        tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+      },
+      update: {
+        userId: workspace.membership.userId,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.id, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptMicrosoftSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token
+          ? encryptMicrosoftSecret(tokens.refresh_token)
+          : existing?.refreshTokenEncrypted || null,
+        tokenExpiresAt: new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000),
+        // These cursor columns are provider-scoped by the connection row. Clear any stale
+        // cursor state when a different Microsoft account replaces the previous one.
+        gmailHistoryId: existing?.accountEmail && existing.accountEmail !== accountEmail ? null : existing?.gmailHistoryId,
+        calendarSyncToken: existing?.accountEmail && existing.accountEmail !== accountEmail ? null : existing?.calendarSyncToken,
+        lastErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        disconnectedAt: null,
+      },
+    });
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_MICROSOFT_CONNECTED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        afterState: { provider: connection.provider, status: connection.status, accountEmail },
+        changedFields: ["crmIntegrationConnections"],
+        metadata: { source: "agencyContacts", provider: "MICROSOFT", accountEmail },
+        ...requestMeta(req),
+      },
+    });
+    return res.json({ ok: true, connection: publicMicrosoftConnection(connection) });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
+  let connectionId: number | null = null;
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await microsoftConnectionForWorkspace(workspace);
+    if (!connection || connection.status === CrmIntegrationStatus.DISCONNECTED) {
+      throw new ApiError(
+        "CRM_MICROSOFT_NOT_CONNECTED",
+        "Connect a Microsoft account before synchronizing",
+        409,
+      );
+    }
+    connectionId = connection.id;
+    const requestedMail = req.body?.mail !== false && req.body?.email !== false;
+    const requestedCalendar = req.body?.calendar !== false;
+    if (!requestedMail && !requestedCalendar) {
+      throw new ApiError("VALIDATION_ERROR", "Select Outlook Mail, Calendar, or both to synchronize", 400);
+    }
+    const access = await usableMicrosoftAccessToken(connection);
+    let liveConnection: any = access.connection;
+    const result: any = { mail: null, calendar: null };
+    const now = new Date();
+    if (requestedMail) {
+      result.mail = await microsoftMailSync(workspace, liveConnection, access.token);
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          lastEmailSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
+      });
+    }
+    if (requestedCalendar) {
+      result.calendar = await microsoftCalendarSync(workspace, liveConnection, access.token);
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          lastCalendarSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
+      });
+    }
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_MICROSOFT_SYNCED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        changedFields: ["crmInteractions"],
+        metadata: {
+          source: "agencyContacts",
+          provider: "MICROSOFT",
+          mailImported: result.mail?.imported ?? null,
+          calendarImported: result.calendar?.imported ?? null,
+        },
+        ...requestMeta(req),
+      },
+    });
+    return res.json({
+      ok: true,
+      result,
+      connection: publicMicrosoftConnection(liveConnection),
+    });
+  } catch (error) {
+    if (connectionId) await markMicrosoftConnectionError(connectionId, error);
+    return handleError(res, error);
+  }
+});
+
+router.post("/integrations/microsoft/disconnect", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await microsoftConnectionForWorkspace(workspace);
+    if (!connection) {
+      return res.json({ ok: true, connection: publicMicrosoftConnection(null) });
+    }
+    const updated = await prisma.crmIntegrationConnection.update({
+      where: { id: connection.id },
+      data: {
+        status: CrmIntegrationStatus.DISCONNECTED,
+        accessTokenEncrypted: encryptMicrosoftSecret(""),
+        refreshTokenEncrypted: null,
+        tokenExpiresAt: null,
+        gmailHistoryId: null,
+        calendarSyncToken: null,
+        disconnectedAt: new Date(),
+      },
+    });
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_MICROSOFT_DISCONNECTED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        changedFields: ["crmIntegrationConnections"],
+        metadata: {
+          source: "agencyContacts",
+          provider: "MICROSOFT",
+          accountEmail: connection.accountEmail,
+        },
+        ...requestMeta(req),
+      },
+    });
+    return res.json({ ok: true, connection: publicMicrosoftConnection(updated) });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.get("/:id", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
