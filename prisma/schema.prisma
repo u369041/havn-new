@@ -514,7 +514,7 @@ model InventoryPropertyContact {
   agencyId            Int
   inventoryPropertyId Int
   contactId           Int
-
+  relationshipType    InventoryPropertyContactRelationshipType?
   relationshipLabel String?
   isPrimary         Boolean                           @default(false)
   notificationLevel InventoryContactNotificationLevel @default(OFF)
@@ -536,6 +536,7 @@ model InventoryPropertyContact {
   @@index([agencyId])
   @@index([inventoryPropertyId])
   @@index([contactId])
+  @@index([relationshipType])
   @@index([agencyId, archivedAt])
   @@index([inventoryPropertyId, archivedAt])
   @@index([contactId, archivedAt])
@@ -1158,6 +1159,20 @@ enum CrmOpportunityStage {
   AGREED
   WON
   LOST
+}
+
+enum InventoryPropertyContactRelationshipType {
+  VENDOR
+  PROSPECTIVE_BUYER
+  BUYER
+  LANDLORD
+  TENANT
+  SOLICITOR
+  SURVEYOR
+  BER_ASSESSOR
+  CONTRACTOR
+  BROKER
+  OTHER
 }
 
 enum InventoryContactNotificationLevel {

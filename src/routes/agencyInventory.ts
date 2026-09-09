@@ -4,6 +4,7 @@ import {
   InventoryMediaKind,
   InventoryMediaSource,
   InventoryContactNotificationLevel,
+  InventoryPropertyContactRelationshipType,
   InventoryMediaVisibility,
   InventoryStage,
   InventoryTransactionType,
@@ -61,6 +62,9 @@ const MEDIA_VISIBILITIES = new Set<string>(
 );
 const CONTACT_NOTIFICATION_LEVELS = new Set<string>(
   Object.values(InventoryContactNotificationLevel)
+);
+const PROPERTY_CONTACT_RELATIONSHIP_TYPES = new Set<string>(
+  Object.values(InventoryPropertyContactRelationshipType)
 );
 const PROFESSIONAL_CONTACT_ROLES = new Set<string>(
   Object.values(ProfessionalContactRole)
@@ -533,6 +537,24 @@ function parseContactNotificationLevel(
   return level as InventoryContactNotificationLevel;
 }
 
+function parsePropertyContactRelationshipType(
+  value: unknown
+): InventoryPropertyContactRelationshipType | null {
+  if (value == null || value === "") return null;
+
+  const relationshipType = String(value).trim().toUpperCase();
+
+  if (!PROPERTY_CONTACT_RELATIONSHIP_TYPES.has(relationshipType)) {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "relationshipType must be VENDOR, PROSPECTIVE_BUYER, BUYER, LANDLORD, TENANT, SOLICITOR, SURVEYOR, BER_ASSESSOR, CONTRACTOR, BROKER or OTHER",
+      400
+    );
+  }
+
+  return relationshipType as InventoryPropertyContactRelationshipType;
+}
+
 function parseProfessionalContactRoles(value: unknown): ProfessionalContactRole[] {
   if (value == null) return [];
   if (!Array.isArray(value)) {
@@ -556,6 +578,7 @@ function contactSnapshot(link: any) {
     linkId: link.id,
     inventoryPropertyId: link.inventoryPropertyId,
     contactId: link.contactId,
+    relationshipType: link.relationshipType,
     relationshipLabel: link.relationshipLabel,
     isPrimary: link.isPrimary,
     notificationLevel: link.notificationLevel,
@@ -1263,8 +1286,13 @@ router.post("/:id/contacts", async (req: AgentRequest, res) => {
 
     const body = req.body || {};
     const requestedContactId = asPositiveInt(body.contactId);
+    const relationshipType = parsePropertyContactRelationshipType(
+      body.relationshipType
+    );
     const relationshipLabel = nullableString(body.relationshipLabel, 200);
-    const notificationLevel = parseContactNotificationLevel(body.notificationLevel, "OFF");
+    const notificationLevel =
+      parseContactNotificationLevel(body.notificationLevel, "OFF");
+
     const isPrimary = nullableBoolean(body.isPrimary, "isPrimary") === true;
     const userId = workspace.membership.userId;
 
@@ -1385,6 +1413,7 @@ router.post("/:id/contacts", async (req: AgentRequest, res) => {
         ? await tx.inventoryPropertyContact.update({
             where: { id: existingLink.id },
             data: {
+              relationshipType,
               relationshipLabel,
               isPrimary,
               notificationLevel,
@@ -1398,6 +1427,7 @@ router.post("/:id/contacts", async (req: AgentRequest, res) => {
               agencyId: workspace.agency.id,
               inventoryPropertyId: id,
               contactId: contact.id,
+              relationshipType,
               relationshipLabel,
               isPrimary,
               notificationLevel,
@@ -1427,6 +1457,7 @@ router.post("/:id/contacts", async (req: AgentRequest, res) => {
           changedFields: [
             "contacts",
             "contactId",
+            "relationshipType",
             "relationshipLabel",
             "isPrimary",
             "notificationLevel",
@@ -1494,12 +1525,21 @@ router.patch("/:id/contacts/:linkId", async (req: AgentRequest, res) => {
         throw new ApiError("CONTACT_LINK_NOT_FOUND", "Property contact link not found", 404);
       }
 
+
       const data: Prisma.InventoryPropertyContactUncheckedUpdateInput = {
         updatedByUserId: userId,
       };
+
+      if ("relationshipType" in body) {
+        data.relationshipType = parsePropertyContactRelationshipType(
+          body.relationshipType
+        );
+      }
+
       if ("relationshipLabel" in body) {
         data.relationshipLabel = nullableString(body.relationshipLabel, 200);
       }
+
       if ("notificationLevel" in body) {
         data.notificationLevel = parseContactNotificationLevel(body.notificationLevel, before.notificationLevel);
       }
