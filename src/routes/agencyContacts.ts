@@ -30,6 +30,172 @@ router.use((_req, res, next) => {
   next();
 });
 
+
+// Microsoft OAuth callback is intentionally public: Microsoft redirects the browser
+// here without HAVN's Bearer token. The signed, short-lived state binds the callback
+// to the agency member/user that initiated the connection.
+router.get("/integrations/microsoft/callback", async (req, res) => {
+  const successUrl = "https://havn.ie/app/index.html?microsoft_oauth=connected#/crm";
+  const errorUrl = (message: string) =>
+    `https://havn.ie/app/index.html?microsoft_oauth=error&microsoft_message=${encodeURIComponent(message)}#/crm`;
+
+  try {
+    const code = requiredString(req.query?.code, "code", 10000);
+    const state = requiredString(req.query?.state, "state", 10000);
+    const payload = decodeMicrosoftState(state);
+    const userId = asPositiveInt(payload?.userId);
+    if (!userId) {
+      throw new ApiError(
+        "CRM_MICROSOFT_OAUTH_STATE_INVALID",
+        "Microsoft connection state does not contain a valid user",
+        400,
+      );
+    }
+
+    const workspace = await requireAgencyWorkspace(userId);
+    assertCanManageCrm(workspace);
+    if (
+      Number(payload.agencyId) !== workspace.agency.id ||
+      Number(payload.memberId) !== workspace.membership.id ||
+      Number(payload.userId) !== workspace.membership.userId
+    ) {
+      throw new ApiError(
+        "CRM_MICROSOFT_OAUTH_STATE_INVALID",
+        "Microsoft connection state does not match this user",
+        403,
+      );
+    }
+
+    const existing = await microsoftConnectionForWorkspace(workspace);
+    const tokens = await microsoftTokenExchange(new URLSearchParams({
+      client_id: requiredMicrosoftEnv("MICROSOFT_CLIENT_ID"),
+      client_secret: requiredMicrosoftEnv("MICROSOFT_CLIENT_SECRET"),
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: microsoftRedirectUri(),
+      scope: MICROSOFT_OAUTH_SCOPES.join(" "),
+    }));
+    if (!tokens.access_token) {
+      throw new ApiError(
+        "CRM_MICROSOFT_OAUTH_FAILED",
+        "Microsoft did not return an access token",
+        400,
+      );
+    }
+
+    const profile = await microsoftJson<any>(
+      "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
+      { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+    );
+    const accountEmail = String(
+      profile?.mail || profile?.userPrincipalName || "",
+    ).trim().toLowerCase();
+    if (!accountEmail) {
+      throw new ApiError(
+        "CRM_MICROSOFT_ACCOUNT_EMAIL_MISSING",
+        "Microsoft account email could not be resolved",
+        400,
+      );
+    }
+
+    const grantedScopes = String(
+      tokens.scope || MICROSOFT_OAUTH_SCOPES.join(" "),
+    )
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+
+    const connection = await prisma.crmIntegrationConnection.upsert({
+      where: {
+        agencyId_memberId_provider: {
+          agencyId: workspace.agency.id,
+          memberId: workspace.membership.id,
+          provider: MICROSOFT_PROVIDER,
+        },
+      },
+      create: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        userId: workspace.membership.userId,
+        provider: MICROSOFT_PROVIDER,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.id, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptMicrosoftSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token
+          ? encryptMicrosoftSecret(tokens.refresh_token)
+          : null,
+        tokenExpiresAt: new Date(
+          Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000,
+        ),
+      },
+      update: {
+        userId: workspace.membership.userId,
+        status: CrmIntegrationStatus.CONNECTED,
+        accountEmail,
+        externalAccountId: nullableString(profile?.id, 500),
+        scopes: grantedScopes,
+        accessTokenEncrypted: encryptMicrosoftSecret(tokens.access_token),
+        refreshTokenEncrypted: tokens.refresh_token
+          ? encryptMicrosoftSecret(tokens.refresh_token)
+          : existing?.refreshTokenEncrypted || null,
+        tokenExpiresAt: new Date(
+          Date.now() + Math.max(60, Number(tokens.expires_in || 3600)) * 1000,
+        ),
+        gmailHistoryId:
+          existing?.accountEmail && existing.accountEmail !== accountEmail
+            ? null
+            : existing?.gmailHistoryId,
+        calendarSyncToken:
+          existing?.accountEmail && existing.accountEmail !== accountEmail
+            ? null
+            : existing?.calendarSyncToken,
+        lastErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        disconnectedAt: null,
+      },
+    });
+
+    await prisma.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_MICROSOFT_CONNECTED",
+        entityType: "CrmIntegrationConnection",
+        entityId: String(connection.id),
+        afterState: {
+          provider: connection.provider,
+          status: connection.status,
+          accountEmail,
+        },
+        changedFields: ["crmIntegrationConnections"],
+        metadata: {
+          source: "agencyContacts",
+          provider: "MICROSOFT",
+          accountEmail,
+          oauthCallback: "backend",
+        },
+        ...requestMeta(req),
+      },
+    });
+
+    console.info("Microsoft CRM OAuth callback completed", {
+      agencyId: workspace.agency.id,
+      memberId: workspace.membership.id,
+      accountEmail,
+    });
+    return res.redirect(302, successUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Microsoft connection failed";
+    console.error("Microsoft CRM OAuth callback failed", error);
+    return res.redirect(302, errorUrl(message));
+  }
+});
+
 router.use(requireActiveAgent);
 
 type AgentRequest = Request & {
