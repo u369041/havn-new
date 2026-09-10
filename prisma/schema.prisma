@@ -476,6 +476,7 @@ model CrmIntegrationConnection {
   accountEmail      String?
   externalAccountId String?
   scopes            String[]
+  configuration     Json?
 
   accessTokenEncrypted  String
   refreshTokenEncrypted String?
@@ -1121,11 +1122,13 @@ enum CrmInteractionProvider {
   MANUAL
   GOOGLE
   MICROSOFT
+  IMAP_CALDAV
 }
 
 enum CrmIntegrationProvider {
   GOOGLE
   MICROSOFT
+  IMAP_CALDAV
 }
 
 enum CrmIntegrationStatus {
