@@ -5244,33 +5244,63 @@ function icalEmail(
   return extractEmails(cleaned)[0] || null;
 }
 
+function icalEmailsFromPropertyLine(
+  line: string | null,
+): string[] {
+  if (!line) return [];
+
+  /*
+   * CalDAV providers (notably Apple) may expose a participant
+   * email in the property value, an EMAIL/CN/SENT-BY parameter,
+   * or a percent-encoded parameter while using a UUID/URN as the
+   * actual property value. Work from the complete property line so
+   * provider-specific parameter placement does not hide the address.
+   */
+  const candidates = new Set<string>();
+  const raw = String(line).trim();
+
+  const addEmails = (value: string) => {
+    for (const email of extractEmails(value)) {
+      candidates.add(email.toLowerCase());
+    }
+  };
+
+  addEmails(raw);
+  addEmails(raw.replace(/\\@/g, "@"));
+
+  try {
+    addEmails(decodeURIComponent(raw));
+  } catch {
+    // Ignore malformed percent encoding and retain the raw-line result.
+  }
+
+  const mailtoMatches = raw.match(/mailto:([^;,:\s\"]+@[^;,:\s\"]+)/gi) || [];
+  for (const match of mailtoMatches) {
+    addEmails(match);
+  }
+
+  return [...candidates];
+}
+
 function icalEmailFromPropertyLine(
   line: string | null,
 ): string | null {
-  if (!line) return null;
+  return icalEmailsFromPropertyLine(line)[0] || null;
+}
 
-  /*
-   * Apple CalDAV can place the participant
-   * email in an EMAIL= parameter while the
-   * property value itself is a urn:uuid.
-   * Search the complete property line first,
-   * then fall back to the normal property value.
-   */
-  const lineEmail =
-    extractEmails(String(line))[0] || null;
+function icalParticipantEmails(
+  lines: string[],
+): string[] {
+  const participantLines = [
+    ...icalPropertyLines(lines, "ATTENDEE"),
+    ...icalPropertyLines(lines, "ORGANIZER"),
+  ];
 
-  if (lineEmail) {
-    return lineEmail;
-  }
-
-  const colon =
-    String(line).indexOf(":");
-
-  return colon >= 0
-    ? icalEmail(
-        String(line).slice(colon + 1),
-      )
-    : null;
+  return [
+    ...new Set(
+      participantLines.flatMap(icalEmailsFromPropertyLine),
+    ),
+  ];
 }
 
 function parseCalendarEventsFromIcal(
@@ -5299,15 +5329,19 @@ function parseCalendarEventsFromIcal(
       "END:VEVENT"
     ) {
       if (current) {
-        const attendeeEmails =
-          icalPropertyLines(
-            current,
-            "ATTENDEE",
-          )
-            .map(
-              icalEmailFromPropertyLine,
-            )
-            .filter(Boolean) as string[];
+        const attendeeEmails = [
+          ...new Set(
+            icalPropertyLines(
+              current,
+              "ATTENDEE",
+            ).flatMap(
+              icalEmailsFromPropertyLine,
+            ),
+          ),
+        ];
+
+        const participantEmails =
+          icalParticipantEmails(current);
 
         events.push({
           uid: icalPropertyValue(
@@ -5361,6 +5395,7 @@ function parseCalendarEventsFromIcal(
               )[0] || null,
             ),
           attendeeEmails,
+          participantEmails,
         });
       }
 
@@ -5400,17 +5435,45 @@ async function upsertCaldavCalendarInteraction(
     objectUrl: string;
     event: any;
   },
-) {
+): Promise<{
+  imported: boolean;
+  reason: string;
+  diagnostics: Record<string, unknown>;
+}> {
   const event = args.event;
+  const accountEmail =
+    args.accountEmail.toLowerCase();
+
+  const safeDiagnostics = {
+    uid: nullableString(event?.uid, 500),
+    summary: nullableString(event?.summary, 500),
+    start:
+      event?.start instanceof Date
+        ? event.start.toISOString()
+        : nullableString(event?.start, 200),
+    organizerEmail:
+      nullableString(event?.organizerEmail, 320),
+    attendeeEmails: Array.isArray(event?.attendeeEmails)
+      ? event.attendeeEmails.slice(0, 25)
+      : [],
+    participantEmails: Array.isArray(event?.participantEmails)
+      ? event.participantEmails.slice(0, 25)
+      : [],
+  };
+
+  if (!event?.uid) {
+    return { imported: false, reason: "missing_uid", diagnostics: safeDiagnostics };
+  }
+
+  if (!event?.start) {
+    return { imported: false, reason: "missing_start", diagnostics: safeDiagnostics };
+  }
 
   if (
-    !event?.uid ||
-    !event?.start ||
-    String(
-      event?.status || "",
-    ).toUpperCase() === "CANCELLED"
+    String(event?.status || "").toUpperCase() ===
+    "CANCELLED"
   ) {
-    return false;
+    return { imported: false, reason: "cancelled", diagnostics: safeDiagnostics };
   }
 
   const occurredAt =
@@ -5418,38 +5481,43 @@ async function upsertCaldavCalendarInteraction(
       ? event.start
       : new Date(event.start);
 
-  if (
-    Number.isNaN(
-      occurredAt.getTime(),
-    )
-  ) {
-    return false;
+  if (Number.isNaN(occurredAt.getTime())) {
+    return { imported: false, reason: "invalid_start", diagnostics: safeDiagnostics };
   }
 
   const participantEmails = [
-    ...(Array.isArray(
-      event.attendeeEmails,
-    )
+    ...(Array.isArray(event.participantEmails)
+      ? event.participantEmails
+      : []),
+    ...(Array.isArray(event.attendeeEmails)
       ? event.attendeeEmails
       : []),
     event.organizerEmail,
   ]
     .filter(Boolean)
     .map((email) =>
-      String(email)
-        .trim()
-        .toLowerCase(),
+      String(email).trim().toLowerCase(),
     )
-    .filter(
-      (email) =>
-        email !==
-        args.accountEmail.toLowerCase(),
-    );
+    .filter((email) => email !== accountEmail);
+
+  const uniqueParticipantEmails =
+    [...new Set(participantEmails)];
+
+  if (!uniqueParticipantEmails.length) {
+    return {
+      imported: false,
+      reason: "no_external_participant_email",
+      diagnostics: {
+        ...safeDiagnostics,
+        matchedParticipantEmails: [],
+      },
+    };
+  }
 
   const contact =
     await matchedContactForEmails(
       args.workspace.agency.id,
-      participantEmails,
+      uniqueParticipantEmails,
     );
 
   /*
@@ -5458,34 +5526,33 @@ async function upsertCaldavCalendarInteraction(
    * involve an active CRM contact.
    */
   if (!contact) {
-    return false;
+    return {
+      imported: false,
+      reason: "no_active_crm_contact",
+      diagnostics: {
+        ...safeDiagnostics,
+        matchedParticipantEmails:
+          uniqueParticipantEmails.slice(0, 25),
+      },
+    };
   }
 
   const subject =
-    String(
-      event.summary || "Meeting",
-    )
+    String(event.summary || "Meeting")
       .trim()
-      .slice(0, 500) ||
-    "Meeting";
+      .slice(0, 500) || "Meeting";
 
   const description =
-    String(
-      event.description || "",
-    ).trim();
+    String(event.description || "").trim();
 
   const location =
-    String(
-      event.location || "",
-    ).trim();
+    String(event.location || "").trim();
 
   const summary =
     (
       [
         description,
-        location
-          ? `Location: ${location}`
-          : "",
+        location ? `Location: ${location}` : "",
       ]
         .filter(Boolean)
         .join("\n\n") ||
@@ -5500,10 +5567,7 @@ async function upsertCaldavCalendarInteraction(
         : null;
 
   const durationMinutes =
-    endAt &&
-    !Number.isNaN(
-      endAt.getTime(),
-    )
+    endAt && !Number.isNaN(endAt.getTime())
       ? Math.max(
           0,
           Math.round(
@@ -5514,9 +5578,6 @@ async function upsertCaldavCalendarInteraction(
         )
       : null;
 
-  const accountEmail =
-    args.accountEmail.toLowerCase();
-
   const calendarKey =
     crypto
       .createHash("sha256")
@@ -5526,9 +5587,7 @@ async function upsertCaldavCalendarInteraction(
 
   const recurrenceKey =
     event.recurrenceId
-      ? `:${String(
-          event.recurrenceId,
-        )}`
+      ? `:${String(event.recurrenceId)}`
       : "";
 
   const externalId =
@@ -5537,21 +5596,17 @@ async function upsertCaldavCalendarInteraction(
   await prisma.crmInteraction.upsert({
     where: {
       agencyId_sourceProvider_externalId: {
-        agencyId:
-          args.workspace.agency.id,
+        agencyId: args.workspace.agency.id,
         sourceProvider:
           CrmInteractionProvider.IMAP_CALDAV,
         externalId,
       },
     },
     create: {
-      agencyId:
-        args.workspace.agency.id,
+      agencyId: args.workspace.agency.id,
       contactId: contact.id,
-      companyId:
-        contact.companyId || null,
-      ownerMemberId:
-        args.connection.memberId,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
       type: CrmInteractionType.MEETING,
       direction:
         imapCaldavCalendarDirection(
@@ -5568,19 +5623,14 @@ async function upsertCaldavCalendarInteraction(
       externalThreadId:
         `${accountEmail}:caldav-series:${String(event.uid)}`,
       externalUrl:
-        nullableString(
-          args.objectUrl,
-          2000,
-        ),
+        nullableString(args.objectUrl, 2000),
       createdByUserId:
         args.connection.userId,
     },
     update: {
       contactId: contact.id,
-      companyId:
-        contact.companyId || null,
-      ownerMemberId:
-        args.connection.memberId,
+      companyId: contact.companyId || null,
+      ownerMemberId: args.connection.memberId,
       direction:
         imapCaldavCalendarDirection(
           accountEmail,
@@ -5593,14 +5643,20 @@ async function upsertCaldavCalendarInteraction(
       externalThreadId:
         `${accountEmail}:caldav-series:${String(event.uid)}`,
       externalUrl:
-        nullableString(
-          args.objectUrl,
-          2000,
-        ),
+        nullableString(args.objectUrl, 2000),
     },
   });
 
-  return true;
+  return {
+    imported: true,
+    reason: "imported",
+    diagnostics: {
+      ...safeDiagnostics,
+      matchedParticipantEmails:
+        uniqueParticipantEmails.slice(0, 25),
+      contactId: contact.id,
+    },
+  };
 }
 
 async function caldavCalendarSync(
@@ -5656,6 +5712,9 @@ async function caldavCalendarSync(
   let imported = 0;
   let skipped = 0;
   let objects = 0;
+  let parsedEvents = 0;
+  const skipReasons: Record<string, number> = {};
+  const skippedEventDiagnostics: Array<Record<string, unknown>> = [];
 
   for (const calendar of calendars) {
     const calendarObjects =
@@ -5680,8 +5739,10 @@ async function caldavCalendarSync(
           ),
         );
 
+      parsedEvents += events.length;
+
       for (const event of events) {
-        const matched =
+        const result =
           await upsertCaldavCalendarInteraction(
             {
               workspace,
@@ -5702,10 +5763,19 @@ async function caldavCalendarSync(
             },
           );
 
-        if (matched) {
+        if (result.imported) {
           imported += 1;
         } else {
           skipped += 1;
+          skipReasons[result.reason] =
+            (skipReasons[result.reason] || 0) + 1;
+
+          if (skippedEventDiagnostics.length < 20) {
+            skippedEventDiagnostics.push({
+              reason: result.reason,
+              ...result.diagnostics,
+            });
+          }
         }
       }
     }
@@ -5717,6 +5787,9 @@ async function caldavCalendarSync(
     calendars:
       calendars.length,
     objects,
+    parsedEvents,
+    skipReasons,
+    skippedEventDiagnostics,
     mode: "window",
     lookbackDays:
       IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS,
@@ -6251,6 +6324,21 @@ router.post(
           calendarSkipped:
             result.calendar
               ?.skipped ?? null,
+          calendars:
+            result.calendar
+              ?.calendars ?? null,
+          calendarObjects:
+            result.calendar
+              ?.objects ?? null,
+          calendarParsedEvents:
+            result.calendar
+              ?.parsedEvents ?? null,
+          calendarSkipReasons:
+            result.calendar
+              ?.skipReasons ?? null,
+          calendarSkippedEvents:
+            result.calendar
+              ?.skippedEventDiagnostics ?? null,
         },
       );
 
