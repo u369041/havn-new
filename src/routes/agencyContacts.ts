@@ -3669,13 +3669,16 @@ async function microsoftMailSync(workspace: AgencyWorkspace, connection: any, to
   });
   let nextUrl: string | null = `https://graph.microsoft.com/v1.0/me/messages?${params.toString()}`;
   let pages = 0;
+  let seen = 0;
   let imported = 0;
   let skipped = 0;
   while (nextUrl && pages < 10) {
     const page = await microsoftJson<any>(nextUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    for (const message of Array.isArray(page?.value) ? page.value : []) {
+    const messages = Array.isArray(page?.value) ? page.value : [];
+    seen += messages.length;
+    for (const message of messages) {
       const matched = await upsertMicrosoftEmailInteraction({
         workspace,
         connection,
@@ -3688,7 +3691,14 @@ async function microsoftMailSync(workspace: AgencyWorkspace, connection: any, to
     nextUrl = page?.["@odata.nextLink"] ? String(page["@odata.nextLink"]) : null;
     pages += 1;
   }
-  return { imported, skipped, mode: "window", lookbackDays: MICROSOFT_INITIAL_MAIL_LOOKBACK_DAYS };
+  return {
+    seen,
+    imported,
+    skipped,
+    pages,
+    mode: "window",
+    lookbackDays: MICROSOFT_INITIAL_MAIL_LOOKBACK_DAYS,
+  };
 }
 
 function microsoftCalendarDirection(accountEmail: string, event: any): CrmInteractionDirection {
@@ -4025,6 +4035,15 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
         },
       });
     }
+
+    console.info("Microsoft CRM sync diagnostic", {
+      agencyId: workspace.agency.id,
+      memberId: workspace.membership.id,
+      accountEmail: liveConnection.accountEmail,
+      mail: result.mail,
+      calendar: result.calendar,
+    });
+
     await prisma.agencyAuditLog.create({
       data: {
         agencyId: workspace.agency.id,
@@ -4038,8 +4057,12 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
         metadata: {
           source: "agencyContacts",
           provider: "MICROSOFT",
+          mailSeen: result.mail?.seen ?? null,
           mailImported: result.mail?.imported ?? null,
+          mailSkipped: result.mail?.skipped ?? null,
+          mailPages: result.mail?.pages ?? null,
           calendarImported: result.calendar?.imported ?? null,
+          calendarSkipped: result.calendar?.skipped ?? null,
         },
         ...requestMeta(req),
       },
