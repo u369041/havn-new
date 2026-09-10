@@ -1,5 +1,8 @@
 import { Router, Request } from "express";
 import crypto from "crypto";
+import { ImapFlow } from "imapflow";
+import { createDAVClient } from "tsdav";
+import { promises as dns } from "dns";
 import {
   Prisma,
   ProfessionalContactRole,
@@ -4122,6 +4125,2271 @@ router.post("/integrations/microsoft/disconnect", async (req: AgentRequest, res)
     return handleError(res, error);
   }
 });
+
+
+/* CRM IMAP / CalDAV integration */
+
+const IMAP_CALDAV_PROVIDER = CrmIntegrationProvider.IMAP_CALDAV;
+const IMAP_CALDAV_MAIL_LOOKBACK_DAYS = 30;
+const IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS = 90;
+const IMAP_CALDAV_CALENDAR_FORWARD_DAYS = 365;
+
+type ImapCaldavConfiguration = {
+  type: "ICLOUD" | "CUSTOM";
+  imap: {
+    host: string;
+    port: number;
+    secure: boolean;
+  };
+  caldav?: {
+    serverUrl: string;
+  } | null;
+};
+
+function imapCaldavEncryptionKey(): Buffer {
+  const raw = String(
+    process.env.CRM_IMAP_CALDAV_ENCRYPTION_KEY || "",
+  ).trim();
+
+  if (!raw) {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_CONFIGURATION_ERROR",
+      "CRM_IMAP_CALDAV_ENCRYPTION_KEY is not configured",
+      503,
+    );
+  }
+
+  let key: Buffer;
+
+  try {
+    key = Buffer.from(raw, "base64");
+  } catch {
+    key = Buffer.alloc(0);
+  }
+
+  if (key.length !== 32) {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_CONFIGURATION_ERROR",
+      "CRM_IMAP_CALDAV_ENCRYPTION_KEY must be a base64-encoded 32-byte key",
+      503,
+    );
+  }
+
+  return key;
+}
+
+function encryptImapCaldavSecret(value: string): string {
+  const key = imapCaldavEncryptionKey();
+  const iv = crypto.randomBytes(12);
+
+  const cipher = crypto.createCipheriv(
+    "aes-256-gcm",
+    key,
+    iv,
+  );
+
+  const encrypted = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+
+  const tag = cipher.getAuthTag();
+
+  return [
+    "v1",
+    iv.toString("base64url"),
+    tag.toString("base64url"),
+    encrypted.toString("base64url"),
+  ].join(":");
+}
+
+function decryptImapCaldavSecret(value: string): string {
+  const [version, ivRaw, tagRaw, encryptedRaw] =
+    String(value || "").split(":");
+
+  if (
+    version !== "v1" ||
+    !ivRaw ||
+    !tagRaw ||
+    encryptedRaw == null
+  ) {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_CREDENTIAL_INVALID",
+      "Stored IMAP / CalDAV credential could not be read",
+      500,
+    );
+  }
+
+  try {
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      imapCaldavEncryptionKey(),
+      Buffer.from(ivRaw, "base64url"),
+    );
+
+    decipher.setAuthTag(
+      Buffer.from(tagRaw, "base64url"),
+    );
+
+    return Buffer.concat([
+      decipher.update(
+        Buffer.from(encryptedRaw, "base64url"),
+      ),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_CREDENTIAL_INVALID",
+      "Stored IMAP / CalDAV credential could not be decrypted",
+      500,
+    );
+  }
+}
+
+async function imapCaldavConnectionForWorkspace(
+  workspace: AgencyWorkspace,
+) {
+  return prisma.crmIntegrationConnection.findUnique({
+    where: {
+      agencyId_memberId_provider: {
+        agencyId: workspace.agency.id,
+        memberId: workspace.membership.id,
+        provider: IMAP_CALDAV_PROVIDER,
+      },
+    },
+  });
+}
+
+function normaliseImapCaldavConfiguration(
+  value: unknown,
+): ImapCaldavConfiguration | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw: any = value;
+
+  const type =
+    String(raw.type || "").toUpperCase() === "ICLOUD"
+      ? "ICLOUD"
+      : "CUSTOM";
+
+  const host = String(
+    raw.imap?.host || "",
+  ).trim().toLowerCase();
+
+  const port = Number(raw.imap?.port || 0);
+
+  /*
+   * HAVN only permits encrypted IMAP connections.
+   * No plaintext port 143 connector is exposed.
+   */
+  const secure = raw.imap?.secure !== false;
+
+  if (
+    !host ||
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65535 ||
+    !secure
+  ) {
+    return null;
+  }
+
+  const serverUrl =
+    String(raw.caldav?.serverUrl || "").trim();
+
+  if (serverUrl) {
+    try {
+      const parsed = new URL(serverUrl);
+
+      if (parsed.protocol !== "https:") {
+        return null;
+      }
+
+      if (!parsed.hostname) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    type,
+    imap: {
+      host,
+      port,
+      secure: true,
+    },
+    caldav: serverUrl
+      ? {
+          serverUrl,
+        }
+      : null,
+  };
+}
+
+function publicImapCaldavConnection(
+  connection: any,
+) {
+  const configuration =
+    normaliseImapCaldavConfiguration(
+      connection?.configuration,
+    );
+
+  if (!connection) {
+    return {
+      provider: IMAP_CALDAV_PROVIDER,
+      connected: false,
+      status:
+        CrmIntegrationStatus.DISCONNECTED,
+      accountEmail: null,
+      configuration: null,
+      scopes: [],
+      lastEmailSyncAt: null,
+      lastCalendarSyncAt: null,
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      disconnectedAt: null,
+    };
+  }
+
+  return {
+    id: connection.id,
+    provider: connection.provider,
+    connected:
+      connection.status ===
+      CrmIntegrationStatus.CONNECTED,
+    status: connection.status,
+    accountEmail: connection.accountEmail,
+    configuration,
+    scopes: connection.scopes,
+    lastEmailSyncAt:
+      connection.lastEmailSyncAt,
+    lastCalendarSyncAt:
+      connection.lastCalendarSyncAt,
+    lastSyncAt: connection.lastSyncAt,
+    lastErrorAt: connection.lastErrorAt,
+    lastErrorCode: connection.lastErrorCode,
+    lastErrorMessage:
+      connection.lastErrorMessage,
+    disconnectedAt:
+      connection.disconnectedAt,
+  };
+}
+
+function isPrivateOrUnsafeIp(
+  address: string,
+): boolean {
+  const value = String(address || "")
+    .trim()
+    .toLowerCase();
+
+  if (!value) return true;
+
+  /*
+   * IPv6 local/private/link-local.
+   */
+  if (
+    value === "::1" ||
+    value === "::" ||
+    value.startsWith("fc") ||
+    value.startsWith("fd") ||
+    value.startsWith("fe8") ||
+    value.startsWith("fe9") ||
+    value.startsWith("fea") ||
+    value.startsWith("feb")
+  ) {
+    return true;
+  }
+
+  /*
+   * IPv4-mapped IPv6.
+   */
+  const ipv4 =
+    value.startsWith("::ffff:")
+      ? value.slice(7)
+      : value;
+
+  const parts = ipv4
+    .split(".")
+    .map((part) => Number(part));
+
+  if (
+    parts.length !== 4 ||
+    parts.some(
+      (part) =>
+        !Number.isInteger(part) ||
+        part < 0 ||
+        part > 255,
+    )
+  ) {
+    return false;
+  }
+
+  const [a, b] = parts;
+
+  if (a === 0) return true;
+  if (a === 10) return true;
+  if (a === 127) return true;
+
+  if (
+    a === 100 &&
+    b >= 64 &&
+    b <= 127
+  ) {
+    return true;
+  }
+
+  if (
+    a === 169 &&
+    b === 254
+  ) {
+    return true;
+  }
+
+  if (
+    a === 172 &&
+    b >= 16 &&
+    b <= 31
+  ) {
+    return true;
+  }
+
+  if (
+    a === 192 &&
+    b === 168
+  ) {
+    return true;
+  }
+
+  if (
+    a === 198 &&
+    (b === 18 || b === 19)
+  ) {
+    return true;
+  }
+
+  if (a >= 224) {
+    return true;
+  }
+
+  return false;
+}
+
+async function assertPublicConnectorHostname(
+  hostname: string,
+) {
+  const host = String(hostname || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_HOST_BLOCKED",
+      "This mail or calendar server address is not allowed",
+      400,
+    );
+  }
+
+  let resolved: {
+    address: string;
+    family: number;
+  }[];
+
+  try {
+    resolved = await dns.lookup(host, {
+      all: true,
+      verbatim: true,
+    });
+  } catch {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_HOST_NOT_FOUND",
+      `Could not resolve server ${host}`,
+      400,
+    );
+  }
+
+  if (
+    !resolved.length ||
+    resolved.some((entry) =>
+      isPrivateOrUnsafeIp(entry.address),
+    )
+  ) {
+    throw new ApiError(
+      "CRM_IMAP_CALDAV_HOST_BLOCKED",
+      "Private or internal mail/calendar servers cannot be accessed by this connector",
+      400,
+    );
+  }
+}
+
+async function validateImapCaldavNetworkTargets(
+  configuration: ImapCaldavConfiguration,
+) {
+  await assertPublicConnectorHostname(
+    configuration.imap.host,
+  );
+
+  if (
+    configuration.caldav?.serverUrl
+  ) {
+    const url = new URL(
+      configuration.caldav.serverUrl,
+    );
+
+    await assertPublicConnectorHostname(
+      url.hostname,
+    );
+  }
+}
+
+async function testImapConnection(args: {
+  email: string;
+  password: string;
+  configuration:
+    ImapCaldavConfiguration;
+}) {
+  const client = new ImapFlow({
+    host: args.configuration.imap.host,
+    port: args.configuration.imap.port,
+    secure: true,
+    auth: {
+      user: args.email,
+      pass: args.password,
+    },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+  } finally {
+    if (client.usable) {
+      await client.logout();
+    }
+  }
+}
+
+async function testCaldavConnection(args: {
+  email: string;
+  password: string;
+  configuration:
+    ImapCaldavConfiguration;
+}) {
+  if (
+    !args.configuration.caldav?.serverUrl
+  ) {
+    return;
+  }
+
+  const client = await createDAVClient({
+    serverUrl:
+      args.configuration.caldav.serverUrl,
+    credentials: {
+      username: args.email,
+      password: args.password,
+    },
+    authMethod: "Basic",
+    defaultAccountType: "caldav",
+  });
+
+  await client.fetchCalendars();
+}
+
+async function markImapCaldavConnectionError(
+  connectionId: number,
+  error: unknown,
+) {
+  const err: any = error;
+
+  try {
+    await prisma.crmIntegrationConnection.update({
+      where: {
+        id: connectionId,
+      },
+      data: {
+        status:
+          CrmIntegrationStatus.ERROR,
+        lastErrorAt: new Date(),
+        lastErrorCode: nullableString(
+          err?.code ||
+            "IMAP_CALDAV_SYNC_ERROR",
+          200,
+        ),
+        lastErrorMessage: nullableString(
+          err?.message ||
+            "IMAP / CalDAV synchronization failed",
+          2000,
+        ),
+      },
+    });
+  } catch (markError) {
+    console.error(
+      "Failed to record IMAP / CalDAV CRM integration error",
+      markError,
+    );
+  }
+}
+
+function imapAddressEmails(
+  values: any,
+): string[] {
+  const list = Array.isArray(values)
+    ? values
+    : values
+      ? [values]
+      : [];
+
+  const result: string[] = [];
+
+  for (const value of list) {
+    const address = String(
+      value?.address || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (address) {
+      result.push(address);
+      continue;
+    }
+
+    const mailbox = String(
+      value?.mailbox || "",
+    ).trim();
+
+    const host = String(
+      value?.host || "",
+    ).trim();
+
+    if (mailbox && host) {
+      result.push(
+        `${mailbox}@${host}`.toLowerCase(),
+      );
+    }
+  }
+
+  return [...new Set(result)];
+}
+
+function imapMailDirection(
+  accountEmail: string,
+  envelope: any,
+): CrmInteractionDirection {
+  const account =
+    accountEmail.toLowerCase();
+
+  const from =
+    imapAddressEmails(envelope?.from);
+
+  return from.includes(account)
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertImapEmailInteraction(
+  args: {
+    workspace: AgencyWorkspace;
+    connection: any;
+    accountEmail: string;
+    mailboxPath: string;
+    uidValidity: string;
+    message: any;
+  },
+) {
+  const message = args.message;
+
+  if (!message?.uid) {
+    return false;
+  }
+
+  const envelope = message.envelope || {};
+
+  const accountEmail =
+    args.accountEmail.toLowerCase();
+
+  const participantEmails = [
+    ...imapAddressEmails(envelope.from),
+    ...imapAddressEmails(envelope.to),
+    ...imapAddressEmails(envelope.cc),
+    ...imapAddressEmails(envelope.bcc),
+    ...imapAddressEmails(envelope.replyTo),
+  ].filter(
+    (email) =>
+      email &&
+      email !== accountEmail,
+  );
+
+  const contact =
+    await matchedContactForEmails(
+      args.workspace.agency.id,
+      participantEmails,
+    );
+
+  /*
+   * Data minimisation:
+   * IMAP is a CRM source, not a mailbox mirror.
+   */
+  if (!contact) {
+    return false;
+  }
+
+  const occurredRaw =
+    envelope?.date ||
+    message?.internalDate ||
+    new Date();
+
+  const occurredAt =
+    occurredRaw instanceof Date
+      ? occurredRaw
+      : new Date(occurredRaw);
+
+  if (
+    Number.isNaN(
+      occurredAt.getTime(),
+    )
+  ) {
+    return false;
+  }
+
+  const subject =
+    String(
+      envelope?.subject || "Email",
+    )
+      .trim()
+      .slice(0, 500) || "Email";
+
+  /*
+   * We deliberately do not ingest entire
+   * email bodies at this stage.
+   */
+  const summary = subject;
+
+  const mailboxKey =
+    String(args.mailboxPath || "mail")
+      .trim()
+      .toLowerCase();
+
+  const externalId =
+    `${accountEmail}:imap:${mailboxKey}:${args.uidValidity}:${String(message.uid)}`;
+
+  const messageId =
+    nullableString(
+      envelope?.messageId,
+      1000,
+    );
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId:
+          args.workspace.agency.id,
+        sourceProvider:
+          CrmInteractionProvider.IMAP_CALDAV,
+        externalId,
+      },
+    },
+    create: {
+      agencyId:
+        args.workspace.agency.id,
+      contactId: contact.id,
+      companyId:
+        contact.companyId || null,
+      ownerMemberId:
+        args.connection.memberId,
+      type: CrmInteractionType.EMAIL,
+      direction: imapMailDirection(
+        accountEmail,
+        envelope,
+      ),
+      subject,
+      summary,
+      occurredAt,
+      sourceProvider:
+        CrmInteractionProvider.IMAP_CALDAV,
+      externalId,
+      externalThreadId: messageId
+        ? `${accountEmail}:imap-message:${messageId}`
+        : null,
+      externalUrl: null,
+      createdByUserId:
+        args.connection.userId,
+    },
+    update: {
+      contactId: contact.id,
+      companyId:
+        contact.companyId || null,
+      ownerMemberId:
+        args.connection.memberId,
+      direction: imapMailDirection(
+        accountEmail,
+        envelope,
+      ),
+      subject,
+      summary,
+      occurredAt,
+      externalThreadId: messageId
+        ? `${accountEmail}:imap-message:${messageId}`
+        : null,
+    },
+  });
+
+  return true;
+}
+
+async function imapMailSync(
+  workspace: AgencyWorkspace,
+  connection: any,
+  password: string,
+  configuration:
+    ImapCaldavConfiguration,
+) {
+  const client = new ImapFlow({
+    host: configuration.imap.host,
+    port: configuration.imap.port,
+    secure: true,
+    auth: {
+      user: connection.accountEmail,
+      pass: password,
+    },
+    logger: false,
+  });
+
+  const since = new Date(
+    Date.now() -
+      IMAP_CALDAV_MAIL_LOOKBACK_DAYS *
+        86400000,
+  );
+
+  let seen = 0;
+  let imported = 0;
+  let skipped = 0;
+  let mailboxes = 0;
+
+  try {
+    await client.connect();
+
+    const availableMailboxes =
+      await client.list();
+
+    const targets =
+      availableMailboxes.filter(
+        (mailbox: any) => {
+          const path =
+            String(
+              mailbox?.path || "",
+            ).toLowerCase();
+
+          const specialUse =
+            String(
+              mailbox?.specialUse || "",
+            ).toLowerCase();
+
+          return (
+            path === "inbox" ||
+            specialUse === "\\sent"
+          );
+        },
+      );
+
+    /*
+     * Every IMAP server has INBOX,
+     * even when LIST did not flag it.
+     */
+    if (
+      !targets.some(
+        (mailbox: any) =>
+          String(
+            mailbox?.path || "",
+          ).toLowerCase() === "inbox",
+      )
+    ) {
+      targets.unshift({
+        path: "INBOX",
+      } as any);
+    }
+
+    for (const mailbox of targets) {
+      const path =
+        String(
+          mailbox?.path || "INBOX",
+        ).trim();
+
+      let lock: any = null;
+
+      try {
+        lock =
+          await client.getMailboxLock(
+            path,
+          );
+
+        const mailboxInfo: any =
+          client.mailbox;
+
+        const uidValidity =
+          String(
+            mailboxInfo?.uidValidity ||
+              "0",
+          );
+
+        const uids =
+          await client.search(
+            {
+              since,
+            },
+            {
+              uid: true,
+            },
+          );
+
+        const uidList = Array.isArray(
+          uids,
+        )
+          ? uids
+          : [];
+
+        seen += uidList.length;
+        mailboxes += 1;
+
+        for (
+          let offset = 0;
+          offset < uidList.length;
+          offset += 100
+        ) {
+          const chunk = uidList.slice(
+            offset,
+            offset + 100,
+          );
+
+          if (!chunk.length) {
+            continue;
+          }
+
+          const range =
+            chunk.join(",");
+
+          for await (
+            const message of client.fetch(
+              range,
+              {
+                uid: true,
+                envelope: true,
+                internalDate: true,
+              },
+              {
+                uid: true,
+              },
+            )
+          ) {
+            const matched =
+              await upsertImapEmailInteraction(
+                {
+                  workspace,
+                  connection,
+                  accountEmail:
+                    connection.accountEmail,
+                  mailboxPath: path,
+                  uidValidity,
+                  message,
+                },
+              );
+
+            if (matched) {
+              imported += 1;
+            } else {
+              skipped += 1;
+            }
+          }
+        }
+      } finally {
+        if (lock) {
+          lock.release();
+        }
+      }
+    }
+  } finally {
+    if (client.usable) {
+      await client.logout();
+    }
+  }
+
+  return {
+    seen,
+    imported,
+    skipped,
+    mailboxes,
+    mode: "window",
+    lookbackDays:
+      IMAP_CALDAV_MAIL_LOOKBACK_DAYS,
+  };
+}
+
+function unfoldIcalLines(
+  data: string,
+): string[] {
+  const rawLines =
+    String(data || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n");
+
+  const lines: string[] = [];
+
+  for (const line of rawLines) {
+    if (
+      /^[ \t]/.test(line) &&
+      lines.length
+    ) {
+      lines[
+        lines.length - 1
+      ] += line.slice(1);
+    } else {
+      lines.push(line);
+    }
+  }
+
+  return lines;
+}
+
+function icalPropertyValue(
+  lines: string[],
+  name: string,
+): string | null {
+  const prefix =
+    name.toUpperCase();
+
+  const line = lines.find(
+    (value) => {
+      const left =
+        String(value)
+          .split(":", 1)[0]
+          ?.split(";", 1)[0]
+          ?.toUpperCase();
+
+      return left === prefix;
+    },
+  );
+
+  if (!line) {
+    return null;
+  }
+
+  const colon =
+    line.indexOf(":");
+
+  if (colon < 0) {
+    return null;
+  }
+
+  return line
+    .slice(colon + 1)
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+}
+
+function icalPropertyValues(
+  lines: string[],
+  name: string,
+): string[] {
+  const prefix =
+    name.toUpperCase();
+
+  return lines
+    .filter((line) => {
+      const left =
+        String(line)
+          .split(":", 1)[0]
+          ?.split(";", 1)[0]
+          ?.toUpperCase();
+
+      return left === prefix;
+    })
+    .map((line) => {
+      const colon =
+        line.indexOf(":");
+
+      return colon >= 0
+        ? line
+            .slice(colon + 1)
+            .trim()
+        : "";
+    })
+    .filter(Boolean);
+}
+
+function parseIcalDate(
+  value: string | null,
+): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const raw =
+    String(value).trim();
+
+  const dateOnly =
+    /^(\d{4})(\d{2})(\d{2})$/.exec(
+      raw,
+    );
+
+  if (dateOnly) {
+    const date = new Date(
+      Date.UTC(
+        Number(dateOnly[1]),
+        Number(dateOnly[2]) - 1,
+        Number(dateOnly[3]),
+      ),
+    );
+
+    return Number.isNaN(
+      date.getTime(),
+    )
+      ? null
+      : date;
+  }
+
+  const dateTime =
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(
+      raw,
+    );
+
+  if (!dateTime) {
+    const fallback =
+      new Date(raw);
+
+    return Number.isNaN(
+      fallback.getTime(),
+    )
+      ? null
+      : fallback;
+  }
+
+  /*
+   * Values without Z are treated as
+   * floating calendar time. HAVN stores
+   * the normalized instant returned here.
+   */
+  const date = new Date(
+    Date.UTC(
+      Number(dateTime[1]),
+      Number(dateTime[2]) - 1,
+      Number(dateTime[3]),
+      Number(dateTime[4]),
+      Number(dateTime[5]),
+      Number(dateTime[6]),
+    ),
+  );
+
+  return Number.isNaN(
+    date.getTime(),
+  )
+    ? null
+    : date;
+}
+
+function icalEmail(
+  value: string | null,
+): string | null {
+  if (!value) return null;
+
+  const cleaned =
+    String(value)
+      .trim()
+      .replace(/^mailto:/i, "")
+      .toLowerCase();
+
+  return extractEmails(cleaned)[0] || null;
+}
+
+function parseCalendarEventsFromIcal(
+  data: string,
+) {
+  const lines =
+    unfoldIcalLines(data);
+
+  const events: any[] = [];
+
+  let current:
+    | string[]
+    | null = null;
+
+  for (const line of lines) {
+    if (
+      line.toUpperCase() ===
+      "BEGIN:VEVENT"
+    ) {
+      current = [];
+      continue;
+    }
+
+    if (
+      line.toUpperCase() ===
+      "END:VEVENT"
+    ) {
+      if (current) {
+        const attendeeEmails =
+          icalPropertyValues(
+            current,
+            "ATTENDEE",
+          )
+            .map(icalEmail)
+            .filter(Boolean) as string[];
+
+        events.push({
+          uid: icalPropertyValue(
+            current,
+            "UID",
+          ),
+          recurrenceId:
+            icalPropertyValue(
+              current,
+              "RECURRENCE-ID",
+            ),
+          status:
+            icalPropertyValue(
+              current,
+              "STATUS",
+            ),
+          summary:
+            icalPropertyValue(
+              current,
+              "SUMMARY",
+            ),
+          description:
+            icalPropertyValue(
+              current,
+              "DESCRIPTION",
+            ),
+          location:
+            icalPropertyValue(
+              current,
+              "LOCATION",
+            ),
+          start:
+            parseIcalDate(
+              icalPropertyValue(
+                current,
+                "DTSTART",
+              ),
+            ),
+          end:
+            parseIcalDate(
+              icalPropertyValue(
+                current,
+                "DTEND",
+              ),
+            ),
+          organizerEmail:
+            icalEmail(
+              icalPropertyValue(
+                current,
+                "ORGANIZER",
+              ),
+            ),
+          attendeeEmails,
+        });
+      }
+
+      current = null;
+      continue;
+    }
+
+    if (current) {
+      current.push(line);
+    }
+  }
+
+  return events;
+}
+
+function imapCaldavCalendarDirection(
+  accountEmail: string,
+  organizerEmail:
+    | string
+    | null,
+): CrmInteractionDirection {
+  return (
+    organizerEmail &&
+    organizerEmail.toLowerCase() ===
+      accountEmail.toLowerCase()
+  )
+    ? CrmInteractionDirection.OUTBOUND
+    : CrmInteractionDirection.INBOUND;
+}
+
+async function upsertCaldavCalendarInteraction(
+  args: {
+    workspace: AgencyWorkspace;
+    connection: any;
+    accountEmail: string;
+    calendarUrl: string;
+    objectUrl: string;
+    event: any;
+  },
+) {
+  const event = args.event;
+
+  if (
+    !event?.uid ||
+    !event?.start ||
+    String(
+      event?.status || "",
+    ).toUpperCase() === "CANCELLED"
+  ) {
+    return false;
+  }
+
+  const occurredAt =
+    event.start instanceof Date
+      ? event.start
+      : new Date(event.start);
+
+  if (
+    Number.isNaN(
+      occurredAt.getTime(),
+    )
+  ) {
+    return false;
+  }
+
+  const participantEmails = [
+    ...(Array.isArray(
+      event.attendeeEmails,
+    )
+      ? event.attendeeEmails
+      : []),
+    event.organizerEmail,
+  ]
+    .filter(Boolean)
+    .map((email) =>
+      String(email)
+        .trim()
+        .toLowerCase(),
+    )
+    .filter(
+      (email) =>
+        email !==
+        args.accountEmail.toLowerCase(),
+    );
+
+  const contact =
+    await matchedContactForEmails(
+      args.workspace.agency.id,
+      participantEmails,
+    );
+
+  /*
+   * Data minimisation:
+   * only retain calendar events that
+   * involve an active CRM contact.
+   */
+  if (!contact) {
+    return false;
+  }
+
+  const subject =
+    String(
+      event.summary || "Meeting",
+    )
+      .trim()
+      .slice(0, 500) ||
+    "Meeting";
+
+  const description =
+    String(
+      event.description || "",
+    ).trim();
+
+  const location =
+    String(
+      event.location || "",
+    ).trim();
+
+  const summary =
+    (
+      [
+        description,
+        location
+          ? `Location: ${location}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n") ||
+      subject
+    ).slice(0, 20000);
+
+  const endAt =
+    event.end instanceof Date
+      ? event.end
+      : event.end
+        ? new Date(event.end)
+        : null;
+
+  const durationMinutes =
+    endAt &&
+    !Number.isNaN(
+      endAt.getTime(),
+    )
+      ? Math.max(
+          0,
+          Math.round(
+            (endAt.getTime() -
+              occurredAt.getTime()) /
+              60000,
+          ),
+        )
+      : null;
+
+  const accountEmail =
+    args.accountEmail.toLowerCase();
+
+  const calendarKey =
+    crypto
+      .createHash("sha256")
+      .update(args.calendarUrl)
+      .digest("hex")
+      .slice(0, 24);
+
+  const recurrenceKey =
+    event.recurrenceId
+      ? `:${String(
+          event.recurrenceId,
+        )}`
+      : "";
+
+  const externalId =
+    `${accountEmail}:caldav:${calendarKey}:${String(event.uid)}${recurrenceKey}`;
+
+  await prisma.crmInteraction.upsert({
+    where: {
+      agencyId_sourceProvider_externalId: {
+        agencyId:
+          args.workspace.agency.id,
+        sourceProvider:
+          CrmInteractionProvider.IMAP_CALDAV,
+        externalId,
+      },
+    },
+    create: {
+      agencyId:
+        args.workspace.agency.id,
+      contactId: contact.id,
+      companyId:
+        contact.companyId || null,
+      ownerMemberId:
+        args.connection.memberId,
+      type: CrmInteractionType.MEETING,
+      direction:
+        imapCaldavCalendarDirection(
+          accountEmail,
+          event.organizerEmail,
+        ),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      sourceProvider:
+        CrmInteractionProvider.IMAP_CALDAV,
+      externalId,
+      externalThreadId:
+        `${accountEmail}:caldav-series:${String(event.uid)}`,
+      externalUrl:
+        nullableString(
+          args.objectUrl,
+          2000,
+        ),
+      createdByUserId:
+        args.connection.userId,
+    },
+    update: {
+      contactId: contact.id,
+      companyId:
+        contact.companyId || null,
+      ownerMemberId:
+        args.connection.memberId,
+      direction:
+        imapCaldavCalendarDirection(
+          accountEmail,
+          event.organizerEmail,
+        ),
+      subject,
+      summary,
+      occurredAt,
+      durationMinutes,
+      externalThreadId:
+        `${accountEmail}:caldav-series:${String(event.uid)}`,
+      externalUrl:
+        nullableString(
+          args.objectUrl,
+          2000,
+        ),
+    },
+  });
+
+  return true;
+}
+
+async function caldavCalendarSync(
+  workspace: AgencyWorkspace,
+  connection: any,
+  password: string,
+  configuration:
+    ImapCaldavConfiguration,
+) {
+  if (
+    !configuration.caldav?.serverUrl
+  ) {
+    return {
+      imported: 0,
+      skipped: 0,
+      calendars: 0,
+      objects: 0,
+      disabled: true,
+    };
+  }
+
+  const client =
+    await createDAVClient({
+      serverUrl:
+        configuration.caldav.serverUrl,
+      credentials: {
+        username:
+          connection.accountEmail,
+        password,
+      },
+      authMethod: "Basic",
+      defaultAccountType:
+        "caldav",
+    });
+
+  const calendars =
+    await client.fetchCalendars();
+
+  const start =
+    new Date(
+      Date.now() -
+        IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS *
+          86400000,
+    ).toISOString();
+
+  const end =
+    new Date(
+      Date.now() +
+        IMAP_CALDAV_CALENDAR_FORWARD_DAYS *
+          86400000,
+    ).toISOString();
+
+  let imported = 0;
+  let skipped = 0;
+  let objects = 0;
+
+  for (const calendar of calendars) {
+    const calendarObjects =
+      await client.fetchCalendarObjects({
+        calendar,
+        timeRange: {
+          start,
+          end,
+        },
+      });
+
+    objects +=
+      calendarObjects.length;
+
+    for (
+      const object of calendarObjects
+    ) {
+      const events =
+        parseCalendarEventsFromIcal(
+          String(
+            object?.data || "",
+          ),
+        );
+
+      for (const event of events) {
+        const matched =
+          await upsertCaldavCalendarInteraction(
+            {
+              workspace,
+              connection,
+              accountEmail:
+                connection.accountEmail,
+              calendarUrl:
+                String(
+                  (calendar as any)
+                    ?.url || "",
+                ),
+              objectUrl:
+                String(
+                  (object as any)
+                    ?.url || "",
+                ),
+              event,
+            },
+          );
+
+        if (matched) {
+          imported += 1;
+        } else {
+          skipped += 1;
+        }
+      }
+    }
+  }
+
+  return {
+    imported,
+    skipped,
+    calendars:
+      calendars.length,
+    objects,
+    mode: "window",
+    lookbackDays:
+      IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS,
+    forwardDays:
+      IMAP_CALDAV_CALENDAR_FORWARD_DAYS,
+  };
+}
+
+router.get(
+  "/integrations/imap-caldav/status",
+  async (
+    req: AgentRequest,
+    res,
+  ) => {
+    try {
+      const workspace =
+        await workspaceFor(req);
+
+      const connection =
+        await imapCaldavConnectionForWorkspace(
+          workspace,
+        );
+
+      return res.json({
+        ok: true,
+        configured: Boolean(
+          process.env
+            .CRM_IMAP_CALDAV_ENCRYPTION_KEY,
+        ),
+        connection:
+          publicImapCaldavConnection(
+            connection,
+          ),
+      });
+    } catch (error) {
+      return handleError(
+        res,
+        error,
+      );
+    }
+  },
+);
+
+router.post(
+  "/integrations/imap-caldav/connect",
+  async (
+    req: AgentRequest,
+    res,
+  ) => {
+    try {
+      const workspace =
+        await workspaceFor(req);
+
+      assertCanManageCrm(
+        workspace,
+      );
+
+      /*
+       * Force validation of the server
+       * encryption key before touching
+       * external services.
+       */
+      imapCaldavEncryptionKey();
+
+      const email =
+        requiredString(
+          req.body?.email,
+          "email",
+          320,
+        )
+          .trim()
+          .toLowerCase();
+
+      if (
+        extractEmails(email).length !==
+          1 ||
+        extractEmails(email)[0] !== email
+      ) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          "email must be a valid email address",
+          400,
+        );
+      }
+
+      const password =
+        requiredString(
+          req.body?.password,
+          "password",
+          1000,
+        );
+
+      const requestedType =
+        String(
+          req.body?.type || "",
+        )
+          .trim()
+          .toUpperCase() ===
+        "ICLOUD"
+          ? "ICLOUD"
+          : "CUSTOM";
+
+      const configuration:
+        ImapCaldavConfiguration =
+        requestedType === "ICLOUD"
+          ? {
+              type: "ICLOUD",
+              imap: {
+                host:
+                  "imap.mail.me.com",
+                port: 993,
+                secure: true,
+              },
+              caldav: {
+                serverUrl:
+                  "https://caldav.icloud.com",
+              },
+            }
+          : {
+              type: "CUSTOM",
+              imap: {
+                host:
+                  requiredString(
+                    req.body
+                      ?.imapHost,
+                    "imapHost",
+                    500,
+                  ),
+                port: Number(
+                  req.body
+                    ?.imapPort ||
+                    993,
+                ),
+                /*
+                 * v1 of the HAVN
+                 * standards connector
+                 * is TLS only.
+                 */
+                secure: true,
+              },
+              caldav:
+                req.body
+                  ?.caldavServerUrl
+                  ? {
+                      serverUrl:
+                        requiredString(
+                          req.body
+                            ?.caldavServerUrl,
+                          "caldavServerUrl",
+                          1000,
+                        ),
+                    }
+                  : null,
+            };
+
+      const normalisedConfiguration =
+        normaliseImapCaldavConfiguration(
+          configuration,
+        );
+
+      if (
+        !normalisedConfiguration
+      ) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          "IMAP / CalDAV configuration is invalid",
+          400,
+        );
+      }
+
+      await validateImapCaldavNetworkTargets(
+        normalisedConfiguration,
+      );
+
+      /*
+       * Verify credentials before
+       * storing anything.
+       */
+      await testImapConnection({
+        email,
+        password,
+        configuration:
+          normalisedConfiguration,
+      });
+
+      await testCaldavConnection({
+        email,
+        password,
+        configuration:
+          normalisedConfiguration,
+      });
+
+      const encryptedCredential =
+        encryptImapCaldavSecret(
+          password,
+        );
+
+      const connection =
+        await prisma.crmIntegrationConnection.upsert(
+          {
+            where: {
+              agencyId_memberId_provider:
+                {
+                  agencyId:
+                    workspace.agency.id,
+                  memberId:
+                    workspace.membership
+                      .id,
+                  provider:
+                    IMAP_CALDAV_PROVIDER,
+                },
+            },
+            create: {
+              agencyId:
+                workspace.agency.id,
+              memberId:
+                workspace.membership.id,
+              userId:
+                workspace.membership
+                  .userId,
+              provider:
+                IMAP_CALDAV_PROVIDER,
+              status:
+                CrmIntegrationStatus.CONNECTED,
+              accountEmail: email,
+              externalAccountId:
+                email,
+              scopes: [
+                "mail.read",
+                ...(normalisedConfiguration
+                  .caldav
+                  ? [
+                      "calendar.read",
+                    ]
+                  : []),
+              ],
+              accessTokenEncrypted:
+                encryptedCredential,
+              refreshTokenEncrypted:
+                null,
+              tokenExpiresAt: null,
+              configuration:
+                normalisedConfiguration as Prisma.InputJsonValue,
+              lastErrorAt: null,
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              disconnectedAt: null,
+            },
+            update: {
+              userId:
+                workspace.membership
+                  .userId,
+              status:
+                CrmIntegrationStatus.CONNECTED,
+              accountEmail: email,
+              externalAccountId:
+                email,
+              scopes: [
+                "mail.read",
+                ...(normalisedConfiguration
+                  .caldav
+                  ? [
+                      "calendar.read",
+                    ]
+                  : []),
+              ],
+              accessTokenEncrypted:
+                encryptedCredential,
+              refreshTokenEncrypted:
+                null,
+              tokenExpiresAt: null,
+              configuration:
+                normalisedConfiguration as Prisma.InputJsonValue,
+              /*
+               * This is a window-based
+               * connector, so there are
+               * no Google cursor values
+               * to retain.
+               */
+              gmailHistoryId: null,
+              calendarSyncToken:
+                null,
+              lastErrorAt: null,
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              disconnectedAt: null,
+            },
+          },
+        );
+
+      await prisma.agencyAuditLog.create(
+        {
+          data: {
+            agencyId:
+              workspace.agency.id,
+            actorUserId:
+              workspace.membership
+                .userId,
+            actorAgencyMemberId:
+              workspace.membership.id,
+            effectiveUserId:
+              workspace.membership
+                .userId,
+            action:
+              "CRM_IMAP_CALDAV_CONNECTED",
+            entityType:
+              "CrmIntegrationConnection",
+            entityId: String(
+              connection.id,
+            ),
+            afterState: {
+              provider:
+                connection.provider,
+              status:
+                connection.status,
+              accountEmail: email,
+              type:
+                normalisedConfiguration.type,
+            },
+            changedFields: [
+              "crmIntegrationConnections",
+            ],
+            metadata: {
+              source:
+                "agencyContacts",
+              provider:
+                "IMAP_CALDAV",
+              accountEmail: email,
+              type:
+                normalisedConfiguration.type,
+            },
+            ...requestMeta(req),
+          },
+        },
+      );
+
+      return res.json({
+        ok: true,
+        connection:
+          publicImapCaldavConnection(
+            connection,
+          ),
+      });
+    } catch (error) {
+      return handleError(
+        res,
+        error,
+      );
+    }
+  },
+);
+
+router.post(
+  "/integrations/imap-caldav/sync",
+  async (
+    req: AgentRequest,
+    res,
+  ) => {
+    let connectionId:
+      | number
+      | null = null;
+
+    try {
+      const workspace =
+        await workspaceFor(req);
+
+      assertCanManageCrm(
+        workspace,
+      );
+
+      const connection =
+        await imapCaldavConnectionForWorkspace(
+          workspace,
+        );
+
+      if (
+        !connection ||
+        connection.status ===
+          CrmIntegrationStatus.DISCONNECTED
+      ) {
+        throw new ApiError(
+          "CRM_IMAP_CALDAV_NOT_CONNECTED",
+          "Connect an IMAP / CalDAV account before synchronizing",
+          409,
+        );
+      }
+
+      connectionId =
+        connection.id;
+
+      const configuration =
+        normaliseImapCaldavConfiguration(
+          connection.configuration,
+        );
+
+      if (!configuration) {
+        throw new ApiError(
+          "CRM_IMAP_CALDAV_CONFIGURATION_INVALID",
+          "Stored IMAP / CalDAV configuration is invalid",
+          500,
+        );
+      }
+
+      await validateImapCaldavNetworkTargets(
+        configuration,
+      );
+
+      const password =
+        decryptImapCaldavSecret(
+          connection.accessTokenEncrypted,
+        );
+
+      if (!password) {
+        throw new ApiError(
+          "CRM_IMAP_CALDAV_RECONNECT_REQUIRED",
+          "Reconnect the mail account before synchronizing",
+          401,
+        );
+      }
+
+      const requestedMail =
+        req.body?.mail !== false &&
+        req.body?.email !== false;
+
+      const requestedCalendar =
+        req.body?.calendar !== false &&
+        Boolean(
+          configuration.caldav,
+        );
+
+      if (
+        !requestedMail &&
+        !requestedCalendar
+      ) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          "Select Mail, Calendar, or both to synchronize",
+          400,
+        );
+      }
+
+      const result: any = {
+        mail: null,
+        calendar: null,
+      };
+
+      let liveConnection: any =
+        connection;
+
+      if (requestedMail) {
+        result.mail =
+          await imapMailSync(
+            workspace,
+            liveConnection,
+            password,
+            configuration,
+          );
+
+        const now = new Date();
+
+        liveConnection =
+          await prisma.crmIntegrationConnection.update(
+            {
+              where: {
+                id: connection.id,
+              },
+              data: {
+                lastEmailSyncAt:
+                  now,
+                lastSyncAt: now,
+                status:
+                  CrmIntegrationStatus.CONNECTED,
+                lastErrorAt: null,
+                lastErrorCode:
+                  null,
+                lastErrorMessage:
+                  null,
+              },
+            },
+          );
+      }
+
+      if (requestedCalendar) {
+        result.calendar =
+          await caldavCalendarSync(
+            workspace,
+            liveConnection,
+            password,
+            configuration,
+          );
+
+        const now = new Date();
+
+        liveConnection =
+          await prisma.crmIntegrationConnection.update(
+            {
+              where: {
+                id: connection.id,
+              },
+              data: {
+                lastCalendarSyncAt:
+                  now,
+                lastSyncAt: now,
+                status:
+                  CrmIntegrationStatus.CONNECTED,
+                lastErrorAt: null,
+                lastErrorCode:
+                  null,
+                lastErrorMessage:
+                  null,
+              },
+            },
+          );
+      }
+
+      console.info(
+        "CRM IMAP / CalDAV sync completed",
+        {
+          agencyId:
+            workspace.agency.id,
+          memberId:
+            workspace.membership.id,
+          mailImported:
+            result.mail?.imported ??
+            null,
+          mailSkipped:
+            result.mail?.skipped ??
+            null,
+          calendarImported:
+            result.calendar
+              ?.imported ?? null,
+          calendarSkipped:
+            result.calendar
+              ?.skipped ?? null,
+        },
+      );
+
+      await prisma.agencyAuditLog.create(
+        {
+          data: {
+            agencyId:
+              workspace.agency.id,
+            actorUserId:
+              workspace.membership
+                .userId,
+            actorAgencyMemberId:
+              workspace.membership.id,
+            effectiveUserId:
+              workspace.membership
+                .userId,
+            action:
+              "CRM_IMAP_CALDAV_SYNCED",
+            entityType:
+              "CrmIntegrationConnection",
+            entityId: String(
+              connection.id,
+            ),
+            changedFields: [
+              "crmInteractions",
+            ],
+            metadata: {
+              source:
+                "agencyContacts",
+              provider:
+                "IMAP_CALDAV",
+              mailSeen:
+                result.mail?.seen ??
+                null,
+              mailImported:
+                result.mail
+                  ?.imported ?? null,
+              mailSkipped:
+                result.mail
+                  ?.skipped ?? null,
+              mailboxes:
+                result.mail
+                  ?.mailboxes ?? null,
+              calendarImported:
+                result.calendar
+                  ?.imported ?? null,
+              calendarSkipped:
+                result.calendar
+                  ?.skipped ?? null,
+              calendars:
+                result.calendar
+                  ?.calendars ?? null,
+              calendarObjects:
+                result.calendar
+                  ?.objects ?? null,
+            },
+            ...requestMeta(req),
+          },
+        },
+      );
+
+      return res.json({
+        ok: true,
+        result,
+        connection:
+          publicImapCaldavConnection(
+            liveConnection,
+          ),
+      });
+    } catch (error) {
+      if (connectionId) {
+        await markImapCaldavConnectionError(
+          connectionId,
+          error,
+        );
+      }
+
+      return handleError(
+        res,
+        error,
+      );
+    }
+  },
+);
+
+router.post(
+  "/integrations/imap-caldav/disconnect",
+  async (
+    req: AgentRequest,
+    res,
+  ) => {
+    try {
+      const workspace =
+        await workspaceFor(req);
+
+      assertCanManageCrm(
+        workspace,
+      );
+
+      const connection =
+        await imapCaldavConnectionForWorkspace(
+          workspace,
+        );
+
+      if (!connection) {
+        return res.json({
+          ok: true,
+          connection:
+            publicImapCaldavConnection(
+              null,
+            ),
+        });
+      }
+
+      const updated =
+        await prisma.crmIntegrationConnection.update(
+          {
+            where: {
+              id: connection.id,
+            },
+            data: {
+              status:
+                CrmIntegrationStatus.DISCONNECTED,
+              /*
+               * Destroy the usable
+               * credential while
+               * retaining the row for
+               * connection history.
+               */
+              accessTokenEncrypted:
+                encryptImapCaldavSecret(
+                  "",
+                ),
+              refreshTokenEncrypted:
+                null,
+              tokenExpiresAt: null,
+              gmailHistoryId: null,
+              calendarSyncToken:
+                null,
+              disconnectedAt:
+                new Date(),
+            },
+          },
+        );
+
+      await prisma.agencyAuditLog.create(
+        {
+          data: {
+            agencyId:
+              workspace.agency.id,
+            actorUserId:
+              workspace.membership
+                .userId,
+            actorAgencyMemberId:
+              workspace.membership.id,
+            effectiveUserId:
+              workspace.membership
+                .userId,
+            action:
+              "CRM_IMAP_CALDAV_DISCONNECTED",
+            entityType:
+              "CrmIntegrationConnection",
+            entityId: String(
+              connection.id,
+            ),
+            changedFields: [
+              "crmIntegrationConnections",
+            ],
+            metadata: {
+              source:
+                "agencyContacts",
+              provider:
+                "IMAP_CALDAV",
+              accountEmail:
+                connection.accountEmail,
+              type:
+                normaliseImapCaldavConfiguration(
+                  connection.configuration,
+                )?.type || null,
+            },
+            ...requestMeta(req),
+          },
+        },
+      );
+
+      return res.json({
+        ok: true,
+        connection:
+          publicImapCaldavConnection(
+            updated,
+          ),
+      });
+    } catch (error) {
+      return handleError(
+        res,
+        error,
+      );
+    }
+  },
+);
+
 
 router.get("/:id", async (req: AgentRequest, res) => {
   try {
