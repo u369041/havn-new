@@ -4670,11 +4670,42 @@ async function testImapConnection(args: {
     logger: false,
   });
 
+  // ImapFlow emits EventEmitter "error" events as well as rejecting connect()/
+  // command promises. Always attach a listener so bad credentials, disconnects or
+  // socket timeouts are returned through the request instead of becoming an
+  // unhandled process-level error.
+  client.on("error", (error) => {
+    console.warn("CRM IMAP connection error", {
+      host: args.configuration.imap.host,
+      code: nullableString((error as any)?.code, 100),
+      message: nullableString((error as any)?.message, 500),
+    });
+  });
+
   try {
     await client.connect();
   } finally {
     if (client.usable) {
-      await client.logout();
+      try {
+        await client.logout();
+      } catch (logoutError) {
+        console.warn("CRM IMAP logout failed after connection test", {
+          host: args.configuration.imap.host,
+          code: nullableString((logoutError as any)?.code, 100),
+          message: nullableString((logoutError as any)?.message, 500),
+        });
+        try {
+          client.close();
+        } catch {
+          // Best-effort cleanup only.
+        }
+      }
+    } else {
+      try {
+        client.close();
+      } catch {
+        // Best-effort cleanup only.
+      }
     }
   }
 }
@@ -4972,6 +5003,15 @@ async function imapMailSync(
     logger: false,
   });
 
+  client.on("error", (error) => {
+    console.warn("CRM IMAP sync connection error", {
+      connectionId: connection.id,
+      host: configuration.imap.host,
+      code: nullableString((error as any)?.code, 100),
+      message: nullableString((error as any)?.message, 500),
+    });
+  });
+
   const since = new Date(
     Date.now() -
       IMAP_CALDAV_MAIL_LOOKBACK_DAYS *
@@ -5153,7 +5193,27 @@ async function imapMailSync(
     }
   } finally {
     if (client.usable) {
-      await client.logout();
+      try {
+        await client.logout();
+      } catch (logoutError) {
+        console.warn("CRM IMAP logout failed after sync", {
+          connectionId: connection.id,
+          host: configuration.imap.host,
+          code: nullableString((logoutError as any)?.code, 100),
+          message: nullableString((logoutError as any)?.message, 500),
+        });
+        try {
+          client.close();
+        } catch {
+          // Best-effort cleanup only.
+        }
+      }
+    } else {
+      try {
+        client.close();
+      } catch {
+        // Best-effort cleanup only.
+      }
     }
   }
 
