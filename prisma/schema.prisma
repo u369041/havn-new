@@ -470,8 +470,9 @@ model CrmIntegrationConnection {
   memberId Int
   userId   Int
 
-  provider CrmIntegrationProvider
-  status   CrmIntegrationStatus @default(CONNECTED)
+  provider      CrmIntegrationProvider
+  connectionKey String
+  status        CrmIntegrationStatus @default(CONNECTED)
 
   accountEmail      String?
   externalAccountId String?
@@ -500,7 +501,7 @@ model CrmIntegrationConnection {
   member AgencyMember @relation("CrmIntegrationConnectionMember", fields: [memberId], references: [id], onDelete: Cascade)
   user   User         @relation("CrmIntegrationConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([agencyId, memberId, provider])
+  @@unique([agencyId, memberId, provider, connectionKey])
   @@index([agencyId])
   @@index([memberId])
   @@index([userId])
