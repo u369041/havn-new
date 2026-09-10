@@ -4036,12 +4036,13 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
       });
     }
 
-    console.info("Microsoft CRM sync diagnostic", {
+    console.info("CRM Microsoft sync completed", {
       agencyId: workspace.agency.id,
       memberId: workspace.membership.id,
-      accountEmail: liveConnection.accountEmail,
-      mail: result.mail,
-      calendar: result.calendar,
+      mailImported: result.mail?.imported ?? null,
+      mailSkipped: result.mail?.skipped ?? null,
+      calendarImported: result.calendar?.imported ?? null,
+      calendarSkipped: result.calendar?.skipped ?? null,
     });
 
     await prisma.agencyAuditLog.create({
