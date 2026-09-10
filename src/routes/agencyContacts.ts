@@ -5659,6 +5659,74 @@ async function upsertCaldavCalendarInteraction(
   };
 }
 
+function caldavEventIsInsideWindow(
+  event: any,
+  windowStartMs: number,
+  windowEndMs: number,
+): boolean {
+  const start =
+    event?.start instanceof Date
+      ? event.start
+      : event?.start
+        ? new Date(event.start)
+        : null;
+
+  if (!start || Number.isNaN(start.getTime())) {
+    return false;
+  }
+
+  const end =
+    event?.end instanceof Date
+      ? event.end
+      : event?.end
+        ? new Date(event.end)
+        : null;
+
+  const startMs = start.getTime();
+  const endMs =
+    end && !Number.isNaN(end.getTime())
+      ? end.getTime()
+      : startMs;
+
+  /*
+   * Treat an event as relevant when its interval intersects the CRM
+   * calendar window. This is deliberately checked locally even when the
+   * CalDAV server was asked to filter by time range. It protects HAVN
+   * from provider quirks and prevents a fallback fetch from importing an
+   * entire historical calendar.
+   */
+  return endMs >= windowStartMs && startMs <= windowEndMs;
+}
+
+function caldavObjectUrlFilter(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname || "";
+
+    /*
+     * tsdav defaults to URLs containing ".ics". CalDAV does not require
+     * that filename convention, so accept any non-collection resource and
+     * let the VEVENT parser decide whether it contains calendar data.
+     */
+    return Boolean(path) && !path.endsWith("/");
+  } catch {
+    return Boolean(url) && !String(url).endsWith("/");
+  }
+}
+
+function caldavParsedEventsForObjects(
+  calendarObjects: any[],
+) {
+  return calendarObjects.flatMap((object) =>
+    parseCalendarEventsFromIcal(
+      String(object?.data || ""),
+    ).map((event) => ({
+      event,
+      objectUrl: String(object?.url || ""),
+    })),
+  );
+}
+
 async function caldavCalendarSync(
   workspace: AgencyWorkspace,
   connection: any,
@@ -5695,87 +5763,200 @@ async function caldavCalendarSync(
   const calendars =
     await client.fetchCalendars();
 
+  const windowStartMs =
+    Date.now() -
+    IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS *
+      86400000;
+
+  const windowEndMs =
+    Date.now() +
+    IMAP_CALDAV_CALENDAR_FORWARD_DAYS *
+      86400000;
+
   const start =
-    new Date(
-      Date.now() -
-        IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS *
-          86400000,
-    ).toISOString();
+    new Date(windowStartMs).toISOString();
 
   const end =
-    new Date(
-      Date.now() +
-        IMAP_CALDAV_CALENDAR_FORWARD_DAYS *
-          86400000,
-    ).toISOString();
+    new Date(windowEndMs).toISOString();
 
   let imported = 0;
   let skipped = 0;
   let objects = 0;
   let parsedEvents = 0;
+  let inWindowParsedEvents = 0;
+  let outOfWindowEvents = 0;
+  let fallbackCalendars = 0;
+  let fallbackObjects = 0;
   const skipReasons: Record<string, number> = {};
   const skippedEventDiagnostics: Array<Record<string, unknown>> = [];
+  const calendarDiagnostics: Array<Record<string, unknown>> = [];
 
   for (const calendar of calendars) {
-    const calendarObjects =
+    const calendarUrl =
+      String((calendar as any)?.url || "");
+
+    const calendarName =
+      nullableString(
+        (calendar as any)?.displayName ||
+          (calendar as any)?.description,
+        250,
+      );
+
+    /*
+     * Apple/iCloud compatibility strategy:
+     *
+     * 1. Ask the server for the CRM window and request recurrence expansion.
+     * 2. Avoid tsdav's default ".ics" URL restriction because CalDAV does
+     *    not require event resources to use that suffix.
+     * 3. Avoid the extra calendar-multiget path. Some CalDAV servers behave
+     *    more consistently when calendar-data is returned directly from the
+     *    calendar-query REPORT.
+     * 4. If the window query yields no actually in-window VEVENTs, fall back
+     *    once to a full collection fetch for that calendar and enforce the
+     *    CRM date window locally before any database write.
+     */
+    let calendarObjects =
       await client.fetchCalendarObjects({
         calendar,
         timeRange: {
           start,
           end,
         },
+        expand: true,
+        useMultiGet: false,
+        urlFilter: caldavObjectUrlFilter,
       });
 
-    objects +=
-      calendarObjects.length;
+    let parsedForCalendar =
+      caldavParsedEventsForObjects(
+        calendarObjects as any[],
+      );
 
-    for (
-      const object of calendarObjects
-    ) {
-      const events =
-        parseCalendarEventsFromIcal(
-          String(
-            object?.data || "",
+    let inWindowForCalendar =
+      parsedForCalendar.filter(({ event }) =>
+        caldavEventIsInsideWindow(
+          event,
+          windowStartMs,
+          windowEndMs,
+        ),
+      );
+
+    const windowObjectCount =
+      calendarObjects.length;
+    const windowParsedCount =
+      parsedForCalendar.length;
+    const windowInRangeCount =
+      inWindowForCalendar.length;
+
+    let usedFallback = false;
+
+    if (windowInRangeCount === 0) {
+      const allCalendarObjects =
+        await client.fetchCalendarObjects({
+          calendar,
+          useMultiGet: false,
+          urlFilter: caldavObjectUrlFilter,
+        });
+
+      const allParsed =
+        caldavParsedEventsForObjects(
+          allCalendarObjects as any[],
+        );
+
+      const allInWindow =
+        allParsed.filter(({ event }) =>
+          caldavEventIsInsideWindow(
+            event,
+            windowStartMs,
+            windowEndMs,
           ),
         );
 
-      parsedEvents += events.length;
+      /*
+       * Use the fallback result only when it improves the usable event set.
+       * Either way, no out-of-window event is allowed through to upsert.
+       */
+      if (allInWindow.length > 0) {
+        calendarObjects = allCalendarObjects;
+        parsedForCalendar = allParsed;
+        inWindowForCalendar = allInWindow;
+        usedFallback = true;
+        fallbackCalendars += 1;
+        fallbackObjects += allCalendarObjects.length;
+      }
+    }
 
-      for (const event of events) {
-        const result =
-          await upsertCaldavCalendarInteraction(
-            {
-              workspace,
-              connection,
-              accountEmail:
-                connection.accountEmail,
-              calendarUrl:
-                String(
-                  (calendar as any)
-                    ?.url || "",
-                ),
-              objectUrl:
-                String(
-                  (object as any)
-                    ?.url || "",
-                ),
-              event,
-            },
-          );
+    objects += calendarObjects.length;
+    parsedEvents += parsedForCalendar.length;
+    inWindowParsedEvents += inWindowForCalendar.length;
+    outOfWindowEvents += Math.max(
+      0,
+      parsedForCalendar.length -
+        inWindowForCalendar.length,
+    );
 
-        if (result.imported) {
-          imported += 1;
-        } else {
-          skipped += 1;
-          skipReasons[result.reason] =
-            (skipReasons[result.reason] || 0) + 1;
+    if (calendarDiagnostics.length < 25) {
+      calendarDiagnostics.push({
+        calendarName,
+        calendarUrlHash:
+          calendarUrl
+            ? crypto
+                .createHash("sha256")
+                .update(calendarUrl)
+                .digest("hex")
+                .slice(0, 12)
+            : null,
+        windowObjects: windowObjectCount,
+        windowParsedEvents: windowParsedCount,
+        windowInRangeEvents: windowInRangeCount,
+        usedFallback,
+        selectedObjects: calendarObjects.length,
+        selectedParsedEvents: parsedForCalendar.length,
+        selectedInRangeEvents: inWindowForCalendar.length,
+      });
+    }
 
-          if (skippedEventDiagnostics.length < 20) {
-            skippedEventDiagnostics.push({
-              reason: result.reason,
-              ...result.diagnostics,
-            });
-          }
+    for (const { event, objectUrl } of parsedForCalendar) {
+      if (
+        !caldavEventIsInsideWindow(
+          event,
+          windowStartMs,
+          windowEndMs,
+        )
+      ) {
+        /*
+         * Provider/server returned this VEVENT outside HAVN's requested
+         * window. Count it separately; do not feed it into contact matching
+         * or persistence and do not expose it as a normal CRM skip reason.
+         */
+        continue;
+      }
+
+      const result =
+        await upsertCaldavCalendarInteraction(
+          {
+            workspace,
+            connection,
+            accountEmail:
+              connection.accountEmail,
+            calendarUrl,
+            objectUrl,
+            event,
+          },
+        );
+
+      if (result.imported) {
+        imported += 1;
+      } else {
+        skipped += 1;
+        skipReasons[result.reason] =
+          (skipReasons[result.reason] || 0) + 1;
+
+        if (skippedEventDiagnostics.length < 20) {
+          skippedEventDiagnostics.push({
+            reason: result.reason,
+            ...result.diagnostics,
+          });
         }
       }
     }
@@ -5788,9 +5969,14 @@ async function caldavCalendarSync(
       calendars.length,
     objects,
     parsedEvents,
+    inWindowParsedEvents,
+    outOfWindowEvents,
+    fallbackCalendars,
+    fallbackObjects,
     skipReasons,
     skippedEventDiagnostics,
-    mode: "window",
+    calendarDiagnostics,
+    mode: "window_with_safe_fallback",
     lookbackDays:
       IMAP_CALDAV_CALENDAR_LOOKBACK_DAYS,
     forwardDays:
@@ -6333,12 +6519,27 @@ router.post(
           calendarParsedEvents:
             result.calendar
               ?.parsedEvents ?? null,
+          calendarInWindowParsedEvents:
+            result.calendar
+              ?.inWindowParsedEvents ?? null,
+          calendarOutOfWindowEvents:
+            result.calendar
+              ?.outOfWindowEvents ?? null,
+          calendarFallbackCalendars:
+            result.calendar
+              ?.fallbackCalendars ?? null,
+          calendarFallbackObjects:
+            result.calendar
+              ?.fallbackObjects ?? null,
           calendarSkipReasons:
             result.calendar
               ?.skipReasons ?? null,
           calendarSkippedEvents:
             result.calendar
               ?.skippedEventDiagnostics ?? null,
+          calendarDiagnostics:
+            result.calendar
+              ?.calendarDiagnostics ?? null,
         },
       );
 
@@ -6394,6 +6595,18 @@ router.post(
               calendarObjects:
                 result.calendar
                   ?.objects ?? null,
+              calendarParsedEvents:
+                result.calendar
+                  ?.parsedEvents ?? null,
+              calendarInWindowParsedEvents:
+                result.calendar
+                  ?.inWindowParsedEvents ?? null,
+              calendarOutOfWindowEvents:
+                result.calendar
+                  ?.outOfWindowEvents ?? null,
+              calendarFallbackCalendars:
+                result.calendar
+                  ?.fallbackCalendars ?? null,
             },
             ...requestMeta(req),
           },
