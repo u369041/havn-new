@@ -5849,8 +5849,41 @@ async function caldavCalendarSync(
       inWindowForCalendar.length;
 
     let usedFallback = false;
+    let fallbackObjectCount = 0;
+    let fallbackParsedCount = 0;
+    let fallbackInRangeCount = 0;
 
-    if (windowInRangeCount === 0) {
+    /*
+     * Apple can return a technically non-empty time-range result that is
+     * still incomplete. A recurring personal event is enough to make a
+     * simple "zero results" fallback check look healthy, while a newer
+     * event in the same collection can be absent.
+     *
+     * Treat the window response as usable only when it contains at least
+     * one in-window VEVENT with an external participant. When it does not,
+     * fetch the collection once without a server-side time filter, merge
+     * the two object sets, and enforce HAVN's date window locally. This keeps
+     * historical events out of CRM while still recovering events omitted by
+     * Apple's REPORT response.
+     */
+    const windowHasExternalParticipant =
+      inWindowForCalendar.some(({ event }) => {
+        const accountEmail =
+          String(connection.accountEmail || "")
+            .trim()
+            .toLowerCase();
+        return [
+          ...(Array.isArray(event?.attendeeEmails)
+            ? event.attendeeEmails
+            : []),
+          event?.organizerEmail,
+        ]
+          .filter(Boolean)
+          .map((email) => String(email).trim().toLowerCase())
+          .some((email) => email && email !== accountEmail);
+      });
+
+    if (!windowHasExternalParticipant) {
       const allCalendarObjects =
         await client.fetchCalendarObjects({
           calendar,
@@ -5858,13 +5891,42 @@ async function caldavCalendarSync(
           urlFilter: caldavObjectUrlFilter,
         });
 
-      const allParsed =
-        caldavParsedEventsForObjects(
-          allCalendarObjects as any[],
-        );
+      fallbackObjectCount = allCalendarObjects.length;
+      fallbackObjects += fallbackObjectCount;
 
-      const allInWindow =
-        allParsed.filter(({ event }) =>
+      /*
+       * Merge by URL when available, otherwise by a short content hash.
+       * The window query can contain expanded data while the collection
+       * fetch contains the underlying resource, so do not discard either
+       * representation unless it is genuinely the same object payload.
+       */
+      const merged = new Map<string, any>();
+      const addObject = (object: any) => {
+        const objectUrl = String(object?.url || "");
+        const data = String(object?.data || "");
+        const key = objectUrl
+          ? `url:${objectUrl}`
+          : `data:${crypto
+              .createHash("sha256")
+              .update(data)
+              .digest("hex")}`;
+
+        const existing = merged.get(key);
+        if (!existing || data.length > String(existing?.data || "").length) {
+          merged.set(key, object);
+        }
+      };
+
+      for (const object of calendarObjects) addObject(object);
+      for (const object of allCalendarObjects) addObject(object);
+
+      const mergedObjects = [...merged.values()];
+      const mergedParsed =
+        caldavParsedEventsForObjects(
+          mergedObjects as any[],
+        );
+      const mergedInWindow =
+        mergedParsed.filter(({ event }) =>
           caldavEventIsInsideWindow(
             event,
             windowStartMs,
@@ -5872,18 +5934,14 @@ async function caldavCalendarSync(
           ),
         );
 
-      /*
-       * Use the fallback result only when it improves the usable event set.
-       * Either way, no out-of-window event is allowed through to upsert.
-       */
-      if (allInWindow.length > 0) {
-        calendarObjects = allCalendarObjects;
-        parsedForCalendar = allParsed;
-        inWindowForCalendar = allInWindow;
-        usedFallback = true;
-        fallbackCalendars += 1;
-        fallbackObjects += allCalendarObjects.length;
-      }
+      fallbackParsedCount = mergedParsed.length;
+      fallbackInRangeCount = mergedInWindow.length;
+
+      calendarObjects = mergedObjects;
+      parsedForCalendar = mergedParsed;
+      inWindowForCalendar = mergedInWindow;
+      usedFallback = true;
+      fallbackCalendars += 1;
     }
 
     objects += calendarObjects.length;
@@ -5909,7 +5967,11 @@ async function caldavCalendarSync(
         windowObjects: windowObjectCount,
         windowParsedEvents: windowParsedCount,
         windowInRangeEvents: windowInRangeCount,
+        windowHasExternalParticipant,
         usedFallback,
+        fallbackObjects: fallbackObjectCount,
+        fallbackParsedEvents: fallbackParsedCount,
+        fallbackInRangeEvents: fallbackInRangeCount,
         selectedObjects: calendarObjects.length,
         selectedParsedEvents: parsedForCalendar.length,
         selectedInRangeEvents: inWindowForCalendar.length,
