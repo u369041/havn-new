@@ -4887,17 +4887,39 @@ async function imapMailSync(
           const path =
             String(
               mailbox?.path || "",
-            ).toLowerCase();
+            )
+              .trim()
+              .toLowerCase();
 
           const specialUse =
             String(
               mailbox?.specialUse || "",
-            ).toLowerCase();
+            )
+              .trim()
+              .toLowerCase();
 
-          return (
-            path === "inbox" ||
-            specialUse === "\\sent"
-          );
+          const pathParts =
+            path
+              .split(/[\/\\]/)
+              .filter(Boolean);
+
+          const folderName =
+            pathParts[
+              pathParts.length - 1
+            ] || path;
+
+          const isInbox =
+            path === "inbox";
+
+          const isSent =
+            specialUse === "\\sent" ||
+            folderName === "sent" ||
+            folderName ===
+              "sent messages" ||
+            folderName ===
+              "sent items";
+
+          return isInbox || isSent;
         },
       );
 
