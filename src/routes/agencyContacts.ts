@@ -5121,23 +5121,32 @@ function icalPropertyValue(
     .trim();
 }
 
-function icalPropertyValues(
+function icalPropertyLines(
   lines: string[],
   name: string,
 ): string[] {
   const prefix =
     name.toUpperCase();
 
-  return lines
-    .filter((line) => {
-      const left =
-        String(line)
-          .split(":", 1)[0]
-          ?.split(";", 1)[0]
-          ?.toUpperCase();
+  return lines.filter((line) => {
+    const left =
+      String(line)
+        .split(":", 1)[0]
+        ?.split(";", 1)[0]
+        ?.toUpperCase();
 
-      return left === prefix;
-    })
+    return left === prefix;
+  });
+}
+
+function icalPropertyValues(
+  lines: string[],
+  name: string,
+): string[] {
+  return icalPropertyLines(
+    lines,
+    name,
+  )
     .map((line) => {
       const colon =
         line.indexOf(":");
@@ -5235,6 +5244,35 @@ function icalEmail(
   return extractEmails(cleaned)[0] || null;
 }
 
+function icalEmailFromPropertyLine(
+  line: string | null,
+): string | null {
+  if (!line) return null;
+
+  /*
+   * Apple CalDAV can place the participant
+   * email in an EMAIL= parameter while the
+   * property value itself is a urn:uuid.
+   * Search the complete property line first,
+   * then fall back to the normal property value.
+   */
+  const lineEmail =
+    extractEmails(String(line))[0] || null;
+
+  if (lineEmail) {
+    return lineEmail;
+  }
+
+  const colon =
+    String(line).indexOf(":");
+
+  return colon >= 0
+    ? icalEmail(
+        String(line).slice(colon + 1),
+      )
+    : null;
+}
+
 function parseCalendarEventsFromIcal(
   data: string,
 ) {
@@ -5262,11 +5300,13 @@ function parseCalendarEventsFromIcal(
     ) {
       if (current) {
         const attendeeEmails =
-          icalPropertyValues(
+          icalPropertyLines(
             current,
             "ATTENDEE",
           )
-            .map(icalEmail)
+            .map(
+              icalEmailFromPropertyLine,
+            )
             .filter(Boolean) as string[];
 
         events.push({
@@ -5314,11 +5354,11 @@ function parseCalendarEventsFromIcal(
               ),
             ),
           organizerEmail:
-            icalEmail(
-              icalPropertyValue(
+            icalEmailFromPropertyLine(
+              icalPropertyLines(
                 current,
                 "ORGANIZER",
-              ),
+              )[0] || null,
             ),
           attendeeEmails,
         });
