@@ -1093,8 +1093,30 @@ router.get("/opportunities", async (req: AgentRequest, res) => {
     const stage = parseEnumValue<CrmOpportunityStage>(req.query.stage, CRM_OPPORTUNITY_STAGES, "stage");
     const ownerMemberId = req.query.ownerMemberId == null || req.query.ownerMemberId === "" ? null : asPositiveInt(req.query.ownerMemberId);
     const contactId = req.query.contactId == null || req.query.contactId === "" ? null : asPositiveInt(req.query.contactId);
+    const q = nullableString(req.query.q, 200);
     if (req.query.ownerMemberId != null && req.query.ownerMemberId !== "" && !ownerMemberId) throw new ApiError("VALIDATION_ERROR", "ownerMemberId must be a positive integer", 400);
     if (req.query.contactId != null && req.query.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer", 400);
+    const searchTokens = q
+      ? q.split(/\s+/).map((token) => token.trim()).filter(Boolean).slice(0, 8)
+      : [];
+    const opportunitySearchFields = (term: string) => [
+      { title: { contains: term, mode: "insensitive" as const } },
+      { notes: { contains: term, mode: "insensitive" as const } },
+      { contact: { is: { OR: [
+        { firstName: { contains: term, mode: "insensitive" as const } },
+        { lastName: { contains: term, mode: "insensitive" as const } },
+        { primaryEmail: { contains: term, mode: "insensitive" as const } },
+        { companyName: { contains: term, mode: "insensitive" as const } },
+      ] } } },
+      { company: { is: { name: { contains: term, mode: "insensitive" as const } } } },
+      { inventoryProperty: { is: { OR: [
+        { address1: { contains: term, mode: "insensitive" as const } },
+        { address2: { contains: term, mode: "insensitive" as const } },
+        { city: { contains: term, mode: "insensitive" as const } },
+        { county: { contains: term, mode: "insensitive" as const } },
+        { eircode: { contains: term, mode: "insensitive" as const } },
+      ] } } },
+    ];
     const items = await prisma.crmOpportunity.findMany({
       where: {
         agencyId: workspace.agency.id,
@@ -1102,10 +1124,11 @@ router.get("/opportunities", async (req: AgentRequest, res) => {
         ...(stage ? { stage } : {}),
         ...(ownerMemberId ? { ownerMemberId } : {}),
         ...(contactId ? { contactId } : {}),
+        ...(q ? { AND: searchTokens.map((token) => ({ OR: opportunitySearchFields(token) })) } : {}),
       },
       include: opportunityInclude,
       orderBy: [{ isArchived: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
-      take: 1000,
+      take: q ? 50 : 1000,
     });
     return res.json({ ok: true, items: items.map(opportunityForResponse) });
   } catch (error) {
