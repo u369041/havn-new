@@ -780,6 +780,563 @@ async function assertNoDuplicateActiveEmail(
   }
 }
 
+
+/* CRM Import Centre */
+type CrmImportMapping = Record<string, string | null | undefined>;
+type CrmImportRow = Record<string, unknown>;
+type CrmImportStatus = "ready" | "matched" | "possible_duplicate" | "needs_attention" | "ignored";
+
+type CrmImportPreviewRow = {
+  rowNumber: number;
+  status: CrmImportStatus;
+  messages: string[];
+  company?: any;
+  contact?: any;
+  opportunity?: any;
+  matches?: {
+    companyId?: number | null;
+    contactId?: number | null;
+    opportunityId?: number | null;
+  };
+};
+
+const CRM_IMPORT_MAX_ROWS = 5000;
+const CRM_IMPORT_MAPPING_KEYS = new Set([
+  "company.name", "company.email", "company.phoneNumber", "company.websiteUrl",
+  "company.addressLine1", "company.addressLine2", "company.townCity", "company.county",
+  "company.eircode", "company.notes",
+  "contact.fullName", "contact.firstName", "contact.lastName", "contact.companyName", "contact.primaryEmail",
+  "contact.phoneNumber", "contact.roles", "contact.notes",
+  "opportunity.title", "opportunity.type", "opportunity.stage", "opportunity.value",
+  "opportunity.probability", "opportunity.expectedCloseAt", "opportunity.owner", "opportunity.notes",
+]);
+
+function importText(value: unknown, maxLength = 10000): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function importCell(row: CrmImportRow, mapping: CrmImportMapping, key: string): string | null {
+  const column = importText(mapping[key], 500);
+  if (!column) return null;
+  return importText(row[column]);
+}
+
+function normalizeImportText(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, " ");
+}
+
+function normalizeImportPhone(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const plus = raw.startsWith("+") ? "+" : "";
+  const digits = raw.replace(/\D/g, "");
+  return plus + digits;
+}
+
+function parseImportedRoles(value: string | null): ProfessionalContactRole[] {
+  if (!value) return [];
+  const aliases: Record<string, string> = {
+    SELLER: "VENDOR", OWNER: "VENDOR", VENDOR: "VENDOR",
+    BUYER: "BUYER", PURCHASER: "BUYER",
+    LANDLORD: "LANDLORD",
+    TENANT: "TENANT", RENTER: "TENANT",
+    SOLICITOR: "SOLICITOR", LAWYER: "SOLICITOR",
+    BROKER: "BROKER", MORTGAGE_BROKER: "BROKER", "MORTGAGE BROKER": "BROKER",
+    OTHER: "OTHER",
+  };
+  const raw = value.split(/[;,|/]+/).map((part) => part.trim()).filter(Boolean);
+  const roles = raw.map((role) => aliases[role.toUpperCase()] || role.toUpperCase());
+  const unique = [...new Set(roles)];
+  if (unique.some((role) => !PROFESSIONAL_CONTACT_ROLES.has(role))) {
+    throw new ApiError("CRM_IMPORT_ROLE_INVALID", `Unknown contact role: ${unique.find((role) => !PROFESSIONAL_CONTACT_ROLES.has(role))}`, 400);
+  }
+  return unique as ProfessionalContactRole[];
+}
+
+function parseImportedOpportunityType(value: string | null): CrmOpportunityType | null {
+  if (!value) return null;
+  const key = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  const aliases: Record<string, string> = {
+    VENDOR: "VENDOR_INSTRUCTION", SELLER: "VENDOR_INSTRUCTION", SALE: "VENDOR_INSTRUCTION",
+    BUYER: "BUYER_SEARCH", PURCHASER: "BUYER_SEARCH",
+    LANDLORD: "LANDLORD_INSTRUCTION", LETTING: "LANDLORD_INSTRUCTION",
+    TENANT: "TENANT_SEARCH", RENTER: "TENANT_SEARCH",
+  };
+  const parsed = aliases[key] || key;
+  if (!CRM_OPPORTUNITY_TYPES.has(parsed)) throw new ApiError("CRM_IMPORT_TYPE_INVALID", `Unknown opportunity type: ${value}`, 400);
+  return parsed as CrmOpportunityType;
+}
+
+function parseImportedOpportunityStage(value: string | null): CrmOpportunityStage {
+  if (!value) return CrmOpportunityStage.LEAD;
+  const key = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  const aliases: Record<string, string> = {
+    NEW: "LEAD", PROSPECT: "LEAD", VALUATION: "APPOINTMENT", APPRAISAL: "APPOINTMENT",
+    INSTRUCTED: "INSTRUCTION", LISTED: "ACTIVE", SALE_AGREED: "AGREED", SOLD: "WON",
+    CLOSED_WON: "WON", CLOSED_LOST: "LOST",
+  };
+  const parsed = aliases[key] || key;
+  if (!CRM_OPPORTUNITY_STAGES.has(parsed)) throw new ApiError("CRM_IMPORT_STAGE_INVALID", `Unknown opportunity stage: ${value}`, 400);
+  return parsed as CrmOpportunityStage;
+}
+
+function parseImportedMoneyToCents(value: string | null): number | null {
+  if (!value) return null;
+  const cleaned = value.replace(/[^0-9.,-]/g, "").replace(/,/g, "");
+  if (!cleaned) return null;
+  const amount = Number(cleaned);
+  if (!Number.isFinite(amount) || amount < 0) throw new ApiError("CRM_IMPORT_VALUE_INVALID", `Invalid opportunity value: ${value}`, 400);
+  const cents = Math.round(amount * 100);
+  if (!Number.isSafeInteger(cents)) throw new ApiError("CRM_IMPORT_VALUE_INVALID", `Opportunity value is too large: ${value}`, 400);
+  return cents;
+}
+
+function parseImportedProbability(value: string | null, stage: CrmOpportunityStage): number {
+  if (!value) return stage === CrmOpportunityStage.WON ? 100 : stage === CrmOpportunityStage.LOST ? 0 : 10;
+  const parsed = Number(value.replace(/%/g, "").trim());
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) throw new ApiError("CRM_IMPORT_PROBABILITY_INVALID", `Invalid probability: ${value}`, 400);
+  return parsed;
+}
+
+function parseImportedDate(value: string | null): Date | null {
+  if (!value) return null;
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+  const m = value.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) {
+    const date = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  throw new ApiError("CRM_IMPORT_DATE_INVALID", `Invalid date: ${value}`, 400);
+}
+
+function validateImportMapping(mapping: unknown): CrmImportMapping {
+  if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) throw new ApiError("VALIDATION_ERROR", "mapping must be an object", 400);
+  const result: CrmImportMapping = {};
+  for (const [key, value] of Object.entries(mapping as Record<string, unknown>)) {
+    if (!CRM_IMPORT_MAPPING_KEYS.has(key)) continue;
+    result[key] = importText(value, 500);
+  }
+  if (!Object.values(result).some(Boolean)) throw new ApiError("CRM_IMPORT_MAPPING_EMPTY", "Map at least one spreadsheet column before previewing the import", 400);
+  return result;
+}
+
+function validateImportRows(rows: unknown): CrmImportRow[] {
+  if (!Array.isArray(rows)) throw new ApiError("VALIDATION_ERROR", "rows must be an array", 400);
+  if (rows.length < 1) throw new ApiError("CRM_IMPORT_EMPTY", "The import file does not contain any data rows", 400);
+  if (rows.length > CRM_IMPORT_MAX_ROWS) throw new ApiError("CRM_IMPORT_TOO_LARGE", `A single CRM import is limited to ${CRM_IMPORT_MAX_ROWS} rows`, 413);
+  return rows.map((row, index) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw new ApiError("CRM_IMPORT_ROW_INVALID", `Row ${index + 2} is invalid`, 400);
+    return row as CrmImportRow;
+  });
+}
+
+async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[], mapping: CrmImportMapping) {
+  const [companies, contacts, opportunities, members] = await Promise.all([
+    prisma.crmCompany.findMany({ where: { agencyId: workspace.agency.id, isArchived: false } }),
+    prisma.professionalContact.findMany({ where: { agencyId: workspace.agency.id, isArchived: false }, include: { company: { select: { id: true, name: true } } } }),
+    prisma.crmOpportunity.findMany({ where: { agencyId: workspace.agency.id, isArchived: false }, select: { id: true, title: true, contactId: true, companyId: true } }),
+    prisma.agencyMember.findMany({ where: { agencyId: workspace.agency.id, status: "ACTIVE" }, select: { id: true, user: { select: { name: true, email: true } } } }),
+  ]);
+
+  const existingCompanyByName = new Map(companies.map((company) => [normalizeImportText(company.name), company]));
+  const existingContactByEmail = new Map(contacts.filter((contact) => contact.primaryEmail).map((contact) => [normalizeImportText(contact.primaryEmail), contact]));
+  const existingContactsByPhone = new Map<string, typeof contacts>();
+  for (const contact of contacts) {
+    const phone = normalizeImportPhone(contact.phoneNumber);
+    if (!phone) continue;
+    existingContactsByPhone.set(phone, [...(existingContactsByPhone.get(phone) || []), contact]);
+  }
+  const memberByIdentity = new Map<string, number>();
+  for (const member of members) {
+    const values = [member.user?.email, member.user?.name].filter(Boolean) as string[];
+    for (const value of values) memberByIdentity.set(normalizeImportText(value), member.id);
+  }
+
+  const seenCompanies = new Map<string, { rowNumber: number; id?: number | null }>();
+  const seenContactsByEmail = new Map<string, { rowNumber: number }>();
+  const seenContactsByPhone = new Map<string, { rowNumber: number }>();
+  const seenOpportunities = new Map<string, { rowNumber: number }>();
+  const previewRows: CrmImportPreviewRow[] = [];
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const rowNumber = index + 2;
+    const messages: string[] = [];
+    let status: CrmImportStatus = "ready";
+    let company: any = null;
+    let contact: any = null;
+    let opportunity: any = null;
+    const matches: CrmImportPreviewRow["matches"] = {};
+
+    try {
+      const companyName = importCell(row, mapping, "company.name");
+      const companySignal = companyName || ["company.email", "company.phoneNumber", "company.websiteUrl", "company.addressLine1", "company.townCity", "company.county", "company.eircode", "company.notes"].some((key) => importCell(row, mapping, key));
+      if (companySignal) {
+        if (!companyName) throw new ApiError("CRM_IMPORT_COMPANY_NAME_REQUIRED", "Company name is required when importing company data", 400);
+        company = {
+          name: companyName,
+          email: importCell(row, mapping, "company.email")?.toLowerCase() || null,
+          phoneNumber: importCell(row, mapping, "company.phoneNumber"),
+          websiteUrl: importCell(row, mapping, "company.websiteUrl"),
+          addressLine1: importCell(row, mapping, "company.addressLine1"),
+          addressLine2: importCell(row, mapping, "company.addressLine2"),
+          townCity: importCell(row, mapping, "company.townCity"),
+          county: importCell(row, mapping, "company.county"),
+          eircode: importCell(row, mapping, "company.eircode"),
+          notes: importCell(row, mapping, "company.notes"),
+        };
+        const companyKey = normalizeImportText(companyName);
+        const existing = existingCompanyByName.get(companyKey);
+        if (existing) {
+          matches.companyId = existing.id;
+          messages.push(`Company matched existing record #${existing.id}`);
+        } else if (!seenCompanies.has(companyKey)) {
+          seenCompanies.set(companyKey, { rowNumber });
+        } else {
+          messages.push(`Company repeats row ${seenCompanies.get(companyKey)?.rowNumber}`);
+        }
+      }
+
+      const fullName = importCell(row, mapping, "contact.fullName");
+      let mappedFirstName = importCell(row, mapping, "contact.firstName");
+      let mappedLastName = importCell(row, mapping, "contact.lastName");
+      if (fullName && !mappedFirstName && !mappedLastName) {
+        const parts = fullName.split(/\s+/).filter(Boolean);
+        mappedFirstName = parts.shift() || null;
+        mappedLastName = parts.length ? parts.join(" ") : null;
+      }
+      const contactValues = {
+        firstName: mappedFirstName,
+        lastName: mappedLastName,
+        companyName: importCell(row, mapping, "contact.companyName"),
+        primaryEmail: importCell(row, mapping, "contact.primaryEmail")?.toLowerCase() || null,
+        phoneNumber: importCell(row, mapping, "contact.phoneNumber"),
+        roles: parseImportedRoles(importCell(row, mapping, "contact.roles")),
+        notes: importCell(row, mapping, "contact.notes"),
+      };
+      const contactSignal = Boolean(contactValues.firstName || contactValues.lastName || contactValues.companyName || contactValues.primaryEmail || contactValues.phoneNumber || contactValues.roles.length || contactValues.notes);
+      if (contactSignal) {
+        if (!contactValues.firstName && !contactValues.lastName && !contactValues.companyName && !contactValues.primaryEmail && !contactValues.phoneNumber) {
+          throw new ApiError("CRM_IMPORT_CONTACT_IDENTITY_REQUIRED", "Contact needs a name, company, email or phone number", 400);
+        }
+        contact = contactValues;
+        const emailKey = normalizeImportText(contactValues.primaryEmail);
+        const phoneKey = normalizeImportPhone(contactValues.phoneNumber);
+        if (emailKey && existingContactByEmail.has(emailKey)) {
+          const existing = existingContactByEmail.get(emailKey)!;
+          matches.contactId = existing.id;
+          messages.push(`Contact matched existing email record #${existing.id}`);
+        } else if (emailKey && seenContactsByEmail.has(emailKey)) {
+          messages.push(`Contact repeats row ${seenContactsByEmail.get(emailKey)?.rowNumber} and will be reused`);
+        } else if (phoneKey && (existingContactsByPhone.get(phoneKey)?.length || 0) > 0) {
+          status = "possible_duplicate";
+          messages.push("Possible contact duplicate: phone number already exists");
+        } else if (phoneKey && seenContactsByPhone.has(phoneKey)) {
+          messages.push(`Contact repeats row ${seenContactsByPhone.get(phoneKey)?.rowNumber} and will be reused`);
+        } else if (!emailKey && !phoneKey && (contactValues.firstName || contactValues.lastName)) {
+          const nameKey = normalizeImportText(`${contactValues.firstName || ""} ${contactValues.lastName || ""}`);
+          const companyKey = normalizeImportText(companyName || contactValues.companyName);
+          const nameMatches = contacts.filter((existing) => {
+            const existingName = normalizeImportText(`${existing.firstName || ""} ${existing.lastName || ""}`);
+            const existingCompany = normalizeImportText(existing.company?.name || existing.companyName);
+            return existingName === nameKey && (!companyKey || existingCompany === companyKey);
+          });
+          if (nameMatches.length) {
+            status = "possible_duplicate";
+            messages.push("Possible contact duplicate: name already exists in this CRM");
+          }
+        }
+        if (emailKey && !seenContactsByEmail.has(emailKey)) seenContactsByEmail.set(emailKey, { rowNumber });
+        if (phoneKey && !seenContactsByPhone.has(phoneKey)) seenContactsByPhone.set(phoneKey, { rowNumber });
+      }
+
+      const opportunityTitle = importCell(row, mapping, "opportunity.title");
+      const opportunitySignal = opportunityTitle || ["opportunity.type", "opportunity.stage", "opportunity.value", "opportunity.probability", "opportunity.expectedCloseAt", "opportunity.owner", "opportunity.notes"].some((key) => importCell(row, mapping, key));
+      if (opportunitySignal) {
+        if (!opportunityTitle) throw new ApiError("CRM_IMPORT_OPPORTUNITY_TITLE_REQUIRED", "Opportunity title is required when importing opportunity data", 400);
+        const type = parseImportedOpportunityType(importCell(row, mapping, "opportunity.type"));
+        if (!type) throw new ApiError("CRM_IMPORT_OPPORTUNITY_TYPE_REQUIRED", "Opportunity type is required", 400);
+        const stage = parseImportedOpportunityStage(importCell(row, mapping, "opportunity.stage"));
+        const ownerText = importCell(row, mapping, "opportunity.owner");
+        let ownerMemberId: number | null = workspace.membership.id;
+        if (ownerText) {
+          ownerMemberId = memberByIdentity.get(normalizeImportText(ownerText)) || null;
+          if (!ownerMemberId) throw new ApiError("CRM_IMPORT_OWNER_NOT_FOUND", `Opportunity owner was not found in this agency: ${ownerText}`, 400);
+        }
+        opportunity = {
+          title: opportunityTitle,
+          type,
+          stage,
+          valueCents: parseImportedMoneyToCents(importCell(row, mapping, "opportunity.value")),
+          probability: parseImportedProbability(importCell(row, mapping, "opportunity.probability"), stage),
+          expectedCloseAt: parseImportedDate(importCell(row, mapping, "opportunity.expectedCloseAt")),
+          ownerMemberId,
+          notes: importCell(row, mapping, "opportunity.notes"),
+        };
+        const relationKey = `${normalizeImportText(opportunityTitle)}|${matches.contactId || normalizeImportText(contactValues.primaryEmail || `${contactValues.firstName || ""} ${contactValues.lastName || ""}`)}|${matches.companyId || normalizeImportText(companyName)}`;
+        const canMatchExistingOpportunity = Boolean(matches.contactId || matches.companyId);
+        const existingOpportunity = canMatchExistingOpportunity
+          ? opportunities.find((item) =>
+              normalizeImportText(item.title) === normalizeImportText(opportunityTitle) &&
+              (!matches.contactId || item.contactId === matches.contactId) &&
+              (!matches.companyId || item.companyId === matches.companyId),
+            )
+          : undefined;
+        if (existingOpportunity) {
+          matches.opportunityId = existingOpportunity.id;
+          messages.push(`Opportunity matched existing record #${existingOpportunity.id}`);
+        } else if (seenOpportunities.has(relationKey)) {
+          status = "possible_duplicate";
+          messages.push(`Opportunity repeats row ${seenOpportunities.get(relationKey)?.rowNumber}`);
+        } else {
+          seenOpportunities.set(relationKey, { rowNumber });
+        }
+      }
+
+      if (!company && !contact && !opportunity) {
+        status = "ignored";
+        messages.push("No mapped CRM data found in this row");
+      } else if (status === "ready") {
+        const createsSomething =
+          Boolean(company && !matches.companyId) ||
+          Boolean(contact && !matches.contactId) ||
+          Boolean(opportunity && !matches.opportunityId);
+        status = createsSomething ? "ready" : "matched";
+      }
+    } catch (error) {
+      status = "needs_attention";
+      messages.push(error instanceof Error ? error.message : "Row could not be validated");
+    }
+
+    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches });
+  }
+
+  const summary = previewRows.reduce((acc, row) => {
+    acc.total += 1;
+    acc[row.status] += 1;
+    return acc;
+  }, { total: 0, ready: 0, matched: 0, possible_duplicate: 0, needs_attention: 0, ignored: 0 } as Record<string, number>);
+
+  return { rows: previewRows, summary };
+}
+
+router.post("/imports/preview", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const rows = validateImportRows(req.body?.rows);
+    const mapping = validateImportMapping(req.body?.mapping);
+    const preview = await crmImportPreview(workspace, rows, mapping);
+    return res.json({ ok: true, ...preview });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/imports/commit", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const rows = validateImportRows(req.body?.rows);
+    const mapping = validateImportMapping(req.body?.mapping);
+    const sourceFileName = importText(req.body?.sourceFileName, 500) || "CRM import";
+    const skipRowNumbers = new Set(
+      Array.isArray(req.body?.skipRowNumbers)
+        ? req.body.skipRowNumbers.map((value: unknown) => asPositiveInt(value)).filter(Boolean) as number[]
+        : [],
+    );
+    const preview = await crmImportPreview(workspace, rows, mapping);
+    const unresolved = preview.rows.filter(
+      (row) => (row.status === "needs_attention" || row.status === "possible_duplicate") && !skipRowNumbers.has(row.rowNumber),
+    );
+    if (unresolved.length > 0) {
+      throw new ApiError(
+        "CRM_IMPORT_REVIEW_REQUIRED",
+        "Skip or resolve rows marked Needs attention or Possible duplicate before importing",
+        409,
+      );
+    }
+
+    const importId = crypto.randomUUID();
+    const userId = workspace.membership.userId;
+    const companyIdsByName = new Map<string, number>();
+    const contactIdsByIdentity = new Map<string, number>();
+    let companiesCreated = 0;
+    let companiesMatched = 0;
+    let contactsCreated = 0;
+    let contactsMatched = 0;
+    let opportunitiesCreated = 0;
+    let opportunitiesMatched = 0;
+
+    await prisma.$transaction(async (tx) => {
+      for (const row of preview.rows) {
+        if (row.status === "ignored" || skipRowNumbers.has(row.rowNumber)) continue;
+        let companyId = row.matches?.companyId || null;
+        if (row.company) {
+          const companyKey = normalizeImportText(row.company.name);
+          companyId = companyId || companyIdsByName.get(companyKey) || null;
+          if (!companyId) {
+            const created = await tx.crmCompany.create({
+              data: {
+                agencyId: workspace.agency.id,
+                ...row.company,
+                createdByUserId: userId,
+                updatedByUserId: userId,
+              },
+            });
+            companyId = created.id;
+            companyIdsByName.set(companyKey, created.id);
+            companiesCreated += 1;
+            await tx.agencyAuditLog.create({
+              data: {
+                agencyId: workspace.agency.id,
+                actorUserId: userId,
+                actorAgencyMemberId: workspace.membership.id,
+                effectiveUserId: userId,
+                action: "CRM_COMPANY_CREATED",
+                entityType: "CrmCompany",
+                entityId: String(created.id),
+                afterState: companySnapshot(created),
+                changedFields: Object.keys(companySnapshot(created) || {}),
+                metadata: { source: "crmImport", importId, sourceFileName, rowNumber: row.rowNumber },
+              },
+            });
+          } else {
+            companiesMatched += 1;
+          }
+        }
+
+        let contactId = row.matches?.contactId || null;
+        if (row.contact) {
+          const emailKey = normalizeImportText(row.contact.primaryEmail);
+          const phoneKey = normalizeImportPhone(row.contact.phoneNumber);
+          const identityKey = emailKey ? `email:${emailKey}` : phoneKey ? `phone:${phoneKey}` : `name:${normalizeImportText(`${row.contact.firstName || ""} ${row.contact.lastName || ""}`)}|${companyId || normalizeImportText(row.contact.companyName)}`;
+          contactId = contactId || contactIdsByIdentity.get(identityKey) || null;
+          if (!contactId) {
+            const created = await tx.professionalContact.create({
+              data: {
+                agencyId: workspace.agency.id,
+                companyId,
+                ...row.contact,
+                companyName: row.contact.companyName || row.company?.name || null,
+                createdByUserId: userId,
+                updatedByUserId: userId,
+              },
+            });
+            contactId = created.id;
+            contactIdsByIdentity.set(identityKey, created.id);
+            contactsCreated += 1;
+            await tx.agencyAuditLog.create({
+              data: {
+                agencyId: workspace.agency.id,
+                actorUserId: userId,
+                actorAgencyMemberId: workspace.membership.id,
+                effectiveUserId: userId,
+                action: "CRM_CONTACT_CREATED",
+                entityType: "ProfessionalContact",
+                entityId: String(created.id),
+                afterState: contactSnapshot(created),
+                changedFields: Object.keys(contactSnapshot(created) || {}),
+                metadata: { source: "crmImport", importId, sourceFileName, rowNumber: row.rowNumber },
+              },
+            });
+          } else {
+            contactsMatched += 1;
+          }
+        }
+
+        if (row.opportunity) {
+          if (row.matches?.opportunityId) {
+            opportunitiesMatched += 1;
+          } else {
+            const created = await tx.crmOpportunity.create({
+              data: {
+                agencyId: workspace.agency.id,
+                contactId,
+                companyId,
+                ownerMemberId: row.opportunity.ownerMemberId,
+                title: row.opportunity.title,
+                type: row.opportunity.type,
+                stage: row.opportunity.stage,
+                valueCents: row.opportunity.valueCents == null ? null : BigInt(row.opportunity.valueCents),
+                probability: row.opportunity.probability,
+                expectedCloseAt: row.opportunity.expectedCloseAt,
+                notes: row.opportunity.notes,
+              },
+            });
+            opportunitiesCreated += 1;
+            await tx.agencyAuditLog.create({
+              data: {
+                agencyId: workspace.agency.id,
+                actorUserId: userId,
+                actorAgencyMemberId: workspace.membership.id,
+                effectiveUserId: userId,
+                action: "CRM_OPPORTUNITY_CREATED",
+                entityType: "CrmOpportunity",
+                entityId: String(created.id),
+                afterState: opportunitySnapshot(created),
+                changedFields: ["created"],
+                metadata: { source: "crmImport", importId, sourceFileName, rowNumber: row.rowNumber, contactId, companyId },
+              },
+            });
+          }
+        }
+      }
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: userId,
+          action: "CRM_IMPORT_COMPLETED",
+          entityType: "CrmImport",
+          entityId: importId,
+          afterState: {
+            importId,
+            sourceFileName,
+            rows: preview.summary.total,
+            companiesCreated,
+            companiesMatched,
+            contactsCreated,
+            contactsMatched,
+            opportunitiesCreated,
+            opportunitiesMatched,
+            rowsSkipped: skipRowNumbers.size,
+          },
+          changedFields: ["crmCompanies", "professionalContacts", "crmOpportunities"],
+          metadata: { source: "crmImport", importId, sourceFileName },
+        },
+      });
+    }, { timeout: 120000 });
+
+    return res.status(201).json({
+      ok: true,
+      importId,
+      sourceFileName,
+      summary: {
+        rows: preview.summary.total,
+        companiesCreated,
+        companiesMatched,
+        contactsCreated,
+        contactsMatched,
+        opportunitiesCreated,
+        opportunitiesMatched,
+        rowsSkipped: skipRowNumbers.size,
+      },
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 /* Companies */
 router.get("/companies", async (req: AgentRequest, res) => {
   try {
