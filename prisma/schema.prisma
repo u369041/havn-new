@@ -433,10 +433,11 @@ model CrmInteraction {
   occurredAt      DateTime @default(now())
   durationMinutes Int?
 
-  sourceProvider CrmInteractionProvider @default(MANUAL)
-  externalId     String?
-  externalThreadId String?
-  externalUrl    String?
+  sourceProvider     CrmInteractionProvider @default(MANUAL)
+  sourceConnectionId Int?
+  externalId         String?
+  externalThreadId   String?
+  externalUrl        String?
 
   createdByUserId Int?
   createdAt       DateTime @default(now())
@@ -449,6 +450,7 @@ model CrmInteraction {
   inventoryProperty InventoryProperty?    @relation(fields: [inventoryPropertyId], references: [id], onDelete: SetNull)
   ownerMember       AgencyMember?         @relation("CrmInteractionOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
   createdBy         User?                 @relation("CrmInteractionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  sourceConnection  CrmIntegrationConnection? @relation(fields: [sourceConnectionId], references: [id], onDelete: SetNull)
 
   @@index([agencyId])
   @@index([contactId])
@@ -456,6 +458,7 @@ model CrmInteraction {
   @@index([opportunityId])
   @@index([inventoryPropertyId])
   @@index([ownerMemberId])
+  @@index([sourceConnectionId])
   @@index([type])
   @@index([occurredAt])
   @@index([agencyId, occurredAt])
@@ -500,6 +503,7 @@ model CrmIntegrationConnection {
   agency Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   member AgencyMember @relation("CrmIntegrationConnectionMember", fields: [memberId], references: [id], onDelete: Cascade)
   user   User         @relation("CrmIntegrationConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
+  interactions CrmInteraction[]
 
   @@unique([agencyId, memberId, provider, connectionKey])
   @@index([agencyId])

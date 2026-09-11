@@ -456,6 +456,7 @@ function interactionSnapshot(item: any) {
     occurredAt: item.occurredAt,
     durationMinutes: item.durationMinutes,
     sourceProvider: item.sourceProvider,
+    sourceConnectionId: item.sourceConnectionId,
     externalId: item.externalId,
     externalThreadId: item.externalThreadId,
     externalUrl: item.externalUrl,
@@ -621,6 +622,15 @@ async function crmContactForAgency(id: number, agencyId: number) {
           inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
           ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
           createdBy: { select: { id: true, name: true, email: true } },
+          sourceConnection: {
+            select: {
+              id: true,
+              provider: true,
+              connectionKey: true,
+              accountEmail: true,
+              configuration: true,
+            },
+          },
         },
       },
       createdBy: { select: { id: true, name: true, email: true } },
@@ -1232,6 +1242,15 @@ const interactionInclude = {
     },
   },
   createdBy: { select: { id: true, name: true, email: true } },
+  sourceConnection: {
+    select: {
+      id: true,
+      provider: true,
+      connectionKey: true,
+      accountEmail: true,
+      configuration: true,
+    },
+  },
 } satisfies Prisma.CrmInteractionInclude;
 
 router.get("/interactions", async (req: AgentRequest, res) => {
@@ -4951,6 +4970,8 @@ async function upsertImapEmailInteraction(
       occurredAt,
       sourceProvider:
         CrmInteractionProvider.IMAP_CALDAV,
+      sourceConnectionId:
+        args.connection.id,
       externalId,
       externalThreadId: messageId
         ? `${accountEmail}:imap-message:${messageId}`
@@ -4965,6 +4986,8 @@ async function upsertImapEmailInteraction(
         contact.companyId || null,
       ownerMemberId:
         args.connection.memberId,
+      sourceConnectionId:
+        args.connection.id,
       direction: imapMailDirection(
         accountEmail,
         envelope,
@@ -5792,6 +5815,8 @@ async function upsertCaldavCalendarInteraction(
       durationMinutes,
       sourceProvider:
         CrmInteractionProvider.IMAP_CALDAV,
+      sourceConnectionId:
+        args.connection.id,
       externalId,
       externalThreadId:
         `${accountEmail}:caldav-series:${String(event.uid)}`,
@@ -5804,6 +5829,7 @@ async function upsertCaldavCalendarInteraction(
       contactId: contact.id,
       companyId: contact.companyId || null,
       ownerMemberId: args.connection.memberId,
+      sourceConnectionId: args.connection.id,
       direction:
         imapCaldavCalendarDirection(
           accountEmail,
