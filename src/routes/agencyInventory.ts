@@ -29,6 +29,7 @@ import {
   inventoryMediaToListingSnapshot,
   inventoryToDraftListingData,
 } from "../services/agencyPropertySync";
+import { createPropertyPreviewToken } from "../services/propertyPreviewToken";
 
 const router = Router();
 
@@ -1651,7 +1652,6 @@ router.delete("/:id/contacts/:linkId", async (req: AgentRequest, res) => {
       if (!before) {
         throw new ApiError("CONTACT_LINK_NOT_FOUND", "Property contact link not found", 404);
       }
-
       const after = await tx.inventoryPropertyContact.update({
         where: { id: linkId },
         data: {
@@ -2027,6 +2027,50 @@ router.patch("/:id/assign", async (req: AgentRequest, res) => {
     });
 
     return res.json({ ok: true, item: after });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/:id/preview-token", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertAgencyPermission(workspace, "canViewAllInventory");
+
+    const id = asPositiveInt(req.params.id);
+    if (!id) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid inventory id", 400);
+    }
+
+    const inventory = await inventoryForAgency(id, workspace.agency.id);
+    if (!inventory) {
+      throw new ApiError(
+        "INVENTORY_NOT_FOUND",
+        "Inventory record not found",
+        404,
+      );
+    }
+
+    let signed;
+    try {
+      signed = createPropertyPreviewToken(id, workspace.agency.id);
+    } catch (error: any) {
+      if (String(error?.message || "").includes("PROPERTY_PREVIEW_SECRET")) {
+        throw new ApiError(
+          "PREVIEW_CONFIGURATION_ERROR",
+          "Listing preview is not configured",
+          500,
+        );
+      }
+      throw error;
+    }
+
+    return res.json({
+      ok: true,
+      token: signed.token,
+      expiresAt: signed.expiresAt.toISOString(),
+      url: `/property.html?slug=${encodeURIComponent(signed.token)}`,
+    });
   } catch (error) {
     return handleError(res, error);
   }
