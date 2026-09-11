@@ -381,6 +381,117 @@ async function assertOpportunityRelations(agencyId: number, values: {
 }
 
 
+async function assertFollowUpRelations(agencyId: number, values: {
+  contactId?: number | null;
+  opportunityId?: number | null;
+}) {
+  const contactId = values.contactId ?? null;
+  const opportunityId = values.opportunityId ?? null;
+
+  if (contactId == null && opportunityId == null) {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "A follow-up must be linked to a CRM contact, an opportunity, or both",
+      400,
+    );
+  }
+
+  if (contactId != null) {
+    const contact = await prisma.professionalContact.findFirst({
+      where: { id: contactId, agencyId, isArchived: false },
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new ApiError(
+        "CONTACT_NOT_FOUND",
+        "Follow-up contact must be an active CRM contact in this agency",
+        404,
+      );
+    }
+  }
+
+  if (opportunityId != null) {
+    const opportunity = await prisma.crmOpportunity.findFirst({
+      where: { id: opportunityId, agencyId, isArchived: false },
+      select: { id: true, contactId: true },
+    });
+    if (!opportunity) {
+      throw new ApiError(
+        "CRM_OPPORTUNITY_NOT_FOUND",
+        "Follow-up opportunity must be an active CRM opportunity in this agency",
+        404,
+      );
+    }
+    if (contactId != null && opportunity.contactId != null && opportunity.contactId !== contactId) {
+      throw new ApiError(
+        "CRM_FOLLOW_UP_RELATION_MISMATCH",
+        "Follow-up contact must match the contact linked to this opportunity",
+        409,
+      );
+    }
+  }
+}
+
+const followUpInclude = {
+  contact: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      primaryEmail: true,
+      phoneNumber: true,
+      roles: true,
+      isArchived: true,
+      companyId: true,
+      companyName: true,
+      company: { select: { id: true, name: true, isArchived: true } },
+    },
+  },
+  opportunity: {
+    select: {
+      id: true,
+      title: true,
+      type: true,
+      stage: true,
+      contactId: true,
+      companyId: true,
+      inventoryPropertyId: true,
+      ownerMemberId: true,
+      isArchived: true,
+    },
+  },
+  createdBy: { select: { id: true, name: true, email: true } },
+  updatedBy: { select: { id: true, name: true, email: true } },
+  assignedMember: {
+    select: {
+      id: true,
+      role: true,
+      jobTitle: true,
+      user: { select: { id: true, name: true, email: true } },
+    },
+  },
+} satisfies Prisma.CrmFollowUpInclude;
+
+function followUpSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    agencyId: item.agencyId,
+    contactId: item.contactId,
+    opportunityId: item.opportunityId,
+    assignedMemberId: item.assignedMemberId,
+    title: item.title,
+    description: item.description,
+    dueAt: item.dueAt,
+    completedAt: item.completedAt,
+    priority: item.priority,
+    createdByUserId: item.createdByUserId,
+    updatedByUserId: item.updatedByUserId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
 async function assertInteractionRelations(agencyId: number, values: {
   contactId?: number | null;
   companyId?: number | null;
@@ -594,6 +705,12 @@ async function crmContactForAgency(id: number, agencyId: number) {
       crmFollowUps: {
         orderBy: [{ completedAt: "asc" }, { dueAt: "asc" }, { id: "asc" }],
         include: {
+          opportunity: {
+            select: {
+              id: true, title: true, type: true, stage: true, contactId: true,
+              companyId: true, inventoryPropertyId: true, ownerMemberId: true, isArchived: true,
+            },
+          },
           createdBy: { select: { id: true, name: true, email: true } },
           updatedBy: { select: { id: true, name: true, email: true } },
           assignedMember: {
@@ -895,35 +1012,28 @@ router.get("/follow-ups", async (req: AgentRequest, res) => {
     const workspace = await workspaceFor(req);
     const includeArchivedContacts =
       String(req.query.includeArchivedContacts || "").toLowerCase() === "true";
+    const opportunityId =
+      req.query.opportunityId == null || req.query.opportunityId === ""
+        ? null
+        : asPositiveInt(req.query.opportunityId);
+    if (req.query.opportunityId != null && req.query.opportunityId !== "" && !opportunityId) {
+      throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer", 400);
+    }
 
     const items = await prisma.crmFollowUp.findMany({
       where: {
         agencyId: workspace.agency.id,
+        ...(opportunityId ? { opportunityId } : {}),
         ...(includeArchivedContacts
           ? {}
-          : { contact: { is: { isArchived: false } } }),
+          : {
+              OR: [
+                { contactId: null },
+                { contact: { is: { isArchived: false } } },
+              ],
+            }),
       },
-      include: {
-        contact: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            primaryEmail: true,
-            phoneNumber: true,
-            roles: true,
-            isArchived: true,
-            companyId: true,
-            companyName: true,
-            company: { select: { id: true, name: true, isArchived: true } },
-          },
-        },
-        createdBy: { select: { id: true, name: true, email: true } },
-        updatedBy: { select: { id: true, name: true, email: true } },
-        assignedMember: {
-          select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } },
-        },
-      },
+      include: followUpInclude,
       orderBy: [{ completedAt: "asc" }, { dueAt: "asc" }, { priority: "desc" }, { id: "asc" }],
       take: 1000,
     });
@@ -965,6 +1075,15 @@ const opportunityInclude = {
   company: { select: { id: true, name: true, isArchived: true } },
   inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
   ownerMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+  followUps: {
+    where: { completedAt: null },
+    orderBy: [{ dueAt: "asc" }, { priority: "desc" }, { id: "asc" }],
+    take: 20,
+    include: {
+      contact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, isArchived: true } },
+      assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+    },
+  },
 } satisfies Prisma.CrmOpportunityInclude;
 
 router.get("/opportunities", async (req: AgentRequest, res) => {
@@ -1735,70 +1854,257 @@ router.delete("/:id/notes/:noteId", async (req: AgentRequest, res) => {
 });
 
 /* Follow-ups */
+function followUpAuditEntity(item: { id: number; contactId: number | null; opportunityId: number | null }) {
+  return item.opportunityId
+    ? { entityType: "CrmOpportunity", entityId: String(item.opportunityId) }
+    : { entityType: "ProfessionalContact", entityId: String(item.contactId) };
+}
+
+async function createFollowUpForWorkspace(args: {
+  workspace: AgencyWorkspace;
+  req: AgentRequest;
+  contactId: number | null;
+  opportunityId: number | null;
+  body: any;
+}) {
+  const { workspace, req, contactId, opportunityId, body } = args;
+  await assertFollowUpRelations(workspace.agency.id, { contactId, opportunityId });
+  const dueAt = nullableDate(body?.dueAt, "dueAt");
+  if (!dueAt) throw new ApiError("VALIDATION_ERROR", "dueAt is required", 400);
+  const assignedMemberId = body?.assignedMemberId == null || body?.assignedMemberId === ""
+    ? workspace.membership.id
+    : asPositiveInt(body?.assignedMemberId);
+  if (!assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+  await assertActiveAgencyMember(assignedMemberId, workspace.agency.id);
+  const priority = parseEnumValue<CrmTaskPriority>(body?.priority, CRM_TASK_PRIORITIES, "priority") || CrmTaskPriority.NORMAL;
+  const userId = workspace.membership.userId;
+
+  return prisma.$transaction(async (tx) => {
+    const followUp = await tx.crmFollowUp.create({
+      data: {
+        agencyId: workspace.agency.id,
+        contactId,
+        opportunityId,
+        assignedMemberId,
+        title: requiredString(body?.title, "title", 300),
+        description: nullableString(body?.description, 5000),
+        dueAt,
+        priority,
+        createdByUserId: userId,
+        updatedByUserId: userId,
+      },
+      include: followUpInclude,
+    });
+    const auditEntity = followUpAuditEntity(followUp);
+    await tx.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: userId,
+        action: "CRM_FOLLOW_UP_CREATED",
+        entityType: auditEntity.entityType,
+        entityId: auditEntity.entityId,
+        afterState: followUpSnapshot(followUp),
+        changedFields: ["crmFollowUps"],
+        metadata: {
+          source: "agencyContacts",
+          followUpId: followUp.id,
+          contactId: followUp.contactId,
+          opportunityId: followUp.opportunityId,
+        },
+        ...requestMeta(req),
+      },
+    });
+    return followUp;
+  });
+}
+
+router.post("/follow-ups", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const body = req.body || {};
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    const opportunityId = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+    if (body.contactId != null && body.contactId !== "" && !contactId) {
+      throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+    }
+    if (body.opportunityId != null && body.opportunityId !== "" && !opportunityId) {
+      throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer or null", 400);
+    }
+    const item = await createFollowUpForWorkspace({ workspace, req, contactId, opportunityId, body });
+    return res.status(201).json({ ok: true, item });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/opportunities/:opportunityId/follow-ups", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const opportunityId = asPositiveInt(req.params.opportunityId);
+    if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM opportunity id", 400);
+    const opportunity = await prisma.crmOpportunity.findFirst({
+      where: { id: opportunityId, agencyId: workspace.agency.id, isArchived: false },
+      select: { id: true, contactId: true },
+    });
+    if (!opportunity) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "CRM opportunity not found", 404);
+    const body = req.body || {};
+    const explicitContactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    if (body.contactId != null && body.contactId !== "" && !explicitContactId) {
+      throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+    }
+    const contactId = explicitContactId ?? opportunity.contactId ?? null;
+    const item = await createFollowUpForWorkspace({ workspace, req, contactId, opportunityId, body });
+    return res.status(201).json({ ok: true, item });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.post("/:id/follow-ups", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
     assertCanManageCrm(workspace);
-    const id = asPositiveInt(req.params.id);
-    if (!id) throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact id", 400);
+    const contactId = asPositiveInt(req.params.id);
+    if (!contactId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact id", 400);
     const contact = await prisma.professionalContact.findFirst({
-      where: { id, agencyId: workspace.agency.id },
+      where: { id: contactId, agencyId: workspace.agency.id },
       select: { id: true, isArchived: true },
     });
     if (!contact) throw new ApiError("CONTACT_NOT_FOUND", "CRM contact not found", 404);
     if (contact.isArchived) {
       throw new ApiError("CONTACT_ARCHIVED", "Restore this CRM contact before adding follow-ups", 409);
     }
-    const dueAt = nullableDate(req.body?.dueAt, "dueAt");
+    const body = req.body || {};
+    const opportunityId = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+    if (body.opportunityId != null && body.opportunityId !== "" && !opportunityId) {
+      throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer or null", 400);
+    }
+    const item = await createFollowUpForWorkspace({ workspace, req, contactId, opportunityId, body });
+    return res.status(201).json({ ok: true, item });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+async function updateFollowUpForWorkspace(args: {
+  workspace: AgencyWorkspace;
+  req: AgentRequest;
+  followUpId: number;
+  body: any;
+  expectedContactId?: number | null;
+}) {
+  const { workspace, req, followUpId, body, expectedContactId } = args;
+  const before = await prisma.crmFollowUp.findFirst({
+    where: {
+      id: followUpId,
+      agencyId: workspace.agency.id,
+      ...(expectedContactId != null ? { contactId: expectedContactId } : {}),
+    },
+  });
+  if (!before) throw new ApiError("CRM_FOLLOW_UP_NOT_FOUND", "CRM follow-up not found", 404);
+
+  const data: Prisma.CrmFollowUpUncheckedUpdateInput = {
+    updatedByUserId: workspace.membership.userId,
+  };
+  if ("title" in body) data.title = requiredString(body.title, "title", 300);
+  if ("description" in body) data.description = nullableString(body.description, 5000);
+  if ("dueAt" in body) {
+    const dueAt = nullableDate(body.dueAt, "dueAt");
     if (!dueAt) throw new ApiError("VALIDATION_ERROR", "dueAt is required", 400);
-    const userId = workspace.membership.userId;
-    const assignedMemberId = req.body?.assignedMemberId == null || req.body?.assignedMemberId === ""
-      ? workspace.membership.id
-      : asPositiveInt(req.body?.assignedMemberId);
-    if (!assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+    data.dueAt = dueAt;
+  }
+  if ("completedAt" in body) data.completedAt = nullableDate(body.completedAt, "completedAt");
+  if ("completed" in body) {
+    const completed = body.completed === true || String(body.completed || "").toLowerCase() === "true";
+    data.completedAt = completed ? new Date() : null;
+  }
+  if ("assignedMemberId" in body) {
+    const assignedMemberId = body.assignedMemberId == null || body.assignedMemberId === "" ? null : asPositiveInt(body.assignedMemberId);
+    if (body.assignedMemberId != null && body.assignedMemberId !== "" && !assignedMemberId) {
+      throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer or null", 400);
+    }
     await assertActiveAgencyMember(assignedMemberId, workspace.agency.id);
-    const priority = parseEnumValue<CrmTaskPriority>(req.body?.priority, CRM_TASK_PRIORITIES, "priority") || CrmTaskPriority.NORMAL;
-    const created = await prisma.$transaction(async (tx) => {
-      const followUp = await tx.crmFollowUp.create({
-        data: {
-          agencyId: workspace.agency.id,
-          contactId: id,
-          assignedMemberId,
-          title: requiredString(req.body?.title, "title", 300),
-          description: nullableString(req.body?.description, 5000),
-          dueAt,
-          priority,
-          createdByUserId: userId,
-          updatedByUserId: userId,
-        },
-      });
+    data.assignedMemberId = assignedMemberId;
+  }
+  if ("priority" in body) {
+    const priority = parseEnumValue<CrmTaskPriority>(body.priority, CRM_TASK_PRIORITIES, "priority");
+    if (!priority) throw new ApiError("VALIDATION_ERROR", "priority is required", 400);
+    data.priority = priority;
+  }
+  if ("contactId" in body) {
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    if (body.contactId != null && body.contactId !== "" && !contactId) {
+      throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+    }
+    data.contactId = contactId;
+  }
+  if ("opportunityId" in body) {
+    const opportunityId = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+    if (body.opportunityId != null && body.opportunityId !== "" && !opportunityId) {
+      throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer or null", 400);
+    }
+    data.opportunityId = opportunityId;
+  }
+
+  const effectiveContactId = "contactId" in body ? (data.contactId as number | null) : before.contactId;
+  const effectiveOpportunityId = "opportunityId" in body ? (data.opportunityId as number | null) : before.opportunityId;
+  await assertFollowUpRelations(workspace.agency.id, {
+    contactId: effectiveContactId,
+    opportunityId: effectiveOpportunityId,
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.crmFollowUp.update({
+      where: { id: followUpId },
+      data,
+      include: followUpInclude,
+    });
+    const changed = snapshotChangedFields(followUpSnapshot(before), followUpSnapshot(updated));
+    if (changed.length > 0) {
+      const auditEntity = followUpAuditEntity(updated);
       await tx.agencyAuditLog.create({
         data: {
           agencyId: workspace.agency.id,
-          actorUserId: userId,
+          actorUserId: workspace.membership.userId,
           actorAgencyMemberId: workspace.membership.id,
-          effectiveUserId: userId,
-          action: "CRM_FOLLOW_UP_CREATED",
-          entityType: "ProfessionalContact",
-          entityId: String(id),
-          afterState: {
-            id: followUp.id,
-            contactId: followUp.contactId,
-            title: followUp.title,
-            description: followUp.description,
-            dueAt: followUp.dueAt,
-            completedAt: followUp.completedAt,
-            assignedMemberId: followUp.assignedMemberId,
-            priority: followUp.priority,
+          effectiveUserId: workspace.membership.userId,
+          action:
+            !before.completedAt && updated.completedAt
+              ? "CRM_FOLLOW_UP_COMPLETED"
+              : before.completedAt && !updated.completedAt
+                ? "CRM_FOLLOW_UP_REOPENED"
+                : "CRM_FOLLOW_UP_UPDATED",
+          entityType: auditEntity.entityType,
+          entityId: auditEntity.entityId,
+          beforeState: followUpSnapshot(before),
+          afterState: followUpSnapshot(updated),
+          changedFields: changed,
+          metadata: {
+            source: "agencyContacts",
+            followUpId,
+            contactId: updated.contactId,
+            opportunityId: updated.opportunityId,
           },
-          changedFields: ["crmFollowUps"],
-          metadata: { source: "agencyContacts", followUpId: followUp.id },
           ...requestMeta(req),
         },
       });
-      return followUp;
-    });
-    return res.status(201).json({ ok: true, item: created });
+    }
+    return updated;
+  });
+}
+
+router.patch("/follow-ups/:followUpId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const followUpId = asPositiveInt(req.params.followUpId);
+    if (!followUpId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM follow-up id", 400);
+    const item = await updateFollowUpForWorkspace({ workspace, req, followUpId, body: req.body || {} });
+    return res.json({ ok: true, item });
   } catch (error) {
     return handleError(res, error);
   }
@@ -1808,89 +2114,73 @@ router.patch("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
     assertCanManageCrm(workspace);
-    const id = asPositiveInt(req.params.id);
+    const contactId = asPositiveInt(req.params.id);
     const followUpId = asPositiveInt(req.params.followUpId);
-    if (!id || !followUpId) {
+    if (!contactId || !followUpId) {
       throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact or follow-up id", 400);
     }
-    const before = await prisma.crmFollowUp.findFirst({
-      where: { id: followUpId, contactId: id, agencyId: workspace.agency.id },
+    const item = await updateFollowUpForWorkspace({
+      workspace,
+      req,
+      followUpId,
+      body: req.body || {},
+      expectedContactId: contactId,
     });
-    if (!before) throw new ApiError("CRM_FOLLOW_UP_NOT_FOUND", "CRM follow-up not found", 404);
-    const body = req.body || {};
-    const data: Prisma.CrmFollowUpUncheckedUpdateInput = {
-      updatedByUserId: workspace.membership.userId,
-    };
-    if ("title" in body) data.title = requiredString(body.title, "title", 300);
-    if ("description" in body) data.description = nullableString(body.description, 5000);
-    if ("dueAt" in body) {
-      const dueAt = nullableDate(body.dueAt, "dueAt");
-      if (!dueAt) throw new ApiError("VALIDATION_ERROR", "dueAt is required", 400);
-      data.dueAt = dueAt;
-    }
-    if ("completedAt" in body) data.completedAt = nullableDate(body.completedAt, "completedAt");
-    if ("completed" in body) {
-      const completed = body.completed === true || String(body.completed || "").toLowerCase() === "true";
-      data.completedAt = completed ? new Date() : null;
-    }
-    if ("assignedMemberId" in body) {
-      const assignedMemberId = body.assignedMemberId == null || body.assignedMemberId === "" ? null : asPositiveInt(body.assignedMemberId);
-      if (body.assignedMemberId != null && body.assignedMemberId !== "" && !assignedMemberId) {
-        throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer or null", 400);
-      }
-      await assertActiveAgencyMember(assignedMemberId, workspace.agency.id);
-      data.assignedMemberId = assignedMemberId;
-    }
-    if ("priority" in body) {
-      const priority = parseEnumValue<CrmTaskPriority>(body.priority, CRM_TASK_PRIORITIES, "priority");
-      if (!priority) throw new ApiError("VALIDATION_ERROR", "priority is required", 400);
-      data.priority = priority;
-    }
-    const after = await prisma.$transaction(async (tx) => {
-      const updated = await tx.crmFollowUp.update({ where: { id: followUpId }, data });
-      const changed = snapshotChangedFields(before, updated);
-      if (changed.length > 0) {
-        await tx.agencyAuditLog.create({
-          data: {
-            agencyId: workspace.agency.id,
-            actorUserId: workspace.membership.userId,
-            actorAgencyMemberId: workspace.membership.id,
-            effectiveUserId: workspace.membership.userId,
-            action:
-              !before.completedAt && updated.completedAt
-                ? "CRM_FOLLOW_UP_COMPLETED"
-                : before.completedAt && !updated.completedAt
-                  ? "CRM_FOLLOW_UP_REOPENED"
-                  : "CRM_FOLLOW_UP_UPDATED",
-            entityType: "ProfessionalContact",
-            entityId: String(id),
-            beforeState: {
-              id: before.id,
-              title: before.title,
-              description: before.description,
-              dueAt: before.dueAt,
-              completedAt: before.completedAt,
-              assignedMemberId: before.assignedMemberId,
-              priority: before.priority,
-            },
-            afterState: {
-              id: updated.id,
-              title: updated.title,
-              description: updated.description,
-              dueAt: updated.dueAt,
-              completedAt: updated.completedAt,
-              assignedMemberId: updated.assignedMemberId,
-              priority: updated.priority,
-            },
-            changedFields: changed,
-            metadata: { source: "agencyContacts", followUpId },
-            ...requestMeta(req),
-          },
-        });
-      }
-      return updated;
+    return res.json({ ok: true, item });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+async function deleteFollowUpForWorkspace(args: {
+  workspace: AgencyWorkspace;
+  req: AgentRequest;
+  followUpId: number;
+  expectedContactId?: number | null;
+}) {
+  const { workspace, req, followUpId, expectedContactId } = args;
+  const before = await prisma.crmFollowUp.findFirst({
+    where: {
+      id: followUpId,
+      agencyId: workspace.agency.id,
+      ...(expectedContactId != null ? { contactId: expectedContactId } : {}),
+    },
+  });
+  if (!before) throw new ApiError("CRM_FOLLOW_UP_NOT_FOUND", "CRM follow-up not found", 404);
+  await prisma.$transaction(async (tx) => {
+    await tx.crmFollowUp.delete({ where: { id: followUpId } });
+    const auditEntity = followUpAuditEntity(before);
+    await tx.agencyAuditLog.create({
+      data: {
+        agencyId: workspace.agency.id,
+        actorUserId: workspace.membership.userId,
+        actorAgencyMemberId: workspace.membership.id,
+        effectiveUserId: workspace.membership.userId,
+        action: "CRM_FOLLOW_UP_DELETED",
+        entityType: auditEntity.entityType,
+        entityId: auditEntity.entityId,
+        beforeState: followUpSnapshot(before),
+        changedFields: ["crmFollowUps"],
+        metadata: {
+          source: "agencyContacts",
+          followUpId,
+          contactId: before.contactId,
+          opportunityId: before.opportunityId,
+        },
+        ...requestMeta(req),
+      },
     });
-    return res.json({ ok: true, item: after });
+  });
+}
+
+router.delete("/follow-ups/:followUpId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const followUpId = asPositiveInt(req.params.followUpId);
+    if (!followUpId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM follow-up id", 400);
+    await deleteFollowUpForWorkspace({ workspace, req, followUpId });
+    return res.json({ ok: true, deletedFollowUpId: followUpId });
   } catch (error) {
     return handleError(res, error);
   }
@@ -1900,42 +2190,93 @@ router.delete("/:id/follow-ups/:followUpId", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
     assertCanManageCrm(workspace);
-    const id = asPositiveInt(req.params.id);
+    const contactId = asPositiveInt(req.params.id);
     const followUpId = asPositiveInt(req.params.followUpId);
-    if (!id || !followUpId) {
+    if (!contactId || !followUpId) {
       throw new ApiError("VALIDATION_ERROR", "Invalid CRM contact or follow-up id", 400);
     }
+    await deleteFollowUpForWorkspace({ workspace, req, followUpId, expectedContactId: contactId });
+    return res.json({ ok: true, deletedFollowUpId: followUpId });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.post("/follow-ups/:followUpId/complete-and-create-next", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const followUpId = asPositiveInt(req.params.followUpId);
+    if (!followUpId) throw new ApiError("VALIDATION_ERROR", "Invalid CRM follow-up id", 400);
     const before = await prisma.crmFollowUp.findFirst({
-      where: { id: followUpId, contactId: id, agencyId: workspace.agency.id },
+      where: { id: followUpId, agencyId: workspace.agency.id },
     });
     if (!before) throw new ApiError("CRM_FOLLOW_UP_NOT_FOUND", "CRM follow-up not found", 404);
-    await prisma.$transaction(async (tx) => {
-      await tx.crmFollowUp.delete({ where: { id: followUpId } });
+    if (before.completedAt) throw new ApiError("CRM_FOLLOW_UP_ALREADY_COMPLETED", "This follow-up is already completed", 409);
+
+    const body = req.body || {};
+    const nextDueAt = nullableDate(body.dueAt, "dueAt");
+    if (!nextDueAt) throw new ApiError("VALIDATION_ERROR", "dueAt is required for the next action", 400);
+    const nextAssignedMemberId = body.assignedMemberId == null || body.assignedMemberId === ""
+      ? before.assignedMemberId || workspace.membership.id
+      : asPositiveInt(body.assignedMemberId);
+    if (!nextAssignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+    await assertActiveAgencyMember(nextAssignedMemberId, workspace.agency.id);
+    const nextPriority = parseEnumValue<CrmTaskPriority>(body.priority, CRM_TASK_PRIORITIES, "priority") || before.priority;
+    await assertFollowUpRelations(workspace.agency.id, {
+      contactId: before.contactId,
+      opportunityId: before.opportunityId,
+    });
+
+    const userId = workspace.membership.userId;
+    const result = await prisma.$transaction(async (tx) => {
+      const completed = await tx.crmFollowUp.update({
+        where: { id: followUpId },
+        data: { completedAt: new Date(), updatedByUserId: userId },
+        include: followUpInclude,
+      });
+      const next = await tx.crmFollowUp.create({
+        data: {
+          agencyId: workspace.agency.id,
+          contactId: before.contactId,
+          opportunityId: before.opportunityId,
+          assignedMemberId: nextAssignedMemberId,
+          title: requiredString(body.title, "title", 300),
+          description: nullableString(body.description, 5000),
+          dueAt: nextDueAt,
+          priority: nextPriority,
+          createdByUserId: userId,
+          updatedByUserId: userId,
+        },
+        include: followUpInclude,
+      });
+      const auditEntity = followUpAuditEntity(completed);
       await tx.agencyAuditLog.create({
         data: {
           agencyId: workspace.agency.id,
-          actorUserId: workspace.membership.userId,
+          actorUserId: userId,
           actorAgencyMemberId: workspace.membership.id,
-          effectiveUserId: workspace.membership.userId,
-          action: "CRM_FOLLOW_UP_DELETED",
-          entityType: "ProfessionalContact",
-          entityId: String(id),
-          beforeState: {
-            id: before.id,
-            title: before.title,
-            description: before.description,
-            dueAt: before.dueAt,
-            completedAt: before.completedAt,
-            assignedMemberId: before.assignedMemberId,
-            priority: before.priority,
+          effectiveUserId: userId,
+          action: "CRM_FOLLOW_UP_COMPLETED_NEXT_CREATED",
+          entityType: auditEntity.entityType,
+          entityId: auditEntity.entityId,
+          beforeState: followUpSnapshot(before),
+          afterState: { completed: followUpSnapshot(completed), next: followUpSnapshot(next) },
+          changedFields: ["crmFollowUps.completedAt", "crmFollowUps.nextAction"],
+          metadata: {
+            source: "agencyContacts",
+            completedFollowUpId: completed.id,
+            nextFollowUpId: next.id,
+            contactId: completed.contactId,
+            opportunityId: completed.opportunityId,
           },
-          changedFields: ["crmFollowUps"],
-          metadata: { source: "agencyContacts", followUpId },
           ...requestMeta(req),
         },
       });
+      return { completed, next };
     });
-    return res.json({ ok: true, deletedFollowUpId: followUpId });
+
+    return res.status(201).json({ ok: true, ...result });
   } catch (error) {
     return handleError(res, error);
   }

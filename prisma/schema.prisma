@@ -342,7 +342,8 @@ model CrmNote {
 model CrmFollowUp {
   id               Int @id @default(autoincrement())
   agencyId         Int
-  contactId        Int
+  contactId        Int?
+  opportunityId    Int?
   assignedMemberId Int?
 
   title       String
@@ -357,14 +358,16 @@ model CrmFollowUp {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agency         Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  contact        ProfessionalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  assignedMember AgencyMember?       @relation("CrmFollowUpAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
-  createdBy      User?               @relation("CrmFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedBy      User?               @relation("CrmFollowUpUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  agency         Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact        ProfessionalContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity    CrmOpportunity?      @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  assignedMember AgencyMember?        @relation("CrmFollowUpAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  createdBy      User?                @relation("CrmFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy      User?                @relation("CrmFollowUpUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
   @@index([agencyId])
   @@index([contactId])
+  @@index([opportunityId])
   @@index([assignedMemberId])
   @@index([priority])
   @@index([dueAt])
@@ -372,8 +375,8 @@ model CrmFollowUp {
   @@index([agencyId, dueAt])
   @@index([agencyId, assignedMemberId, dueAt])
   @@index([contactId, dueAt])
+  @@index([opportunityId, dueAt])
 }
-
 model CrmOpportunity {
   id                  Int @id @default(autoincrement())
   agencyId            Int
@@ -402,6 +405,7 @@ model CrmOpportunity {
   inventoryProperty InventoryProperty?    @relation(fields: [inventoryPropertyId], references: [id], onDelete: SetNull)
   ownerMember       AgencyMember?         @relation("CrmOpportunityOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
   interactions      CrmInteraction[]
+  followUps         CrmFollowUp[]
 
   @@index([agencyId])
   @@index([contactId])
@@ -504,6 +508,7 @@ model CrmIntegrationConnection {
   member AgencyMember @relation("CrmIntegrationConnectionMember", fields: [memberId], references: [id], onDelete: Cascade)
   user   User         @relation("CrmIntegrationConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
   interactions CrmInteraction[]
+
 
   @@unique([agencyId, memberId, provider, connectionKey])
   @@index([agencyId])
