@@ -3172,20 +3172,50 @@ router.post("/integrations/google/send", async (req: AgentRequest, res) => {
   }
 });
 
-router.post("/integrations/google/sync", async (req: AgentRequest, res) => {
-  let connectionId: number | null = null;
+type CrmSyncAuditMode = "always" | "changes" | "never";
+
+function shouldWriteCrmSyncAudit(mode: CrmSyncAuditMode, result: any): boolean {
+  if (mode === "always") return true;
+  if (mode === "never") return false;
+  return [
+    result?.gmail?.imported,
+    result?.mail?.imported,
+    result?.calendar?.imported,
+  ].some((value) => Number(value || 0) > 0);
+}
+
+async function syncGoogleConnection(
+  workspace: AgencyWorkspace,
+  connection: any,
+  options: {
+    gmail?: boolean;
+    calendar?: boolean;
+    auditMode?: CrmSyncAuditMode;
+    auditSource?: string;
+    requestMetadata?: Record<string, unknown>;
+  } = {},
+) {
+  const requestedGmail = options.gmail !== false;
+  const requestedCalendar = options.calendar !== false;
+  const auditMode = options.auditMode || "always";
+  const auditSource = options.auditSource || "agencyContacts";
+  const requestMetadata = options.requestMetadata || {};
+  const connectionId = Number(connection?.id || 0) || null;
+
   try {
-    const workspace = await workspaceFor(req);
-    assertCanManageCrm(workspace);
-    const connection = await googleConnectionForWorkspace(workspace);
     if (!connection || connection.status === CrmIntegrationStatus.DISCONNECTED) {
-      throw new ApiError("CRM_GOOGLE_NOT_CONNECTED", "Connect a Google account before synchronizing", 409);
+      throw new ApiError(
+        "CRM_GOOGLE_NOT_CONNECTED",
+        "Connect a Google account before synchronizing",
+        409,
+      );
     }
-    connectionId = connection.id;
-    const requestedGmail = req.body?.gmail !== false;
-    const requestedCalendar = req.body?.calendar !== false;
     if (!requestedGmail && !requestedCalendar) {
-      throw new ApiError("VALIDATION_ERROR", "Select Gmail, Calendar, or both to synchronize", 400);
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Select Gmail, Calendar, or both to synchronize",
+        400,
+      );
     }
 
     const access = await usableGoogleAccessToken(connection);
@@ -3225,24 +3255,44 @@ router.post("/integrations/google/sync", async (req: AgentRequest, res) => {
       });
     }
 
-    await prisma.agencyAuditLog.create({
-      data: {
-        agencyId: workspace.agency.id,
-        actorUserId: workspace.membership.userId,
-        actorAgencyMemberId: workspace.membership.id,
-        effectiveUserId: workspace.membership.userId,
-        action: "CRM_GOOGLE_SYNCED",
-        entityType: "CrmIntegrationConnection",
-        entityId: String(connection.id),
-        changedFields: ["crmInteractions"],
-        metadata: {
-          source: "agencyContacts",
-          provider: "GOOGLE",
-          gmailImported: result.gmail?.imported ?? null,
-          calendarImported: result.calendar?.imported ?? null,
+    if (shouldWriteCrmSyncAudit(auditMode, result)) {
+      await prisma.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_GOOGLE_SYNCED",
+          entityType: "CrmIntegrationConnection",
+          entityId: String(connection.id),
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: auditSource,
+            provider: "GOOGLE",
+            gmailImported: result.gmail?.imported ?? null,
+            calendarImported: result.calendar?.imported ?? null,
+          },
+          ...requestMetadata,
         },
-        ...requestMeta(req),
-      },
+      });
+    }
+
+    return { result, liveConnection };
+  } catch (error) {
+    if (connectionId) await markGoogleConnectionError(connectionId, error);
+    throw error;
+  }
+}
+
+router.post("/integrations/google/sync", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await googleConnectionForWorkspace(workspace);
+    const { result, liveConnection } = await syncGoogleConnection(workspace, connection, {
+      gmail: req.body?.gmail !== false,
+      calendar: req.body?.calendar !== false,
+      requestMetadata: requestMeta(req),
     });
 
     return res.json({
@@ -3251,7 +3301,6 @@ router.post("/integrations/google/sync", async (req: AgentRequest, res) => {
       connection: publicGoogleConnection(liveConnection),
     });
   } catch (error) {
-    if (connectionId) await markGoogleConnectionError(connectionId, error);
     return handleError(res, error);
   }
 });
@@ -4016,12 +4065,25 @@ router.post("/integrations/microsoft/exchange", async (req: AgentRequest, res) =
   }
 });
 
-router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
-  let connectionId: number | null = null;
+async function syncMicrosoftConnection(
+  workspace: AgencyWorkspace,
+  connection: any,
+  options: {
+    mail?: boolean;
+    calendar?: boolean;
+    auditMode?: CrmSyncAuditMode;
+    auditSource?: string;
+    requestMetadata?: Record<string, unknown>;
+  } = {},
+) {
+  const requestedMail = options.mail !== false;
+  const requestedCalendar = options.calendar !== false;
+  const auditMode = options.auditMode || "always";
+  const auditSource = options.auditSource || "agencyContacts";
+  const requestMetadata = options.requestMetadata || {};
+  const connectionId = Number(connection?.id || 0) || null;
+
   try {
-    const workspace = await workspaceFor(req);
-    assertCanManageCrm(workspace);
-    const connection = await microsoftConnectionForWorkspace(workspace);
     if (!connection || connection.status === CrmIntegrationStatus.DISCONNECTED) {
       throw new ApiError(
         "CRM_MICROSOFT_NOT_CONNECTED",
@@ -4029,16 +4091,19 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
         409,
       );
     }
-    connectionId = connection.id;
-    const requestedMail = req.body?.mail !== false && req.body?.email !== false;
-    const requestedCalendar = req.body?.calendar !== false;
     if (!requestedMail && !requestedCalendar) {
-      throw new ApiError("VALIDATION_ERROR", "Select Outlook Mail, Calendar, or both to synchronize", 400);
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Select Outlook Mail, Calendar, or both to synchronize",
+        400,
+      );
     }
+
     const access = await usableMicrosoftAccessToken(connection);
     let liveConnection: any = access.connection;
     const result: any = { mail: null, calendar: null };
     const now = new Date();
+
     if (requestedMail) {
       result.mail = await microsoftMailSync(workspace, liveConnection, access.token);
       liveConnection = await prisma.crmIntegrationConnection.update({
@@ -4053,6 +4118,7 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
         },
       });
     }
+
     if (requestedCalendar) {
       result.calendar = await microsoftCalendarSync(workspace, liveConnection, access.token);
       liveConnection = await prisma.crmIntegrationConnection.update({
@@ -4077,36 +4143,56 @@ router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
       calendarSkipped: result.calendar?.skipped ?? null,
     });
 
-    await prisma.agencyAuditLog.create({
-      data: {
-        agencyId: workspace.agency.id,
-        actorUserId: workspace.membership.userId,
-        actorAgencyMemberId: workspace.membership.id,
-        effectiveUserId: workspace.membership.userId,
-        action: "CRM_MICROSOFT_SYNCED",
-        entityType: "CrmIntegrationConnection",
-        entityId: String(connection.id),
-        changedFields: ["crmInteractions"],
-        metadata: {
-          source: "agencyContacts",
-          provider: "MICROSOFT",
-          mailSeen: result.mail?.seen ?? null,
-          mailImported: result.mail?.imported ?? null,
-          mailSkipped: result.mail?.skipped ?? null,
-          mailPages: result.mail?.pages ?? null,
-          calendarImported: result.calendar?.imported ?? null,
-          calendarSkipped: result.calendar?.skipped ?? null,
+    if (shouldWriteCrmSyncAudit(auditMode, result)) {
+      await prisma.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_MICROSOFT_SYNCED",
+          entityType: "CrmIntegrationConnection",
+          entityId: String(connection.id),
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: auditSource,
+            provider: "MICROSOFT",
+            mailSeen: result.mail?.seen ?? null,
+            mailImported: result.mail?.imported ?? null,
+            mailSkipped: result.mail?.skipped ?? null,
+            mailPages: result.mail?.pages ?? null,
+            calendarImported: result.calendar?.imported ?? null,
+            calendarSkipped: result.calendar?.skipped ?? null,
+          },
+          ...requestMetadata,
         },
-        ...requestMeta(req),
-      },
+      });
+    }
+
+    return { result, liveConnection };
+  } catch (error) {
+    if (connectionId) await markMicrosoftConnectionError(connectionId, error);
+    throw error;
+  }
+}
+
+router.post("/integrations/microsoft/sync", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const connection = await microsoftConnectionForWorkspace(workspace);
+    const { result, liveConnection } = await syncMicrosoftConnection(workspace, connection, {
+      mail: req.body?.mail !== false && req.body?.email !== false,
+      calendar: req.body?.calendar !== false,
+      requestMetadata: requestMeta(req),
     });
+
     return res.json({
       ok: true,
       result,
       connection: publicMicrosoftConnection(liveConnection),
     });
   } catch (error) {
-    if (connectionId) await markMicrosoftConnectionError(connectionId, error);
     return handleError(res, error);
   }
 });
@@ -6473,320 +6559,199 @@ router.post(
   },
 );
 
-router.post(
-  "/integrations/imap-caldav/sync",
-  async (
-    req: AgentRequest,
-    res,
-  ) => {
-    let connectionId:
-      | number
-      | null = null;
+async function syncImapCaldavConnection(
+  workspace: AgencyWorkspace,
+  connection: any,
+  options: {
+    mail?: boolean;
+    calendar?: boolean;
+    auditMode?: CrmSyncAuditMode;
+    auditSource?: string;
+    requestMetadata?: Record<string, unknown>;
+  } = {},
+) {
+  const requestedMailOption = options.mail !== false;
+  const requestedCalendarOption = options.calendar !== false;
+  const auditMode = options.auditMode || "always";
+  const auditSource = options.auditSource || "agencyContacts";
+  const requestMetadata = options.requestMetadata || {};
+  const connectionId = Number(connection?.id || 0) || null;
 
-    try {
-      const workspace =
-        await workspaceFor(req);
-
-      assertCanManageCrm(
-        workspace,
+  try {
+    if (!connection || connection.status === CrmIntegrationStatus.DISCONNECTED) {
+      throw new ApiError(
+        "CRM_IMAP_CALDAV_NOT_CONNECTED",
+        "Connect an IMAP / CalDAV account before synchronizing",
+        409,
       );
+    }
 
-      const requestedConnectionId = imapCaldavConnectionIdFromRequest(req);
-      const connection =
-        await imapCaldavConnectionForWorkspace(
-          workspace,
-          { connectionId: requestedConnectionId },
-        );
+    const configuration = normaliseImapCaldavConfiguration(connection.configuration);
+    if (!configuration) {
+      throw new ApiError(
+        "CRM_IMAP_CALDAV_CONFIGURATION_INVALID",
+        "Stored IMAP / CalDAV configuration is invalid",
+        500,
+      );
+    }
 
-      if (
-        !connection ||
-        connection.status ===
-          CrmIntegrationStatus.DISCONNECTED
-      ) {
-        throw new ApiError(
-          "CRM_IMAP_CALDAV_NOT_CONNECTED",
-          "Connect an IMAP / CalDAV account before synchronizing",
-          409,
-        );
-      }
+    await validateImapCaldavNetworkTargets(configuration);
+    const password = decryptImapCaldavSecret(connection.accessTokenEncrypted);
+    if (!password) {
+      throw new ApiError(
+        "CRM_IMAP_CALDAV_RECONNECT_REQUIRED",
+        "Reconnect the mail account before synchronizing",
+        401,
+      );
+    }
 
-      connectionId =
-        connection.id;
+    const requestedMail = requestedMailOption;
+    const requestedCalendar = requestedCalendarOption && Boolean(configuration.caldav);
+    if (!requestedMail && !requestedCalendar) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Select Mail, Calendar, or both to synchronize",
+        400,
+      );
+    }
 
-      const configuration =
-        normaliseImapCaldavConfiguration(
-          connection.configuration,
-        );
+    const result: any = { mail: null, calendar: null };
+    let liveConnection: any = connection;
 
-      if (!configuration) {
-        throw new ApiError(
-          "CRM_IMAP_CALDAV_CONFIGURATION_INVALID",
-          "Stored IMAP / CalDAV configuration is invalid",
-          500,
-        );
-      }
-
-      await validateImapCaldavNetworkTargets(
+    if (requestedMail) {
+      result.mail = await imapMailSync(
+        workspace,
+        liveConnection,
+        password,
         configuration,
       );
-
-      const password =
-        decryptImapCaldavSecret(
-          connection.accessTokenEncrypted,
-        );
-
-      if (!password) {
-        throw new ApiError(
-          "CRM_IMAP_CALDAV_RECONNECT_REQUIRED",
-          "Reconnect the mail account before synchronizing",
-          401,
-        );
-      }
-
-      const requestedMail =
-        req.body?.mail !== false &&
-        req.body?.email !== false;
-
-      const requestedCalendar =
-        req.body?.calendar !== false &&
-        Boolean(
-          configuration.caldav,
-        );
-
-      if (
-        !requestedMail &&
-        !requestedCalendar
-      ) {
-        throw new ApiError(
-          "VALIDATION_ERROR",
-          "Select Mail, Calendar, or both to synchronize",
-          400,
-        );
-      }
-
-      const result: any = {
-        mail: null,
-        calendar: null,
-      };
-
-      let liveConnection: any =
-        connection;
-
-      if (requestedMail) {
-        result.mail =
-          await imapMailSync(
-            workspace,
-            liveConnection,
-            password,
-            configuration,
-          );
-
-        const now = new Date();
-
-        liveConnection =
-          await prisma.crmIntegrationConnection.update(
-            {
-              where: {
-                id: connection.id,
-              },
-              data: {
-                lastEmailSyncAt:
-                  now,
-                lastSyncAt: now,
-                status:
-                  CrmIntegrationStatus.CONNECTED,
-                lastErrorAt: null,
-                lastErrorCode:
-                  null,
-                lastErrorMessage:
-                  null,
-              },
-            },
-          );
-      }
-
-      if (requestedCalendar) {
-        result.calendar =
-          await caldavCalendarSync(
-            workspace,
-            liveConnection,
-            password,
-            configuration,
-          );
-
-        const now = new Date();
-
-        liveConnection =
-          await prisma.crmIntegrationConnection.update(
-            {
-              where: {
-                id: connection.id,
-              },
-              data: {
-                lastCalendarSyncAt:
-                  now,
-                lastSyncAt: now,
-                status:
-                  CrmIntegrationStatus.CONNECTED,
-                lastErrorAt: null,
-                lastErrorCode:
-                  null,
-                lastErrorMessage:
-                  null,
-              },
-            },
-          );
-      }
-
-      console.info(
-        "CRM IMAP / CalDAV sync completed",
-        {
-          agencyId:
-            workspace.agency.id,
-          memberId:
-            workspace.membership.id,
-          connectionId: connection.id,
-          connectionKey: connection.connectionKey,
-          accountEmail: connection.accountEmail,
-          type: configuration.type,
-          mailImported:
-            result.mail?.imported ??
-            null,
-          mailSkipped:
-            result.mail?.skipped ??
-            null,
-          calendarImported:
-            result.calendar
-              ?.imported ?? null,
-          calendarSkipped:
-            result.calendar
-              ?.skipped ?? null,
-          calendars:
-            result.calendar
-              ?.calendars ?? null,
-          calendarObjects:
-            result.calendar
-              ?.objects ?? null,
-          calendarParsedEvents:
-            result.calendar
-              ?.parsedEvents ?? null,
-          calendarInWindowParsedEvents:
-            result.calendar
-              ?.inWindowParsedEvents ?? null,
-          calendarOutOfWindowEvents:
-            result.calendar
-              ?.outOfWindowEvents ?? null,
-          calendarFallbackCalendars:
-            result.calendar
-              ?.fallbackCalendars ?? null,
-          calendarFallbackObjects:
-            result.calendar
-              ?.fallbackObjects ?? null,
-          calendarSkipReasons:
-            result.calendar
-              ?.skipReasons ?? null,
-          calendarSkippedEvents:
-            result.calendar
-              ?.skippedEventDiagnostics ?? null,
-          calendarDiagnostics:
-            result.calendar
-              ?.calendarDiagnostics ?? null,
+      const now = new Date();
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          lastEmailSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
         },
-      );
+      });
+    }
 
-      await prisma.agencyAuditLog.create(
-        {
-          data: {
-            agencyId:
-              workspace.agency.id,
-            actorUserId:
-              workspace.membership
-                .userId,
-            actorAgencyMemberId:
-              workspace.membership.id,
-            effectiveUserId:
-              workspace.membership
-                .userId,
-            action:
-              "CRM_IMAP_CALDAV_SYNCED",
-            entityType:
-              "CrmIntegrationConnection",
-            entityId: String(
-              connection.id,
-            ),
-            changedFields: [
-              "crmInteractions",
-            ],
-            metadata: {
-              source:
-                "agencyContacts",
-              provider:
-                "IMAP_CALDAV",
-              connectionKey: connection.connectionKey,
-              accountEmail: connection.accountEmail,
-              type: configuration.type,
-              mailSeen:
-                result.mail?.seen ??
-                null,
-              mailImported:
-                result.mail
-                  ?.imported ?? null,
-              mailSkipped:
-                result.mail
-                  ?.skipped ?? null,
-              mailboxes:
-                result.mail
-                  ?.mailboxes ?? null,
-              calendarImported:
-                result.calendar
-                  ?.imported ?? null,
-              calendarSkipped:
-                result.calendar
-                  ?.skipped ?? null,
-              calendars:
-                result.calendar
-                  ?.calendars ?? null,
-              calendarObjects:
-                result.calendar
-                  ?.objects ?? null,
-              calendarParsedEvents:
-                result.calendar
-                  ?.parsedEvents ?? null,
-              calendarInWindowParsedEvents:
-                result.calendar
-                  ?.inWindowParsedEvents ?? null,
-              calendarOutOfWindowEvents:
-                result.calendar
-                  ?.outOfWindowEvents ?? null,
-              calendarFallbackCalendars:
-                result.calendar
-                  ?.fallbackCalendars ?? null,
-            },
-            ...requestMeta(req),
+    if (requestedCalendar) {
+      result.calendar = await caldavCalendarSync(
+        workspace,
+        liveConnection,
+        password,
+        configuration,
+      );
+      const now = new Date();
+      liveConnection = await prisma.crmIntegrationConnection.update({
+        where: { id: connection.id },
+        data: {
+          lastCalendarSyncAt: now,
+          lastSyncAt: now,
+          status: CrmIntegrationStatus.CONNECTED,
+          lastErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
+      });
+    }
+
+    console.info("CRM IMAP / CalDAV sync completed", {
+      agencyId: workspace.agency.id,
+      memberId: workspace.membership.id,
+      connectionId: connection.id,
+      connectionKey: connection.connectionKey,
+      accountEmail: connection.accountEmail,
+      type: configuration.type,
+      mailImported: result.mail?.imported ?? null,
+      mailSkipped: result.mail?.skipped ?? null,
+      calendarImported: result.calendar?.imported ?? null,
+      calendarSkipped: result.calendar?.skipped ?? null,
+      calendars: result.calendar?.calendars ?? null,
+      calendarObjects: result.calendar?.objects ?? null,
+      calendarParsedEvents: result.calendar?.parsedEvents ?? null,
+      calendarInWindowParsedEvents: result.calendar?.inWindowParsedEvents ?? null,
+      calendarOutOfWindowEvents: result.calendar?.outOfWindowEvents ?? null,
+      calendarFallbackCalendars: result.calendar?.fallbackCalendars ?? null,
+      calendarFallbackObjects: result.calendar?.fallbackObjects ?? null,
+      calendarSkipReasons: result.calendar?.skipReasons ?? null,
+      calendarSkippedEvents: result.calendar?.skippedEventDiagnostics ?? null,
+      calendarDiagnostics: result.calendar?.calendarDiagnostics ?? null,
+    });
+
+    if (shouldWriteCrmSyncAudit(auditMode, result)) {
+      await prisma.agencyAuditLog.create({
+        data: {
+          agencyId: workspace.agency.id,
+          actorUserId: workspace.membership.userId,
+          actorAgencyMemberId: workspace.membership.id,
+          effectiveUserId: workspace.membership.userId,
+          action: "CRM_IMAP_CALDAV_SYNCED",
+          entityType: "CrmIntegrationConnection",
+          entityId: String(connection.id),
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: auditSource,
+            provider: "IMAP_CALDAV",
+            connectionKey: connection.connectionKey,
+            accountEmail: connection.accountEmail,
+            type: configuration.type,
+            mailSeen: result.mail?.seen ?? null,
+            mailImported: result.mail?.imported ?? null,
+            mailSkipped: result.mail?.skipped ?? null,
+            mailboxes: result.mail?.mailboxes ?? null,
+            calendarImported: result.calendar?.imported ?? null,
+            calendarSkipped: result.calendar?.skipped ?? null,
+            calendars: result.calendar?.calendars ?? null,
+            calendarObjects: result.calendar?.objects ?? null,
+            calendarParsedEvents: result.calendar?.parsedEvents ?? null,
+            calendarInWindowParsedEvents: result.calendar?.inWindowParsedEvents ?? null,
+            calendarOutOfWindowEvents: result.calendar?.outOfWindowEvents ?? null,
+            calendarFallbackCalendars: result.calendar?.fallbackCalendars ?? null,
           },
+          ...requestMetadata,
+        },
+      });
+    }
+
+    return { result, liveConnection };
+  } catch (error) {
+    if (connectionId) await markImapCaldavConnectionError(connectionId, error);
+    throw error;
+  }
+}
+
+router.post(
+  "/integrations/imap-caldav/sync",
+  async (req: AgentRequest, res) => {
+    try {
+      const workspace = await workspaceFor(req);
+      assertCanManageCrm(workspace);
+      const requestedConnectionId = imapCaldavConnectionIdFromRequest(req);
+      const connection = await imapCaldavConnectionForWorkspace(workspace, {
+        connectionId: requestedConnectionId,
+      });
+      const { result, liveConnection } = await syncImapCaldavConnection(
+        workspace,
+        connection,
+        {
+          mail: req.body?.mail !== false && req.body?.email !== false,
+          calendar: req.body?.calendar !== false,
+          requestMetadata: requestMeta(req),
         },
       );
 
       return res.json({
         ok: true,
         result,
-        connection:
-          publicImapCaldavConnection(
-            liveConnection,
-          ),
+        connection: publicImapCaldavConnection(liveConnection),
       });
     } catch (error) {
-      if (connectionId) {
-        await markImapCaldavConnectionError(
-          connectionId,
-          error,
-        );
-      }
-
-      return handleError(
-        res,
-        error,
-      );
+      return handleError(res, error);
     }
   },
 );
@@ -7003,6 +6968,78 @@ router.get("/:id", async (req: AgentRequest, res) => {
     return handleError(res, error);
   }
 });
+
+export async function runCrmBackgroundSyncCycle() {
+  const connections = await prisma.crmIntegrationConnection.findMany({
+    where: { status: CrmIntegrationStatus.CONNECTED },
+    orderBy: [{ agencyId: "asc" }, { memberId: "asc" }, { id: "asc" }],
+  });
+
+  const summary = {
+    scanned: connections.length,
+    synced: 0,
+    failed: 0,
+    skipped: 0,
+  };
+
+  for (const connection of connections) {
+    try {
+      const workspace = await requireAgencyWorkspace(connection.userId);
+      if (
+        workspace.agency.id !== connection.agencyId ||
+        workspace.membership.id !== connection.memberId
+      ) {
+        summary.skipped += 1;
+        console.warn("CRM background sync skipped connection with workspace mismatch", {
+          connectionId: connection.id,
+          agencyId: connection.agencyId,
+          memberId: connection.memberId,
+          userId: connection.userId,
+        });
+        continue;
+      }
+
+      if (connection.provider === GOOGLE_PROVIDER) {
+        await syncGoogleConnection(workspace, connection, {
+          gmail: true,
+          calendar: true,
+          auditMode: "changes",
+          auditSource: "crmBackgroundSync",
+        });
+      } else if (connection.provider === MICROSOFT_PROVIDER) {
+        await syncMicrosoftConnection(workspace, connection, {
+          mail: true,
+          calendar: true,
+          auditMode: "changes",
+          auditSource: "crmBackgroundSync",
+        });
+      } else if (connection.provider === IMAP_CALDAV_PROVIDER) {
+        await syncImapCaldavConnection(workspace, connection, {
+          mail: true,
+          calendar: true,
+          auditMode: "changes",
+          auditSource: "crmBackgroundSync",
+        });
+      } else {
+        summary.skipped += 1;
+        continue;
+      }
+
+      summary.synced += 1;
+    } catch (error) {
+      summary.failed += 1;
+      console.error("CRM background sync connection failed", {
+        connectionId: connection.id,
+        provider: connection.provider,
+        agencyId: connection.agencyId,
+        memberId: connection.memberId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return summary;
+}
 
 class ApiError extends Error {
   code: string;

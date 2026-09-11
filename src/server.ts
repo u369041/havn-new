@@ -20,6 +20,7 @@ import professionalAppRouter from "./routes/professionalApp";
 import agencyInventoryRouter from "./routes/agencyInventory";
 import agencyContactsRouter from "./routes/agencyContacts";
 import appRouter from "./routes/app";
+import { startCrmBackgroundSync } from "./services/crmBackgroundSync";
 
 const app = express();
 
@@ -231,4 +232,5 @@ const PORT = Number(process.env.PORT || 8080);
 
 app.listen(PORT, () => {
   console.log(`HAVN API running on ${PORT}`);
+  startCrmBackgroundSync();
 });
