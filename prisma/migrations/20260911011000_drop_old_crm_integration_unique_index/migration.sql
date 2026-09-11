@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "CrmIntegrationConnection_agencyId_memberId_provider_key";
