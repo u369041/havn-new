@@ -2108,7 +2108,56 @@ router.get("/opportunities", async (req: AgentRequest, res) => {
       orderBy: [{ isArchived: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
       take: q ? 50 : 1000,
     });
-    return res.json({ ok: true, items: items.map(opportunityForResponse) });
+
+    const opportunityIds = new Set(items.map((item) => item.id));
+    const routingByOpportunityId = new Map<number, {
+      source: string | null;
+      ownerMemberId: number | null;
+      enquiryId: number | null;
+      propertyId: number | null;
+      inventoryPropertyId: number | null;
+    }>();
+
+    if (opportunityIds.size > 0) {
+      const routingLogs = await prisma.agencyAuditLog.findMany({
+        where: {
+          agencyId: workspace.agency.id,
+          action: "CRM_PROPERTY_ENQUIRY_CAPTURED",
+        },
+        select: {
+          metadata: true,
+          createdAt: true,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 5000,
+      });
+
+      for (const log of routingLogs) {
+        const metadata = log.metadata && typeof log.metadata === "object" && !Array.isArray(log.metadata)
+          ? log.metadata as Prisma.JsonObject
+          : null;
+        if (!metadata) continue;
+
+        const opportunityId = asPositiveInt(metadata.opportunityId);
+        if (!opportunityId || !opportunityIds.has(opportunityId) || routingByOpportunityId.has(opportunityId)) continue;
+
+        routingByOpportunityId.set(opportunityId, {
+          source: nullableString(metadata.routingSource, 100),
+          ownerMemberId: asPositiveInt(metadata.ownerMemberId),
+          enquiryId: asPositiveInt(metadata.enquiryId),
+          propertyId: asPositiveInt(metadata.propertyId),
+          inventoryPropertyId: asPositiveInt(metadata.inventoryPropertyId),
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      items: items.map((item) => ({
+        ...opportunityForResponse(item),
+        assignmentRouting: routingByOpportunityId.get(item.id) || null,
+      })),
+    });
   } catch (error) {
     return handleError(res, error);
   }
