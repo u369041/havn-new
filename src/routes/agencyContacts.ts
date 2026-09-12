@@ -1535,6 +1535,38 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
           if (!candidate) throw new ApiError("CRM_IMPORT_DUPLICATE_RESOLUTION_INVALID", "The selected duplicate contact is no longer available", 409);
           contactId = candidate.id;
           duplicateContactsLinked += 1;
+
+          const existingDuplicateContact = await tx.professionalContact.findUnique({ where: { id: contactId } });
+          if (!existingDuplicateContact) throw new ApiError("CONTACT_NOT_FOUND", "Selected duplicate CRM contact no longer exists", 409);
+          await tx.agencyAuditLog.create({
+            data: {
+              agencyId: workspace.agency.id,
+              actorUserId: userId,
+              actorAgencyMemberId: workspace.membership.id,
+              effectiveUserId: userId,
+              action: "CRM_CONTACT_DUPLICATE_LINKED",
+              entityType: "ProfessionalContact",
+              entityId: String(existingDuplicateContact.id),
+              beforeState: contactSnapshot(existingDuplicateContact),
+              afterState: contactSnapshot(existingDuplicateContact),
+              changedFields: ["duplicateResolution"],
+              metadata: {
+                source: "crmImport",
+                importId,
+                sourceFileName,
+                rowNumber: row.rowNumber,
+                duplicateResolution: "use_existing",
+                duplicateReason: row.contactDuplicate.reason,
+                importedContact: {
+                  firstName: row.contact?.firstName || null,
+                  lastName: row.contact?.lastName || null,
+                  primaryEmail: row.contact?.primaryEmail || null,
+                  phoneNumber: row.contact?.phoneNumber || null,
+                  companyName: row.contact?.companyName || row.company?.name || null,
+                },
+              },
+            },
+          });
         }
         if (row.contact) {
           const emailKey = normalizeImportText(row.contact.primaryEmail);
