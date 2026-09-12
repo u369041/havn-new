@@ -808,6 +808,18 @@ type CrmImportPreviewRow = {
     existingValue: string | null;
     importValue: string | null;
   }>;
+  contactDuplicate?: {
+    reason: "phone" | "name";
+    candidates: Array<{
+      id: number;
+      firstName: string | null;
+      lastName: string | null;
+      primaryEmail: string | null;
+      phoneNumber: string | null;
+      companyName: string | null;
+      roles: string[];
+    }>;
+  };
 };
 
 const CRM_IMPORT_MAX_ROWS = 5000;
@@ -986,6 +998,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
     const matches: CrmImportPreviewRow["matches"] = {};
     let contactEnrichment: CrmImportPreviewRow["contactEnrichment"] | undefined;
     let contactConflicts: CrmImportPreviewRow["contactConflicts"] | undefined;
+    let contactDuplicate: CrmImportPreviewRow["contactDuplicate"] | undefined;
 
     try {
       const companyName = importCell(row, mapping, "company.name");
@@ -1125,6 +1138,19 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
           messages.push(`Contact repeats row ${seenContactsByEmail.get(emailKey)?.rowNumber} and will be reused`);
         } else if (phoneKey && (existingContactsByPhone.get(phoneKey)?.length || 0) > 0) {
           status = "possible_duplicate";
+          const duplicateCandidates = existingContactsByPhone.get(phoneKey) || [];
+          contactDuplicate = {
+            reason: "phone",
+            candidates: duplicateCandidates.map((candidate) => ({
+              id: candidate.id,
+              firstName: candidate.firstName || null,
+              lastName: candidate.lastName || null,
+              primaryEmail: candidate.primaryEmail || null,
+              phoneNumber: candidate.phoneNumber || null,
+              companyName: candidate.company?.name || candidate.companyName || null,
+              roles: (candidate.roles || []).map((role: unknown) => String(role)),
+            })),
+          };
           messages.push("Possible contact duplicate: phone number already exists");
         } else if (phoneKey && seenContactsByPhone.has(phoneKey)) {
           messages.push(`Contact repeats row ${seenContactsByPhone.get(phoneKey)?.rowNumber} and will be reused`);
@@ -1138,6 +1164,18 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
           });
           if (nameMatches.length) {
             status = "possible_duplicate";
+            contactDuplicate = {
+              reason: "name",
+              candidates: nameMatches.map((candidate) => ({
+                id: candidate.id,
+                firstName: candidate.firstName || null,
+                lastName: candidate.lastName || null,
+                primaryEmail: candidate.primaryEmail || null,
+                phoneNumber: candidate.phoneNumber || null,
+                companyName: candidate.company?.name || candidate.companyName || null,
+                roles: (candidate.roles || []).map((role: unknown) => String(role)),
+              })),
+            };
             messages.push("Possible contact duplicate: name already exists in this CRM");
           }
         }
@@ -1205,7 +1243,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
       messages.push(error instanceof Error ? error.message : "Row could not be validated");
     }
 
-    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches, contactEnrichment, contactConflicts });
+    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches, contactEnrichment, contactConflicts, contactDuplicate });
   }
 
   const summary = previewRows.reduce((acc, row) => {
@@ -1394,10 +1432,30 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
       }
       if (Object.keys(clean).length) conflictResolutions.set(rowNumber, clean);
     }
+    const rawDuplicateResolutions = req.body?.duplicateResolutions && typeof req.body.duplicateResolutions === "object"
+      ? req.body.duplicateResolutions as Record<string, unknown>
+      : {};
+    const duplicateResolutions = new Map<number, { action: "use_existing" | "create_new"; contactId?: number }>();
+    for (const [rawRowNumber, rawResolution] of Object.entries(rawDuplicateResolutions)) {
+      const rowNumber = asPositiveInt(rawRowNumber);
+      if (!rowNumber || !rawResolution || typeof rawResolution !== "object" || Array.isArray(rawResolution)) continue;
+      const action = importText((rawResolution as Record<string, unknown>).action, 50);
+      if (action === "create_new") {
+        duplicateResolutions.set(rowNumber, { action: "create_new" });
+      } else if (action === "use_existing") {
+        const contactId = asPositiveInt((rawResolution as Record<string, unknown>).contactId);
+        if (contactId) duplicateResolutions.set(rowNumber, { action: "use_existing", contactId });
+      }
+    }
     const preview = await crmImportPreview(workspace, rows, mapping);
     const unresolved = preview.rows.filter((row) => {
       if (skipRowNumbers.has(row.rowNumber)) return false;
-      if (row.status === "possible_duplicate") return true;
+      if (row.status === "possible_duplicate") {
+        const resolution = duplicateResolutions.get(row.rowNumber);
+        if (!resolution || !row.contactDuplicate?.candidates?.length) return true;
+        if (resolution.action === "create_new") return false;
+        return !resolution.contactId || !row.contactDuplicate.candidates.some((candidate) => candidate.id === resolution.contactId);
+      }
       if (row.status !== "needs_attention") return false;
       if (!row.contactConflicts?.length) return true;
       const choices = conflictResolutions.get(row.rowNumber) || {};
@@ -1421,12 +1479,15 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
     let contactsMatched = 0;
     let contactsEnriched = 0;
     let contactsResolved = 0;
+    let duplicateContactsLinked = 0;
+    let duplicateContactsCreated = 0;
     let opportunitiesCreated = 0;
     let opportunitiesMatched = 0;
 
     await prisma.$transaction(async (tx) => {
       for (const row of preview.rows) {
         if (row.status === "ignored" || skipRowNumbers.has(row.rowNumber)) continue;
+        const duplicateResolution = duplicateResolutions.get(row.rowNumber);
         let companyId = row.matches?.companyId || null;
         if (row.company) {
           const companyKey = normalizeImportText(row.company.name);
@@ -1454,7 +1515,13 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
                 entityId: String(created.id),
                 afterState: companySnapshot(created),
                 changedFields: Object.keys(companySnapshot(created) || {}),
-                metadata: { source: "crmImport", importId, sourceFileName, rowNumber: row.rowNumber },
+                metadata: {
+                  source: "crmImport",
+                  importId,
+                  sourceFileName,
+                  rowNumber: row.rowNumber,
+                  duplicateResolution: row.status === "possible_duplicate" ? duplicateResolution?.action : undefined,
+                },
               },
             });
           } else {
@@ -1463,6 +1530,12 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
         }
 
         let contactId = row.matches?.contactId || null;
+        if (row.status === "possible_duplicate" && row.contactDuplicate?.candidates?.length && duplicateResolution?.action === "use_existing") {
+          const candidate = row.contactDuplicate.candidates.find((item) => item.id === duplicateResolution.contactId);
+          if (!candidate) throw new ApiError("CRM_IMPORT_DUPLICATE_RESOLUTION_INVALID", "The selected duplicate contact is no longer available", 409);
+          contactId = candidate.id;
+          duplicateContactsLinked += 1;
+        }
         if (row.contact) {
           const emailKey = normalizeImportText(row.contact.primaryEmail);
           const phoneKey = normalizeImportPhone(row.contact.phoneNumber);
@@ -1482,6 +1555,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             contactId = created.id;
             contactIdsByIdentity.set(identityKey, created.id);
             contactsCreated += 1;
+            if (row.status === "possible_duplicate" && duplicateResolution?.action === "create_new") duplicateContactsCreated += 1;
             await tx.agencyAuditLog.create({
               data: {
                 agencyId: workspace.agency.id,
@@ -1616,6 +1690,8 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             contactsMatched,
             contactsEnriched,
             contactsResolved,
+            duplicateContactsLinked,
+            duplicateContactsCreated,
             opportunitiesCreated,
             opportunitiesMatched,
             rowsSkipped: skipRowNumbers.size,
@@ -1638,6 +1714,8 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
         contactsMatched,
         contactsEnriched,
         contactsResolved,
+        duplicateContactsLinked,
+        duplicateContactsCreated,
         opportunitiesCreated,
         opportunitiesMatched,
         rowsSkipped: skipRowNumbers.size,
