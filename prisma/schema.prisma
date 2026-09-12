@@ -69,6 +69,8 @@ model User {
   crmViewingsUpdated           CrmViewing[]               @relation("CrmViewingUpdatedBy")
   crmOffersCreated             CrmOffer[]                 @relation("CrmOfferCreatedBy")
   crmOffersUpdated             CrmOffer[]                 @relation("CrmOfferUpdatedBy")
+  crmSaleProgressionsCreated   CrmSaleProgression[]       @relation("CrmSaleProgressionCreatedBy")
+  crmSaleProgressionsUpdated   CrmSaleProgression[]       @relation("CrmSaleProgressionUpdatedBy")
   crmIntegrationConnections    CrmIntegrationConnection[] @relation("CrmIntegrationConnectionUser")
   inventoryContactLinksCreated InventoryPropertyContact[] @relation("InventoryPropertyContactCreatedBy")
   inventoryContactLinksUpdated InventoryPropertyContact[] @relation("InventoryPropertyContactUpdatedBy")
@@ -187,6 +189,7 @@ model Agency {
   crmInteractions           CrmInteraction[]
   crmViewings               CrmViewing[]
   crmOffers                 CrmOffer[]
+  crmSaleProgressions       CrmSaleProgression[]
   crmIntegrationConnections CrmIntegrationConnection[]
   inventoryProperties       InventoryProperty[]
   inventoryPropertyContacts InventoryPropertyContact[]
@@ -227,6 +230,7 @@ model AgencyMember {
   crmInteractionsOwned        CrmInteraction[]     @relation("CrmInteractionOwner")
   crmViewingsAssigned          CrmViewing[]         @relation("CrmViewingAssignedMember")
   crmOffersAssigned            CrmOffer[]           @relation("CrmOfferAssignedMember")
+  crmSaleProgressionsAssigned  CrmSaleProgression[]  @relation("CrmSaleProgressionAssignedMember")
   crmIntegrationConnections   CrmIntegrationConnection[] @relation("CrmIntegrationConnectionMember")
 
   @@unique([agencyId, userId])
@@ -274,6 +278,10 @@ model ProfessionalContact {
   crmInteractions     CrmInteraction[]
   crmViewings         CrmViewing[]
   crmOffers           CrmOffer[]
+  crmSaleBuyerProgressions          CrmSaleProgression[] @relation("CrmSaleBuyer")
+  crmSaleVendorProgressions         CrmSaleProgression[] @relation("CrmSaleVendor")
+  crmSaleBuyerSolicitorProgressions CrmSaleProgression[] @relation("CrmSaleBuyerSolicitor")
+  crmSaleVendorSolicitorProgressions CrmSaleProgression[] @relation("CrmSaleVendorSolicitor")
 
   @@index([agencyId])
   @@index([primaryEmail])
@@ -418,6 +426,7 @@ model CrmOpportunity {
   followUps         CrmFollowUp[]
   viewings          CrmViewing[]
   offers            CrmOffer[]
+  saleProgression   CrmSaleProgression?
 
   @@index([agencyId])
   @@index([contactId])
@@ -554,6 +563,7 @@ model CrmOffer {
   assignedMember    AgencyMember?        @relation("CrmOfferAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
   createdBy         User?                @relation("CrmOfferCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy         User?                @relation("CrmOfferUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  acceptedSaleProgression CrmSaleProgression?
 
   @@index([agencyId])
   @@index([contactId])
@@ -565,6 +575,69 @@ model CrmOffer {
   @@index([agencyId, submittedAt])
   @@index([agencyId, inventoryPropertyId, submittedAt])
   @@index([opportunityId, submittedAt])
+}
+
+
+model CrmSaleProgression {
+  id                  Int @id @default(autoincrement())
+  agencyId            Int
+  opportunityId       Int @unique
+  inventoryPropertyId Int @unique
+  acceptedOfferId     Int @unique
+  buyerContactId      Int?
+  vendorContactId     Int?
+  buyerSolicitorId    Int?
+  vendorSolicitorId   Int?
+  assignedMemberId    Int?
+
+  agreedPriceCents BigInt
+  agreedAt          DateTime @default(now())
+  status            CrmSaleProgressionStatus @default(SALE_AGREED)
+  buyerFunding      CrmBuyerFundingStatus @default(UNKNOWN)
+
+  proofOfFundsReceivedAt DateTime?
+  mortgageApprovalAt     DateTime?
+  bookingDepositCents    BigInt?
+  bookingDepositRequestedAt DateTime?
+  bookingDepositReceivedAt  DateTime?
+
+  solicitorsInstructedAt DateTime?
+  memorandumIssuedAt     DateTime?
+  contractsIssuedAt      DateTime?
+  surveyCompletedAt      DateTime?
+  loanOfferAt            DateTime?
+  contractsSignedAt      DateTime?
+  closingDate            DateTime?
+  closedAt               DateTime?
+  fallenThroughAt        DateTime?
+
+  notes String?
+
+  createdByUserId Int?
+  updatedByUserId Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agency            Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  opportunity       CrmOpportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  inventoryProperty InventoryProperty    @relation(fields: [inventoryPropertyId], references: [id], onDelete: Cascade)
+  acceptedOffer     CrmOffer             @relation(fields: [acceptedOfferId], references: [id], onDelete: Restrict)
+  buyerContact      ProfessionalContact? @relation("CrmSaleBuyer", fields: [buyerContactId], references: [id], onDelete: SetNull)
+  vendorContact     ProfessionalContact? @relation("CrmSaleVendor", fields: [vendorContactId], references: [id], onDelete: SetNull)
+  buyerSolicitor    ProfessionalContact? @relation("CrmSaleBuyerSolicitor", fields: [buyerSolicitorId], references: [id], onDelete: SetNull)
+  vendorSolicitor   ProfessionalContact? @relation("CrmSaleVendorSolicitor", fields: [vendorSolicitorId], references: [id], onDelete: SetNull)
+  assignedMember    AgencyMember?        @relation("CrmSaleProgressionAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  createdBy         User?                @relation("CrmSaleProgressionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?                @relation("CrmSaleProgressionUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([status])
+  @@index([assignedMemberId])
+  @@index([buyerContactId])
+  @@index([vendorContactId])
+  @@index([closingDate])
+  @@index([agencyId, status])
+  @@index([agencyId, assignedMemberId, status])
 }
 
 model CrmIntegrationConnection {
@@ -739,6 +812,7 @@ model InventoryProperty {
   crmInteractions  CrmInteraction[]
   crmViewings      CrmViewing[]
   crmOffers        CrmOffer[]
+  crmSaleProgression CrmSaleProgression?
 
   @@index([agencyId])
   @@index([stage])
@@ -1252,6 +1326,26 @@ enum CrmOfferStatus {
   REJECTED
   WITHDRAWN
   EXPIRED
+}
+
+
+enum CrmSaleProgressionStatus {
+  SALE_AGREED
+  SOLICITORS_INSTRUCTED
+  MEMORANDUM_ISSUED
+  CONTRACTS_ISSUED
+  SURVEY_COMPLETE
+  LOAN_OFFER
+  CONTRACTS_SIGNED
+  CLOSING_AGREED
+  CLOSED
+  FALLEN_THROUGH
+}
+
+enum CrmBuyerFundingStatus {
+  UNKNOWN
+  CASH
+  MORTGAGE
 }
 
 enum CrmViewingStatus {

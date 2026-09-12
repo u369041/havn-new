@@ -17,6 +17,8 @@ import {
   CrmViewingStatus,
   CrmViewingOutcome,
   CrmOfferStatus,
+  CrmSaleProgressionStatus,
+  CrmBuyerFundingStatus,
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
@@ -229,6 +231,8 @@ const CRM_INTERACTION_PROVIDERS = new Set<string>(Object.values(CrmInteractionPr
 const CRM_VIEWING_STATUSES = new Set<string>(Object.values(CrmViewingStatus));
 const CRM_VIEWING_OUTCOMES = new Set<string>(Object.values(CrmViewingOutcome));
 const CRM_OFFER_STATUSES = new Set<string>(Object.values(CrmOfferStatus));
+const CRM_SALE_PROGRESSION_STATUSES = new Set<string>(Object.values(CrmSaleProgressionStatus));
+const CRM_BUYER_FUNDING_STATUSES = new Set<string>(Object.values(CrmBuyerFundingStatus));
 
 function parseEnumValue<T extends string>(
   value: unknown,
@@ -674,6 +678,50 @@ function offerSnapshot(item: any) {
 function offerForResponse(item: any) {
   if (!item) return item;
   return { ...item, amountCents: item.amountCents == null ? null : Number(item.amountCents) };
+}
+
+const saleProgressionInclude = {
+  opportunity: { select: { id: true, title: true, type: true, stage: true, probability: true, valueCents: true, ownerMemberId: true, isArchived: true } },
+  inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, askingPrice: true, primaryContactId: true, archivedAt: true } },
+  acceptedOffer: { select: { id: true, amountCents: true, status: true, submittedAt: true, respondedAt: true } },
+  buyerContact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, isArchived: true } },
+  vendorContact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, isArchived: true } },
+  buyerSolicitor: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, isArchived: true } },
+  vendorSolicitor: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, isArchived: true } },
+  assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+} satisfies Prisma.CrmSaleProgressionInclude;
+
+function saleProgressionSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id, agencyId: item.agencyId, opportunityId: item.opportunityId, inventoryPropertyId: item.inventoryPropertyId,
+    acceptedOfferId: item.acceptedOfferId, buyerContactId: item.buyerContactId, vendorContactId: item.vendorContactId,
+    buyerSolicitorId: item.buyerSolicitorId, vendorSolicitorId: item.vendorSolicitorId, assignedMemberId: item.assignedMemberId,
+    agreedPriceCents: item.agreedPriceCents == null ? null : Number(item.agreedPriceCents), agreedAt: item.agreedAt, status: item.status,
+    buyerFunding: item.buyerFunding, proofOfFundsReceivedAt: item.proofOfFundsReceivedAt, mortgageApprovalAt: item.mortgageApprovalAt,
+    bookingDepositCents: item.bookingDepositCents == null ? null : Number(item.bookingDepositCents),
+    bookingDepositRequestedAt: item.bookingDepositRequestedAt, bookingDepositReceivedAt: item.bookingDepositReceivedAt,
+    solicitorsInstructedAt: item.solicitorsInstructedAt, memorandumIssuedAt: item.memorandumIssuedAt, contractsIssuedAt: item.contractsIssuedAt,
+    surveyCompletedAt: item.surveyCompletedAt, loanOfferAt: item.loanOfferAt, contractsSignedAt: item.contractsSignedAt, closingDate: item.closingDate,
+    closedAt: item.closedAt, fallenThroughAt: item.fallenThroughAt, notes: item.notes, createdAt: item.createdAt, updatedAt: item.updatedAt,
+  };
+}
+
+function saleProgressionForResponse(item: any) {
+  if (!item) return item;
+  return {
+    ...item,
+    agreedPriceCents: item.agreedPriceCents == null ? null : Number(item.agreedPriceCents),
+    bookingDepositCents: item.bookingDepositCents == null ? null : Number(item.bookingDepositCents),
+    opportunity: item.opportunity ? { ...item.opportunity, valueCents: item.opportunity.valueCents == null ? null : Number(item.opportunity.valueCents) } : item.opportunity,
+    acceptedOffer: item.acceptedOffer ? { ...item.acceptedOffer, amountCents: item.acceptedOffer.amountCents == null ? null : Number(item.acceptedOffer.amountCents) } : item.acceptedOffer,
+  };
+}
+
+async function assertSaleContact(contactId: number | null, agencyId: number, field: string) {
+  if (contactId == null) return;
+  const contact = await prisma.professionalContact.findFirst({ where: { id: contactId, agencyId, isArchived: false }, select: { id: true } });
+  if (!contact) throw new ApiError("CONTACT_NOT_FOUND", `${field} must be an active CRM contact in this agency`, 404);
 }
 
 async function assertOfferRelations(agencyId: number, values: {
@@ -2741,6 +2789,30 @@ router.patch("/offers/:offerId", async (req: AgentRequest, res) => {
             valueCents: updated.amountCents,
           },
         });
+        const saleProperty = await tx.inventoryProperty.findFirst({
+          where: { id: updated.inventoryPropertyId, agencyId: workspace.agency.id, archivedAt: null },
+          select: { id: true, primaryContactId: true },
+        });
+        if (saleProperty) {
+          await tx.inventoryProperty.update({
+            where: { id: saleProperty.id },
+            data: { stage: "SALE_AGREED", saleAgreedDate: completedAt, updatedByUserId: workspace.membership.userId },
+          });
+          await tx.crmSaleProgression.upsert({
+            where: { opportunityId: updated.opportunityId },
+            create: {
+              agencyId: workspace.agency.id, opportunityId: updated.opportunityId, inventoryPropertyId: updated.inventoryPropertyId, acceptedOfferId: updated.id,
+              buyerContactId: updated.contactId, vendorContactId: saleProperty.primaryContactId, assignedMemberId: updated.assignedMemberId,
+              agreedPriceCents: updated.amountCents, agreedAt: completedAt, status: CrmSaleProgressionStatus.SALE_AGREED,
+              createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+            },
+            update: {
+              acceptedOfferId: updated.id, buyerContactId: updated.contactId, vendorContactId: saleProperty.primaryContactId, assignedMemberId: updated.assignedMemberId,
+              agreedPriceCents: updated.amountCents, agreedAt: completedAt, status: CrmSaleProgressionStatus.SALE_AGREED, closedAt: null, fallenThroughAt: null,
+              updatedByUserId: workspace.membership.userId,
+            },
+          });
+        }
         await tx.crmFollowUp.updateMany({
           where: {
             agencyId: workspace.agency.id,
@@ -2773,6 +2845,102 @@ router.patch("/offers/:offerId", async (req: AgentRequest, res) => {
       return updated;
     });
     return res.json({ ok: true, item: offerForResponse(result) });
+  } catch (error) { return handleError(res, error); }
+});
+
+
+/* CRM sale progression */
+router.get("/sale-progressions", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const status = parseEnumValue<CrmSaleProgressionStatus>(req.query.status, CRM_SALE_PROGRESSION_STATUSES, "sale progression status");
+    const assignedMemberId = req.query.assignedMemberId == null || req.query.assignedMemberId === "" ? null : asPositiveInt(req.query.assignedMemberId);
+    if (req.query.assignedMemberId != null && req.query.assignedMemberId !== "" && !assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+    const items = await prisma.crmSaleProgression.findMany({
+      where: { agencyId: workspace.agency.id, ...(status ? { status } : {}), ...(assignedMemberId ? { assignedMemberId } : {}) },
+      include: saleProgressionInclude,
+      orderBy: [{ status: "asc" }, { closingDate: "asc" }, { updatedAt: "desc" }],
+      take: 1000,
+    });
+    return res.json({ ok: true, items: items.map(saleProgressionForResponse) });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.patch("/sale-progressions/:saleId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const saleId = asPositiveInt(req.params.saleId);
+    if (!saleId) throw new ApiError("VALIDATION_ERROR", "Invalid sale progression id", 400);
+    const before = await prisma.crmSaleProgression.findFirst({ where: { id: saleId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_SALE_PROGRESSION_NOT_FOUND", "Sale progression not found", 404);
+    const body = req.body || {};
+    const data: Prisma.CrmSaleProgressionUncheckedUpdateInput = { updatedByUserId: workspace.membership.userId };
+    if ("status" in body) { const v = parseEnumValue<CrmSaleProgressionStatus>(body.status, CRM_SALE_PROGRESSION_STATUSES, "sale progression status"); if (!v) throw new ApiError("VALIDATION_ERROR", "status is required", 400); data.status = v; }
+    if ("buyerFunding" in body) { const v = parseEnumValue<CrmBuyerFundingStatus>(body.buyerFunding, CRM_BUYER_FUNDING_STATUSES, "buyer funding"); if (!v) throw new ApiError("VALIDATION_ERROR", "buyerFunding is required", 400); data.buyerFunding = v; }
+    const contactFields = ["vendorContactId", "buyerSolicitorId", "vendorSolicitorId"] as const;
+    for (const field of contactFields) {
+      if (field in body) {
+        const value = body[field] == null || body[field] === "" ? null : asPositiveInt(body[field]);
+        if (body[field] != null && body[field] !== "" && !value) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+        await assertSaleContact(value, workspace.agency.id, field);
+        (data as any)[field] = value;
+      }
+    }
+    if ("assignedMemberId" in body) { const v = body.assignedMemberId == null || body.assignedMemberId === "" ? null : asPositiveInt(body.assignedMemberId); if (body.assignedMemberId != null && body.assignedMemberId !== "" && !v) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer or null", 400); await assertActiveAgencyMember(v, workspace.agency.id); data.assignedMemberId = v; }
+    const dateFields = ["proofOfFundsReceivedAt","mortgageApprovalAt","bookingDepositRequestedAt","bookingDepositReceivedAt","solicitorsInstructedAt","memorandumIssuedAt","contractsIssuedAt","surveyCompletedAt","loanOfferAt","contractsSignedAt","closingDate"] as const;
+    for (const field of dateFields) if (field in body) (data as any)[field] = nullableDate(body[field], field);
+    if ("bookingDepositCents" in body) data.bookingDepositCents = nullableNonNegativeBigInt(body.bookingDepositCents, "bookingDepositCents");
+    if ("notes" in body) data.notes = nullableString(body.notes, 10000);
+
+    const status = (data.status as CrmSaleProgressionStatus | undefined) || before.status;
+    const now = new Date();
+    const milestoneField: Partial<Record<CrmSaleProgressionStatus, string>> = {
+      [CrmSaleProgressionStatus.SOLICITORS_INSTRUCTED]: "solicitorsInstructedAt",
+      [CrmSaleProgressionStatus.MEMORANDUM_ISSUED]: "memorandumIssuedAt",
+      [CrmSaleProgressionStatus.CONTRACTS_ISSUED]: "contractsIssuedAt",
+      [CrmSaleProgressionStatus.SURVEY_COMPLETE]: "surveyCompletedAt",
+      [CrmSaleProgressionStatus.LOAN_OFFER]: "loanOfferAt",
+      [CrmSaleProgressionStatus.CONTRACTS_SIGNED]: "contractsSignedAt",
+      [CrmSaleProgressionStatus.CLOSING_AGREED]: "closingDate",
+      [CrmSaleProgressionStatus.CLOSED]: "closedAt",
+      [CrmSaleProgressionStatus.FALLEN_THROUGH]: "fallenThroughAt",
+    };
+    const mf = milestoneField[status]; if (mf && !(data as any)[mf] && !(before as any)[mf]) (data as any)[mf] = now;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmSaleProgression.update({ where: { id: saleId }, data, include: saleProgressionInclude });
+      const changed = snapshotChangedFields(saleProgressionSnapshot(before), saleProgressionSnapshot(updated));
+
+      if (status === CrmSaleProgressionStatus.CLOSED) {
+        await tx.crmOpportunity.update({ where: { id: updated.opportunityId }, data: { stage: CrmOpportunityStage.WON, probability: 100, valueCents: updated.agreedPriceCents } });
+        await tx.inventoryProperty.update({ where: { id: updated.inventoryPropertyId }, data: { stage: "SOLD", completedAt: updated.closedAt || now, updatedByUserId: workspace.membership.userId } });
+        await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null }, data: { completedAt: now, updatedByUserId: workspace.membership.userId } });
+      } else if (status === CrmSaleProgressionStatus.FALLEN_THROUGH) {
+        await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: { startsWith: "Progress sale:" } }, data: { completedAt: now, updatedByUserId: workspace.membership.userId } });
+      } else {
+        const nextByStatus: Partial<Record<CrmSaleProgressionStatus, string>> = {
+          [CrmSaleProgressionStatus.SALE_AGREED]: "Confirm solicitors and booking deposit",
+          [CrmSaleProgressionStatus.SOLICITORS_INSTRUCTED]: "Issue memorandum of sale",
+          [CrmSaleProgressionStatus.MEMORANDUM_ISSUED]: "Track contracts and booking deposit",
+          [CrmSaleProgressionStatus.CONTRACTS_ISSUED]: "Track survey and loan offer",
+          [CrmSaleProgressionStatus.SURVEY_COMPLETE]: "Track loan offer and contract signing",
+          [CrmSaleProgressionStatus.LOAN_OFFER]: "Progress contracts to signing",
+          [CrmSaleProgressionStatus.CONTRACTS_SIGNED]: "Agree closing date",
+          [CrmSaleProgressionStatus.CLOSING_AGREED]: "Complete sale",
+        };
+        const next = nextByStatus[status];
+        if (next) {
+          await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, OR: [{ title: "Progress agreed offer" }, { title: { startsWith: "Progress sale:" } }] }, data: { completedAt: now, updatedByUserId: workspace.membership.userId } });
+          const title = `Progress sale: ${next}`;
+          await tx.crmFollowUp.create({ data: { agencyId: workspace.agency.id, contactId: updated.buyerContactId, opportunityId: updated.opportunityId, assignedMemberId: updated.assignedMemberId, title, description: `Created automatically from sale progression #${updated.id}.`, dueAt: new Date(Date.now() + 24*60*60*1000), priority: CrmTaskPriority.HIGH, createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId } });
+        }
+      }
+
+      if (changed.length) await tx.agencyAuditLog.create({ data: { agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId, action: "CRM_SALE_PROGRESSION_UPDATED", entityType: "CrmSaleProgression", entityId: String(updated.id), beforeState: saleProgressionSnapshot(before), afterState: saleProgressionSnapshot(updated), changedFields: changed, metadata: { source: "agencyContacts", opportunityId: updated.opportunityId, inventoryPropertyId: updated.inventoryPropertyId, acceptedOfferId: updated.acceptedOfferId }, ...requestMeta(req) } });
+      return updated;
+    });
+    return res.json({ ok: true, item: saleProgressionForResponse(result) });
   } catch (error) { return handleError(res, error); }
 });
 
