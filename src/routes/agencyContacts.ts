@@ -14,6 +14,8 @@ import {
   CrmInteractionProvider,
   CrmIntegrationProvider,
   CrmIntegrationStatus,
+  CrmViewingStatus,
+  CrmViewingOutcome,
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
@@ -223,6 +225,8 @@ const CRM_OPPORTUNITY_STAGES = new Set<string>(Object.values(CrmOpportunityStage
 const CRM_INTERACTION_TYPES = new Set<string>(Object.values(CrmInteractionType));
 const CRM_INTERACTION_DIRECTIONS = new Set<string>(Object.values(CrmInteractionDirection));
 const CRM_INTERACTION_PROVIDERS = new Set<string>(Object.values(CrmInteractionProvider));
+const CRM_VIEWING_STATUSES = new Set<string>(Object.values(CrmViewingStatus));
+const CRM_VIEWING_OUTCOMES = new Set<string>(Object.values(CrmViewingOutcome));
 
 function parseEnumValue<T extends string>(
   value: unknown,
@@ -549,6 +553,86 @@ async function assertInteractionRelations(agencyId: number, values: {
     await assertActiveAgencyMember(values.ownerMemberId, agencyId);
   }
 }
+
+
+function viewingSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    agencyId: item.agencyId,
+    contactId: item.contactId,
+    opportunityId: item.opportunityId,
+    inventoryPropertyId: item.inventoryPropertyId,
+    assignedMemberId: item.assignedMemberId,
+    scheduledAt: item.scheduledAt,
+    durationMinutes: item.durationMinutes,
+    status: item.status,
+    outcome: item.outcome,
+    notes: item.notes,
+    feedbackNotes: item.feedbackNotes,
+    completedAt: item.completedAt,
+    cancelledAt: item.cancelledAt,
+    createdByUserId: item.createdByUserId,
+    updatedByUserId: item.updatedByUserId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+async function assertViewingRelations(agencyId: number, values: {
+  contactId?: number | null;
+  opportunityId?: number | null;
+  inventoryPropertyId?: number | null;
+  assignedMemberId?: number | null;
+}) {
+  const contactId = values.contactId ?? null;
+  const opportunityId = values.opportunityId ?? null;
+  const inventoryPropertyId = values.inventoryPropertyId ?? null;
+  const assignedMemberId = values.assignedMemberId ?? null;
+
+  if (contactId != null) {
+    const contact = await prisma.professionalContact.findFirst({
+      where: { id: contactId, agencyId, isArchived: false },
+      select: { id: true },
+    });
+    if (!contact) throw new ApiError("CONTACT_NOT_FOUND", "Viewing contact must be an active CRM contact in this agency", 404);
+  }
+
+  let opportunity: { id: number; contactId: number | null; inventoryPropertyId: number | null } | null = null;
+  if (opportunityId != null) {
+    opportunity = await prisma.crmOpportunity.findFirst({
+      where: { id: opportunityId, agencyId, isArchived: false },
+      select: { id: true, contactId: true, inventoryPropertyId: true },
+    });
+    if (!opportunity) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "Viewing opportunity must be an active CRM opportunity in this agency", 404);
+  }
+
+  if (inventoryPropertyId != null) {
+    const property = await prisma.inventoryProperty.findFirst({
+      where: { id: inventoryPropertyId, agencyId, archivedAt: null },
+      select: { id: true },
+    });
+    if (!property) throw new ApiError("INVENTORY_NOT_FOUND", "Viewing property must be an active Inventory record in this agency", 404);
+  }
+
+  if (assignedMemberId != null) await assertActiveAgencyMember(assignedMemberId, agencyId);
+
+  if (opportunity && contactId != null && opportunity.contactId != null && opportunity.contactId !== contactId) {
+    throw new ApiError("CRM_VIEWING_RELATION_MISMATCH", "Viewing contact must match the contact linked to this opportunity", 409);
+  }
+  if (opportunity && inventoryPropertyId != null && opportunity.inventoryPropertyId != null && opportunity.inventoryPropertyId !== inventoryPropertyId) {
+    throw new ApiError("CRM_VIEWING_RELATION_MISMATCH", "Viewing property must match the property linked to this opportunity", 409);
+  }
+}
+
+const viewingInclude = {
+  contact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, roles: true, isArchived: true } },
+  opportunity: { select: { id: true, title: true, type: true, stage: true, contactId: true, inventoryPropertyId: true, ownerMemberId: true, isArchived: true } },
+  inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
+  assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+  createdBy: { select: { id: true, name: true, email: true } },
+  updatedBy: { select: { id: true, name: true, email: true } },
+} satisfies Prisma.CrmViewingInclude;
 
 function interactionSnapshot(item: any) {
   if (!item) return null;
@@ -2313,6 +2397,144 @@ router.post("/opportunities/:opportunityId/restore", async (req: AgentRequest, r
     return res.json({ ok: true, item: opportunityForResponse(after) });
   } catch (error) { return handleError(res, error); }
 });
+
+
+/* CRM viewings */
+router.get("/viewings", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const contactId = req.query.contactId == null || req.query.contactId === "" ? null : asPositiveInt(req.query.contactId);
+    const opportunityId = req.query.opportunityId == null || req.query.opportunityId === "" ? null : asPositiveInt(req.query.opportunityId);
+    const inventoryPropertyId = req.query.inventoryPropertyId == null || req.query.inventoryPropertyId === "" ? null : asPositiveInt(req.query.inventoryPropertyId);
+    const assignedMemberId = req.query.assignedMemberId == null || req.query.assignedMemberId === "" ? null : asPositiveInt(req.query.assignedMemberId);
+    const status = parseEnumValue<CrmViewingStatus>(req.query.status, CRM_VIEWING_STATUSES, "viewing status");
+    if (req.query.contactId != null && req.query.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer", 400);
+    if (req.query.opportunityId != null && req.query.opportunityId !== "" && !opportunityId) throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer", 400);
+    if (req.query.inventoryPropertyId != null && req.query.inventoryPropertyId !== "" && !inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId must be a positive integer", 400);
+    if (req.query.assignedMemberId != null && req.query.assignedMemberId !== "" && !assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId must be a positive integer", 400);
+
+    const items = await prisma.crmViewing.findMany({
+      where: {
+        agencyId: workspace.agency.id,
+        ...(contactId ? { contactId } : {}),
+        ...(opportunityId ? { opportunityId } : {}),
+        ...(inventoryPropertyId ? { inventoryPropertyId } : {}),
+        ...(assignedMemberId ? { assignedMemberId } : {}),
+        ...(status ? { status } : {}),
+      },
+      include: viewingInclude,
+      orderBy: [{ scheduledAt: "asc" }, { id: "asc" }],
+      take: 1000,
+    });
+    return res.json({ ok: true, items });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.post("/viewings", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const body = req.body || {};
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    const opportunityId = body.opportunityId == null || body.opportunityId === "" ? null : asPositiveInt(body.opportunityId);
+    const inventoryPropertyId = body.inventoryPropertyId == null || body.inventoryPropertyId === "" ? null : asPositiveInt(body.inventoryPropertyId);
+    const assignedMemberId = body.assignedMemberId == null || body.assignedMemberId === "" ? workspace.membership.id : asPositiveInt(body.assignedMemberId);
+    for (const [field, raw, parsed] of [["contactId", body.contactId, contactId], ["opportunityId", body.opportunityId, opportunityId], ["inventoryPropertyId", body.inventoryPropertyId, inventoryPropertyId], ["assignedMemberId", body.assignedMemberId, assignedMemberId]] as const) {
+      if (raw != null && raw !== "" && !parsed) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+    }
+    if (!contactId && !opportunityId) throw new ApiError("VALIDATION_ERROR", "A viewing must be linked to a CRM contact, an opportunity, or both", 400);
+    if (!inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId is required", 400);
+    if (!assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId is required", 400);
+    const scheduledAt = nullableDate(body.scheduledAt, "scheduledAt");
+    if (!scheduledAt) throw new ApiError("VALIDATION_ERROR", "scheduledAt is required", 400);
+    const durationMinutes = body.durationMinutes == null || body.durationMinutes === "" ? 30 : Number(body.durationMinutes);
+    if (!Number.isSafeInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440) throw new ApiError("VALIDATION_ERROR", "durationMinutes must be an integer from 5 to 1440", 400);
+    const status = parseEnumValue<CrmViewingStatus>(body.status, CRM_VIEWING_STATUSES, "viewing status") || CrmViewingStatus.SCHEDULED;
+    const outcome = parseEnumValue<CrmViewingOutcome>(body.outcome, CRM_VIEWING_OUTCOMES, "viewing outcome");
+    await assertViewingRelations(workspace.agency.id, { contactId, opportunityId, inventoryPropertyId, assignedMemberId });
+
+    const created = await prisma.$transaction(async (tx) => {
+      const item = await tx.crmViewing.create({
+        data: {
+          agencyId: workspace.agency.id, contactId, opportunityId, inventoryPropertyId, assignedMemberId,
+          scheduledAt, durationMinutes, status, outcome,
+          notes: nullableString(body.notes, 10000), feedbackNotes: nullableString(body.feedbackNotes, 10000),
+          completedAt: status === CrmViewingStatus.COMPLETED ? new Date() : null,
+          cancelledAt: status === CrmViewingStatus.CANCELLED ? new Date() : null,
+          createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+        },
+        include: viewingInclude,
+      });
+      await tx.agencyAuditLog.create({ data: {
+        agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
+        action: "CRM_VIEWING_CREATED", entityType: "CrmViewing", entityId: String(item.id), afterState: viewingSnapshot(item), changedFields: ["created"],
+        metadata: { source: "agencyContacts", contactId: item.contactId, opportunityId: item.opportunityId, inventoryPropertyId: item.inventoryPropertyId, assignedMemberId: item.assignedMemberId },
+        ...requestMeta(req),
+      } });
+      return item;
+    });
+    return res.status(201).json({ ok: true, item: created });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.patch("/viewings/:viewingId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const viewingId = asPositiveInt(req.params.viewingId);
+    if (!viewingId) throw new ApiError("VALIDATION_ERROR", "Invalid viewing id", 400);
+    const before = await prisma.crmViewing.findFirst({ where: { id: viewingId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_VIEWING_NOT_FOUND", "CRM viewing not found", 404);
+    const body = req.body || {};
+    const data: Prisma.CrmViewingUncheckedUpdateInput = { updatedByUserId: workspace.membership.userId };
+    const relationValues: any = {};
+    for (const field of ["contactId", "opportunityId", "inventoryPropertyId", "assignedMemberId"] as const) {
+      if (field in body) {
+        const parsed = body[field] == null || body[field] === "" ? null : asPositiveInt(body[field]);
+        if (body[field] != null && body[field] !== "" && !parsed) throw new ApiError("VALIDATION_ERROR", `${field} must be a positive integer or null`, 400);
+        relationValues[field] = parsed;
+        (data as any)[field] = parsed;
+      }
+    }
+    const nextContactId = "contactId" in relationValues ? relationValues.contactId : before.contactId;
+    const nextOpportunityId = "opportunityId" in relationValues ? relationValues.opportunityId : before.opportunityId;
+    const nextInventoryPropertyId = "inventoryPropertyId" in relationValues ? relationValues.inventoryPropertyId : before.inventoryPropertyId;
+    const nextAssignedMemberId = "assignedMemberId" in relationValues ? relationValues.assignedMemberId : before.assignedMemberId;
+    if (!nextContactId && !nextOpportunityId) throw new ApiError("VALIDATION_ERROR", "A viewing must be linked to a CRM contact, an opportunity, or both", 400);
+    if (!nextInventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId is required", 400);
+    if (!nextAssignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId is required", 400);
+    await assertViewingRelations(workspace.agency.id, { contactId: nextContactId, opportunityId: nextOpportunityId, inventoryPropertyId: nextInventoryPropertyId, assignedMemberId: nextAssignedMemberId });
+
+    if ("scheduledAt" in body) { const v = nullableDate(body.scheduledAt, "scheduledAt"); if (!v) throw new ApiError("VALIDATION_ERROR", "scheduledAt is required", 400); data.scheduledAt = v; }
+    if ("durationMinutes" in body) { const v = Number(body.durationMinutes); if (!Number.isSafeInteger(v) || v < 5 || v > 1440) throw new ApiError("VALIDATION_ERROR", "durationMinutes must be an integer from 5 to 1440", 400); data.durationMinutes = v; }
+    if ("notes" in body) data.notes = nullableString(body.notes, 10000);
+    if ("feedbackNotes" in body) data.feedbackNotes = nullableString(body.feedbackNotes, 10000);
+    if ("outcome" in body) data.outcome = parseEnumValue<CrmViewingOutcome>(body.outcome, CRM_VIEWING_OUTCOMES, "viewing outcome");
+    if ("status" in body) {
+      const v = parseEnumValue<CrmViewingStatus>(body.status, CRM_VIEWING_STATUSES, "viewing status");
+      if (!v) throw new ApiError("VALIDATION_ERROR", "status is required", 400);
+      data.status = v;
+      if (v === CrmViewingStatus.COMPLETED) { data.completedAt = before.completedAt || new Date(); data.cancelledAt = null; }
+      else if (v === CrmViewingStatus.CANCELLED) { data.cancelledAt = before.cancelledAt || new Date(); data.completedAt = null; }
+      else { data.completedAt = null; data.cancelledAt = null; }
+    }
+
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmViewing.update({ where: { id: viewingId }, data, include: viewingInclude });
+      const changed = snapshotChangedFields(viewingSnapshot(before), viewingSnapshot(updated));
+      if (changed.length) await tx.agencyAuditLog.create({ data: {
+        agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
+        action: changed.includes("status") ? "CRM_VIEWING_STATUS_CHANGED" : "CRM_VIEWING_UPDATED", entityType: "CrmViewing", entityId: String(viewingId),
+        beforeState: viewingSnapshot(before), afterState: viewingSnapshot(updated), changedFields: changed,
+        metadata: { source: "agencyContacts", contactId: updated.contactId, opportunityId: updated.opportunityId, inventoryPropertyId: updated.inventoryPropertyId, assignedMemberId: updated.assignedMemberId },
+        ...requestMeta(req),
+      } });
+      return updated;
+    });
+    return res.json({ ok: true, item: after });
+  } catch (error) { return handleError(res, error); }
+});
+
 
 /* Contact list */
 router.get("/", async (req: AgentRequest, res) => {
