@@ -784,7 +784,7 @@ async function assertNoDuplicateActiveEmail(
 /* CRM Import Centre */
 type CrmImportMapping = Record<string, string | null | undefined>;
 type CrmImportRow = Record<string, unknown>;
-type CrmImportStatus = "ready" | "matched" | "possible_duplicate" | "needs_attention" | "ignored";
+type CrmImportStatus = "ready" | "matched" | "enrichment_available" | "possible_duplicate" | "needs_attention" | "ignored";
 
 type CrmImportPreviewRow = {
   rowNumber: number;
@@ -797,6 +797,10 @@ type CrmImportPreviewRow = {
     companyId?: number | null;
     contactId?: number | null;
     opportunityId?: number | null;
+  };
+  contactEnrichment?: {
+    fields: string[];
+    data: Record<string, unknown>;
   };
 };
 
@@ -974,6 +978,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
     let contact: any = null;
     let opportunity: any = null;
     const matches: CrmImportPreviewRow["matches"] = {};
+    let contactEnrichment: CrmImportPreviewRow["contactEnrichment"] | undefined;
 
     try {
       const companyName = importCell(row, mapping, "company.name");
@@ -1033,6 +1038,81 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
           const existing = existingContactByEmail.get(emailKey)!;
           matches.contactId = existing.id;
           messages.push(`Contact matched existing email record #${existing.id}`);
+
+          const enrichmentData: Record<string, unknown> = {};
+          const enrichmentFields: string[] = [];
+          const conflicts: string[] = [];
+          const sourceFirstName = importText(contactValues.firstName, 120);
+          const sourceLastName = importText(contactValues.lastName, 120);
+          const existingFirstName = importText(existing.firstName, 120);
+          const existingLastName = importText(existing.lastName, 120);
+
+          if (sourceFirstName) {
+            if (!existingFirstName) {
+              enrichmentData.firstName = sourceFirstName;
+              enrichmentFields.push("first name");
+            } else if (normalizeImportText(sourceFirstName) !== normalizeImportText(existingFirstName)) {
+              conflicts.push(`first name differs (CRM: ${existingFirstName}; import: ${sourceFirstName})`);
+            }
+          }
+          if (sourceLastName) {
+            if (!existingLastName) {
+              enrichmentData.lastName = sourceLastName;
+              enrichmentFields.push("last name");
+            } else if (normalizeImportText(sourceLastName) !== normalizeImportText(existingLastName)) {
+              conflicts.push(`last name differs (CRM: ${existingLastName}; import: ${sourceLastName})`);
+            }
+          }
+
+          const sourcePhone = importText(contactValues.phoneNumber, 80);
+          const existingPhone = importText(existing.phoneNumber, 80);
+          if (sourcePhone) {
+            if (!existingPhone) {
+              enrichmentData.phoneNumber = sourcePhone;
+              enrichmentFields.push("phone");
+            } else if (normalizeImportPhone(sourcePhone) !== normalizeImportPhone(existingPhone)) {
+              conflicts.push(`phone differs (CRM: ${existingPhone}; import: ${sourcePhone})`);
+            }
+          }
+
+          const sourceCompanyName = importText(companyName || contactValues.companyName, 250);
+          const existingCompanyName = importText(existing.company?.name || existing.companyName, 250);
+          if (sourceCompanyName) {
+            if (!existing.companyId && !existingCompanyName) {
+              if (matches.companyId) enrichmentData.companyId = matches.companyId;
+              enrichmentData.companyName = sourceCompanyName;
+              enrichmentFields.push("company");
+            } else if (existingCompanyName && normalizeImportText(sourceCompanyName) !== normalizeImportText(existingCompanyName)) {
+              conflicts.push(`company differs (CRM: ${existingCompanyName}; import: ${sourceCompanyName})`);
+            }
+          }
+
+          const existingRoles = new Set((existing.roles || []).map((role: unknown) => String(role)));
+          const missingRoles = contactValues.roles.filter((role) => !existingRoles.has(String(role)));
+          if (missingRoles.length) {
+            enrichmentData.roles = [...new Set([...(existing.roles || []), ...missingRoles])];
+            enrichmentFields.push(`role${missingRoles.length === 1 ? "" : "s"} (${missingRoles.join(", ")})`);
+          }
+
+          const sourceNotes = importText(contactValues.notes, 10000);
+          const existingNotes = importText(existing.notes, 10000);
+          if (sourceNotes) {
+            if (!existingNotes) {
+              enrichmentData.notes = sourceNotes;
+              enrichmentFields.push("contact notes");
+            } else if (normalizeImportText(sourceNotes) !== normalizeImportText(existingNotes)) {
+              conflicts.push("contact notes differ from the existing CRM record");
+            }
+          }
+
+          if (conflicts.length) {
+            status = "needs_attention";
+            messages.push(`Matched contact has conflicting data: ${conflicts.join("; ")}`);
+          } else if (enrichmentFields.length) {
+            contactEnrichment = { fields: enrichmentFields, data: enrichmentData };
+            if (status === "ready") status = "enrichment_available";
+            messages.push(`Safe enrichment available: ${enrichmentFields.join(", ")}`);
+          }
         } else if (emailKey && seenContactsByEmail.has(emailKey)) {
           messages.push(`Contact repeats row ${seenContactsByEmail.get(emailKey)?.rowNumber} and will be reused`);
         } else if (phoneKey && (existingContactsByPhone.get(phoneKey)?.length || 0) > 0) {
@@ -1103,26 +1183,28 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
       if (!company && !contact && !opportunity) {
         status = "ignored";
         messages.push("No mapped CRM data found in this row");
-      } else if (status === "ready") {
+      } else if (status === "ready" || status === "enrichment_available") {
         const createsSomething =
           Boolean(company && !matches.companyId) ||
           Boolean(contact && !matches.contactId) ||
           Boolean(opportunity && !matches.opportunityId);
-        status = createsSomething ? "ready" : "matched";
+        if (createsSomething) status = "ready";
+        else if (contactEnrichment?.fields.length) status = "enrichment_available";
+        else status = "matched";
       }
     } catch (error) {
       status = "needs_attention";
       messages.push(error instanceof Error ? error.message : "Row could not be validated");
     }
 
-    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches });
+    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches, contactEnrichment });
   }
 
   const summary = previewRows.reduce((acc, row) => {
     acc.total += 1;
     acc[row.status] += 1;
     return acc;
-  }, { total: 0, ready: 0, matched: 0, possible_duplicate: 0, needs_attention: 0, ignored: 0 } as Record<string, number>);
+  }, { total: 0, ready: 0, matched: 0, enrichment_available: 0, possible_duplicate: 0, needs_attention: 0, ignored: 0 } as Record<string, number>);
 
   return { rows: previewRows, summary };
 }
@@ -1172,6 +1254,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
     let companiesMatched = 0;
     let contactsCreated = 0;
     let contactsMatched = 0;
+    let contactsEnriched = 0;
     let opportunitiesCreated = 0;
     let opportunitiesMatched = 0;
 
@@ -1249,6 +1332,43 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             });
           } else {
             contactsMatched += 1;
+            if (row.contactEnrichment?.fields?.length && row.contactEnrichment.data) {
+              const before = await tx.professionalContact.findUnique({ where: { id: contactId } });
+              if (!before) throw new ApiError("CONTACT_NOT_FOUND", "Matched CRM contact no longer exists", 409);
+              const enrichmentData = { ...row.contactEnrichment.data } as Record<string, unknown>;
+              if (companyId && enrichmentData.companyName && enrichmentData.companyId == null) {
+                enrichmentData.companyId = companyId;
+              }
+              const updated = await tx.professionalContact.update({
+                where: { id: contactId },
+                data: {
+                  ...enrichmentData,
+                  updatedByUserId: userId,
+                },
+              });
+              contactsEnriched += 1;
+              await tx.agencyAuditLog.create({
+                data: {
+                  agencyId: workspace.agency.id,
+                  actorUserId: userId,
+                  actorAgencyMemberId: workspace.membership.id,
+                  effectiveUserId: userId,
+                  action: "CRM_CONTACT_UPDATED",
+                  entityType: "ProfessionalContact",
+                  entityId: String(updated.id),
+                  beforeState: contactSnapshot(before),
+                  afterState: contactSnapshot(updated),
+                  changedFields: row.contactEnrichment.fields,
+                  metadata: {
+                    source: "crmImport",
+                    importId,
+                    sourceFileName,
+                    rowNumber: row.rowNumber,
+                    enrichment: true,
+                  },
+                },
+              });
+            }
           }
         }
 
@@ -1307,6 +1427,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             companiesMatched,
             contactsCreated,
             contactsMatched,
+            contactsEnriched,
             opportunitiesCreated,
             opportunitiesMatched,
             rowsSkipped: skipRowNumbers.size,
@@ -1327,6 +1448,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
         companiesMatched,
         contactsCreated,
         contactsMatched,
+        contactsEnriched,
         opportunitiesCreated,
         opportunitiesMatched,
         rowsSkipped: skipRowNumbers.size,
