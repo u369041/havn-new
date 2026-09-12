@@ -16,6 +16,7 @@ import {
   CrmIntegrationStatus,
   CrmViewingStatus,
   CrmViewingOutcome,
+  CrmOfferStatus,
 } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
@@ -227,6 +228,7 @@ const CRM_INTERACTION_DIRECTIONS = new Set<string>(Object.values(CrmInteractionD
 const CRM_INTERACTION_PROVIDERS = new Set<string>(Object.values(CrmInteractionProvider));
 const CRM_VIEWING_STATUSES = new Set<string>(Object.values(CrmViewingStatus));
 const CRM_VIEWING_OUTCOMES = new Set<string>(Object.values(CrmViewingOutcome));
+const CRM_OFFER_STATUSES = new Set<string>(Object.values(CrmOfferStatus));
 
 function parseEnumValue<T extends string>(
   value: unknown,
@@ -627,12 +629,79 @@ async function assertViewingRelations(agencyId: number, values: {
 
 const viewingInclude = {
   contact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, roles: true, isArchived: true } },
-  opportunity: { select: { id: true, title: true, type: true, stage: true, contactId: true, inventoryPropertyId: true, ownerMemberId: true, isArchived: true } },
+  opportunity: {
+    select: {
+      id: true, title: true, type: true, stage: true, contactId: true, inventoryPropertyId: true, ownerMemberId: true, isArchived: true,
+      followUps: {
+        where: { completedAt: null },
+        orderBy: [{ dueAt: "asc" }, { priority: "desc" }, { id: "asc" }],
+        take: 5,
+        select: { id: true, title: true, dueAt: true, priority: true, assignedMemberId: true },
+      },
+      offers: {
+        orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
+        take: 5,
+        select: { id: true, amountCents: true, status: true, submittedAt: true, respondedAt: true },
+      },
+    },
+  },
   inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
   assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
   createdBy: { select: { id: true, name: true, email: true } },
   updatedBy: { select: { id: true, name: true, email: true } },
 } satisfies Prisma.CrmViewingInclude;
+
+const offerInclude = {
+  contact: { select: { id: true, firstName: true, lastName: true, primaryEmail: true, phoneNumber: true, isArchived: true } },
+  opportunity: { select: { id: true, title: true, type: true, stage: true, contactId: true, inventoryPropertyId: true, ownerMemberId: true, isArchived: true } },
+  inventoryProperty: { select: { id: true, address1: true, address2: true, city: true, county: true, eircode: true, stage: true, transactionType: true, archivedAt: true } },
+  assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
+  createdBy: { select: { id: true, name: true, email: true } },
+  updatedBy: { select: { id: true, name: true, email: true } },
+} satisfies Prisma.CrmOfferInclude;
+
+function offerSnapshot(item: any) {
+  if (!item) return null;
+  return {
+    id: item.id, agencyId: item.agencyId, contactId: item.contactId, opportunityId: item.opportunityId,
+    inventoryPropertyId: item.inventoryPropertyId, assignedMemberId: item.assignedMemberId,
+    amountCents: item.amountCents == null ? null : Number(item.amountCents), status: item.status, notes: item.notes,
+    submittedAt: item.submittedAt, respondedAt: item.respondedAt, createdByUserId: item.createdByUserId,
+    updatedByUserId: item.updatedByUserId, createdAt: item.createdAt, updatedAt: item.updatedAt,
+  };
+}
+
+function offerForResponse(item: any) {
+  if (!item) return item;
+  return { ...item, amountCents: item.amountCents == null ? null : Number(item.amountCents) };
+}
+
+async function assertOfferRelations(agencyId: number, values: {
+  contactId?: number | null; opportunityId: number; inventoryPropertyId: number; assignedMemberId?: number | null;
+}) {
+  await assertViewingRelations(agencyId, values);
+  const opportunity = await prisma.crmOpportunity.findFirst({
+    where: { id: values.opportunityId, agencyId, isArchived: false },
+    select: { id: true, contactId: true, inventoryPropertyId: true },
+  });
+  if (!opportunity) throw new ApiError("CRM_OPPORTUNITY_NOT_FOUND", "Offer opportunity must be an active CRM opportunity in this agency", 404);
+  if (opportunity.inventoryPropertyId && opportunity.inventoryPropertyId !== values.inventoryPropertyId) {
+    throw new ApiError("CRM_OFFER_RELATION_MISMATCH", "Offer property must match the property linked to this opportunity", 409);
+  }
+  if (values.contactId && opportunity.contactId && opportunity.contactId !== values.contactId) {
+    throw new ApiError("CRM_OFFER_RELATION_MISMATCH", "Offer contact must match the contact linked to this opportunity", 409);
+  }
+}
+
+function viewingAutomationPlan(outcome: CrmViewingOutcome | null) {
+  if (!outcome) return null;
+  const now = Date.now();
+  if (outcome === CrmViewingOutcome.INTERESTED) return { title: "Follow up after viewing", dueAt: new Date(now + 24 * 60 * 60 * 1000), stage: CrmOpportunityStage.QUALIFIED, priority: CrmTaskPriority.HIGH };
+  if (outcome === CrmViewingOutcome.CONSIDERING) return { title: "Follow up after viewing", dueAt: new Date(now + 3 * 24 * 60 * 60 * 1000), stage: CrmOpportunityStage.QUALIFIED, priority: CrmTaskPriority.NORMAL };
+  if (outcome === CrmViewingOutcome.SECOND_VIEWING) return { title: "Arrange second viewing", dueAt: new Date(now + 24 * 60 * 60 * 1000), stage: CrmOpportunityStage.APPOINTMENT, priority: CrmTaskPriority.HIGH };
+  if (outcome === CrmViewingOutcome.OFFER_INTENT) return { title: "Record buyer offer", dueAt: new Date(now + 24 * 60 * 60 * 1000), stage: CrmOpportunityStage.NEGOTIATION, priority: CrmTaskPriority.HIGH };
+  return null;
+}
 
 function interactionSnapshot(item: any) {
   if (!item) return null;
@@ -2519,7 +2588,7 @@ router.patch("/viewings/:viewingId", async (req: AgentRequest, res) => {
       else { data.completedAt = null; data.cancelledAt = null; }
     }
 
-    const after = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.crmViewing.update({ where: { id: viewingId }, data, include: viewingInclude });
       const changed = snapshotChangedFields(viewingSnapshot(before), viewingSnapshot(updated));
       if (changed.length) await tx.agencyAuditLog.create({ data: {
@@ -2529,9 +2598,158 @@ router.patch("/viewings/:viewingId", async (req: AgentRequest, res) => {
         metadata: { source: "agencyContacts", contactId: updated.contactId, opportunityId: updated.opportunityId, inventoryPropertyId: updated.inventoryPropertyId, assignedMemberId: updated.assignedMemberId },
         ...requestMeta(req),
       } });
+
+      let automation: any = null;
+      const newlyCompleted = updated.status === CrmViewingStatus.COMPLETED && before.status !== CrmViewingStatus.COMPLETED;
+      if (newlyCompleted && updated.opportunityId) {
+        const plan = viewingAutomationPlan(updated.outcome);
+        const completedTitles = ["Respond to enquiry", "Follow up after viewing", "Arrange second viewing"];
+        if (updated.outcome === CrmViewingOutcome.NOT_INTERESTED) {
+          const closed = await tx.crmFollowUp.updateMany({
+            where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: { in: completedTitles } },
+            data: { completedAt: new Date(), updatedByUserId: workspace.membership.userId },
+          });
+          automation = { outcome: updated.outcome, action: "closed", closedFollowUps: closed.count, nextAction: null };
+        } else if (plan) {
+          const opportunity = await tx.crmOpportunity.findUnique({ where: { id: updated.opportunityId }, select: { id: true, stage: true } });
+          const stageRank: Record<string, number> = { LEAD: 1, QUALIFIED: 2, APPOINTMENT: 3, INSTRUCTION: 4, ACTIVE: 5, NEGOTIATION: 6, AGREED: 7, WON: 8, LOST: 9 };
+          if (opportunity && opportunity.stage !== CrmOpportunityStage.WON && opportunity.stage !== CrmOpportunityStage.LOST && (stageRank[plan.stage] || 0) > (stageRank[opportunity.stage] || 0)) {
+            await tx.crmOpportunity.update({ where: { id: opportunity.id }, data: { stage: plan.stage } });
+          }
+          const existing = await tx.crmFollowUp.findFirst({
+            where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: plan.title },
+            orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+          });
+          const followUp = existing || await tx.crmFollowUp.create({ data: {
+            agencyId: workspace.agency.id, contactId: updated.contactId, opportunityId: updated.opportunityId,
+            assignedMemberId: updated.assignedMemberId, title: plan.title,
+            description: `Created automatically from completed viewing #${updated.id} (${String(updated.outcome || "").replace(/_/g, " ").toLowerCase()}).`,
+            dueAt: plan.dueAt, priority: plan.priority, createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+          } });
+          automation = { outcome: updated.outcome, action: existing ? "reused" : "created", followUpId: followUp.id, nextAction: followUp.title, dueAt: followUp.dueAt, stage: plan.stage };
+        }
+        if (automation) await tx.agencyAuditLog.create({ data: {
+          agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
+          action: "CRM_VIEWING_AUTOMATION_APPLIED", entityType: "CrmViewing", entityId: String(updated.id), afterState: automation, changedFields: ["nextAction"],
+          metadata: { source: "agencyContacts", opportunityId: updated.opportunityId, contactId: updated.contactId, inventoryPropertyId: updated.inventoryPropertyId, outcome: updated.outcome },
+          ...requestMeta(req),
+        } });
+      }
+      return { updated, automation };
+    });
+    return res.json({ ok: true, item: result.updated, automation: result.automation });
+  } catch (error) { return handleError(res, error); }
+});
+
+
+/* CRM offers */
+router.get("/offers", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    const opportunityId = req.query.opportunityId == null || req.query.opportunityId === "" ? null : asPositiveInt(req.query.opportunityId);
+    const inventoryPropertyId = req.query.inventoryPropertyId == null || req.query.inventoryPropertyId === "" ? null : asPositiveInt(req.query.inventoryPropertyId);
+    const contactId = req.query.contactId == null || req.query.contactId === "" ? null : asPositiveInt(req.query.contactId);
+    const status = parseEnumValue<CrmOfferStatus>(req.query.status, CRM_OFFER_STATUSES, "offer status");
+    if (req.query.opportunityId != null && req.query.opportunityId !== "" && !opportunityId) throw new ApiError("VALIDATION_ERROR", "opportunityId must be a positive integer", 400);
+    if (req.query.inventoryPropertyId != null && req.query.inventoryPropertyId !== "" && !inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId must be a positive integer", 400);
+    if (req.query.contactId != null && req.query.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer", 400);
+    const items = await prisma.crmOffer.findMany({
+      where: { agencyId: workspace.agency.id, ...(opportunityId ? { opportunityId } : {}), ...(inventoryPropertyId ? { inventoryPropertyId } : {}), ...(contactId ? { contactId } : {}), ...(status ? { status } : {}) },
+      include: offerInclude,
+      orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
+      take: 1000,
+    });
+    return res.json({ ok: true, items: items.map(offerForResponse) });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.post("/offers", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const body = req.body || {};
+    const contactId = body.contactId == null || body.contactId === "" ? null : asPositiveInt(body.contactId);
+    const opportunityId = asPositiveInt(body.opportunityId);
+    const inventoryPropertyId = asPositiveInt(body.inventoryPropertyId);
+    const assignedMemberId = body.assignedMemberId == null || body.assignedMemberId === "" ? workspace.membership.id : asPositiveInt(body.assignedMemberId);
+    if (!opportunityId) throw new ApiError("VALIDATION_ERROR", "opportunityId is required", 400);
+    if (!inventoryPropertyId) throw new ApiError("VALIDATION_ERROR", "inventoryPropertyId is required", 400);
+    if (!assignedMemberId) throw new ApiError("VALIDATION_ERROR", "assignedMemberId is required", 400);
+    if (body.contactId != null && body.contactId !== "" && !contactId) throw new ApiError("VALIDATION_ERROR", "contactId must be a positive integer or null", 400);
+    const amountCents = nullableNonNegativeBigInt(body.amountCents, "amountCents");
+    if (amountCents == null || amountCents <= 0n) throw new ApiError("VALIDATION_ERROR", "amountCents must be greater than zero", 400);
+    const status = parseEnumValue<CrmOfferStatus>(body.status, CRM_OFFER_STATUSES, "offer status") || CrmOfferStatus.SUBMITTED;
+    const submittedAt = nullableDate(body.submittedAt, "submittedAt") || new Date();
+    await assertOfferRelations(workspace.agency.id, { contactId, opportunityId, inventoryPropertyId, assignedMemberId });
+
+    const created = await prisma.$transaction(async (tx) => {
+      const item = await tx.crmOffer.create({ data: {
+        agencyId: workspace.agency.id, contactId, opportunityId, inventoryPropertyId, assignedMemberId,
+        amountCents, status, notes: nullableString(body.notes, 10000), submittedAt,
+        respondedAt: new Set<CrmOfferStatus>([CrmOfferStatus.ACCEPTED, CrmOfferStatus.REJECTED, CrmOfferStatus.WITHDRAWN, CrmOfferStatus.EXPIRED]).has(status) ? new Date() : null,
+        createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+      }, include: offerInclude });
+      const opportunity = await tx.crmOpportunity.findUnique({ where: { id: opportunityId }, select: { stage: true } });
+      if (opportunity && opportunity.stage !== CrmOpportunityStage.WON && opportunity.stage !== CrmOpportunityStage.LOST && opportunity.stage !== CrmOpportunityStage.AGREED) {
+        await tx.crmOpportunity.update({ where: { id: opportunityId }, data: { stage: CrmOpportunityStage.NEGOTIATION } });
+      }
+      await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId, completedAt: null, title: "Record buyer offer" }, data: { completedAt: new Date(), updatedByUserId: workspace.membership.userId } });
+      const existingNext = await tx.crmFollowUp.findFirst({ where: { agencyId: workspace.agency.id, opportunityId, completedAt: null, title: "Follow up on offer" } });
+      if (!existingNext) await tx.crmFollowUp.create({ data: {
+        agencyId: workspace.agency.id, contactId, opportunityId, assignedMemberId, title: "Follow up on offer",
+        description: `Created automatically from CRM offer #${item.id}.`, dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000), priority: CrmTaskPriority.HIGH,
+        createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+      } });
+      await tx.agencyAuditLog.create({ data: {
+        agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
+        action: "CRM_OFFER_CREATED", entityType: "CrmOffer", entityId: String(item.id), afterState: offerSnapshot(item), changedFields: ["created"],
+        metadata: { source: "agencyContacts", opportunityId, contactId, inventoryPropertyId, assignedMemberId }, ...requestMeta(req),
+      } });
+      return item;
+    });
+    return res.status(201).json({ ok: true, item: offerForResponse(created) });
+  } catch (error) { return handleError(res, error); }
+});
+
+router.patch("/offers/:offerId", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+    const offerId = asPositiveInt(req.params.offerId);
+    if (!offerId) throw new ApiError("VALIDATION_ERROR", "Invalid offer id", 400);
+    const before = await prisma.crmOffer.findFirst({ where: { id: offerId, agencyId: workspace.agency.id } });
+    if (!before) throw new ApiError("CRM_OFFER_NOT_FOUND", "CRM offer not found", 404);
+    const body = req.body || {};
+    const data: Prisma.CrmOfferUncheckedUpdateInput = { updatedByUserId: workspace.membership.userId };
+    if ("status" in body) {
+      const status = parseEnumValue<CrmOfferStatus>(body.status, CRM_OFFER_STATUSES, "offer status");
+      if (!status) throw new ApiError("VALIDATION_ERROR", "status is required", 400);
+      data.status = status;
+      data.respondedAt = new Set<CrmOfferStatus>([CrmOfferStatus.ACCEPTED, CrmOfferStatus.REJECTED, CrmOfferStatus.WITHDRAWN, CrmOfferStatus.EXPIRED]).has(status) ? (before.respondedAt || new Date()) : null;
+    }
+    if ("notes" in body) data.notes = nullableString(body.notes, 10000);
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.crmOffer.update({ where: { id: offerId }, data, include: offerInclude });
+      const changed = snapshotChangedFields(offerSnapshot(before), offerSnapshot(updated));
+      if (updated.status === CrmOfferStatus.ACCEPTED && before.status !== CrmOfferStatus.ACCEPTED) {
+        await tx.crmOpportunity.update({ where: { id: updated.opportunityId }, data: { stage: CrmOpportunityStage.AGREED, probability: 90 } });
+        await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Follow up on offer" }, data: { completedAt: new Date(), updatedByUserId: workspace.membership.userId } });
+        const existing = await tx.crmFollowUp.findFirst({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Progress agreed offer" } });
+        if (!existing) await tx.crmFollowUp.create({ data: {
+          agencyId: workspace.agency.id, contactId: updated.contactId, opportunityId: updated.opportunityId, assignedMemberId: updated.assignedMemberId,
+          title: "Progress agreed offer", description: `Created automatically when CRM offer #${updated.id} was accepted.`,
+          dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000), priority: CrmTaskPriority.HIGH,
+          createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
+        } });
+      }
+      if (changed.length) await tx.agencyAuditLog.create({ data: {
+        agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
+        action: "CRM_OFFER_UPDATED", entityType: "CrmOffer", entityId: String(updated.id), beforeState: offerSnapshot(before), afterState: offerSnapshot(updated), changedFields: changed,
+        metadata: { source: "agencyContacts", opportunityId: updated.opportunityId, contactId: updated.contactId, inventoryPropertyId: updated.inventoryPropertyId }, ...requestMeta(req),
+      } });
       return updated;
     });
-    return res.json({ ok: true, item: after });
+    return res.json({ ok: true, item: offerForResponse(result) });
   } catch (error) { return handleError(res, error); }
 });
 

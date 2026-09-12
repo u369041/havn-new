@@ -67,6 +67,8 @@ model User {
   crmInteractionsCreated       CrmInteraction[]           @relation("CrmInteractionCreatedBy")
   crmViewingsCreated           CrmViewing[]               @relation("CrmViewingCreatedBy")
   crmViewingsUpdated           CrmViewing[]               @relation("CrmViewingUpdatedBy")
+  crmOffersCreated             CrmOffer[]                 @relation("CrmOfferCreatedBy")
+  crmOffersUpdated             CrmOffer[]                 @relation("CrmOfferUpdatedBy")
   crmIntegrationConnections    CrmIntegrationConnection[] @relation("CrmIntegrationConnectionUser")
   inventoryContactLinksCreated InventoryPropertyContact[] @relation("InventoryPropertyContactCreatedBy")
   inventoryContactLinksUpdated InventoryPropertyContact[] @relation("InventoryPropertyContactUpdatedBy")
@@ -184,6 +186,7 @@ model Agency {
   crmOpportunities          CrmOpportunity[]
   crmInteractions           CrmInteraction[]
   crmViewings               CrmViewing[]
+  crmOffers                 CrmOffer[]
   crmIntegrationConnections CrmIntegrationConnection[]
   inventoryProperties       InventoryProperty[]
   inventoryPropertyContacts InventoryPropertyContact[]
@@ -223,6 +226,7 @@ model AgencyMember {
   crmOpportunitiesOwned       CrmOpportunity[]     @relation("CrmOpportunityOwner")
   crmInteractionsOwned        CrmInteraction[]     @relation("CrmInteractionOwner")
   crmViewingsAssigned          CrmViewing[]         @relation("CrmViewingAssignedMember")
+  crmOffersAssigned            CrmOffer[]           @relation("CrmOfferAssignedMember")
   crmIntegrationConnections   CrmIntegrationConnection[] @relation("CrmIntegrationConnectionMember")
 
   @@unique([agencyId, userId])
@@ -269,6 +273,7 @@ model ProfessionalContact {
   crmOpportunities    CrmOpportunity[]
   crmInteractions     CrmInteraction[]
   crmViewings         CrmViewing[]
+  crmOffers           CrmOffer[]
 
   @@index([agencyId])
   @@index([primaryEmail])
@@ -412,6 +417,7 @@ model CrmOpportunity {
   interactions      CrmInteraction[]
   followUps         CrmFollowUp[]
   viewings          CrmViewing[]
+  offers            CrmOffer[]
 
   @@index([agencyId])
   @@index([contactId])
@@ -519,6 +525,46 @@ model CrmViewing {
   @@index([agencyId, scheduledAt])
   @@index([agencyId, assignedMemberId, scheduledAt])
   @@index([opportunityId, scheduledAt])
+}
+
+model CrmOffer {
+  id                  Int @id @default(autoincrement())
+  agencyId            Int
+  contactId           Int?
+  opportunityId       Int
+  inventoryPropertyId Int
+  assignedMemberId    Int?
+
+  amountCents BigInt
+  status      CrmOfferStatus @default(SUBMITTED)
+  notes       String?
+
+  submittedAt DateTime @default(now())
+  respondedAt DateTime?
+
+  createdByUserId Int?
+  updatedByUserId Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agency            Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contact           ProfessionalContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity       CrmOpportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  inventoryProperty InventoryProperty    @relation(fields: [inventoryPropertyId], references: [id], onDelete: Cascade)
+  assignedMember    AgencyMember?        @relation("CrmOfferAssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  createdBy         User?                @relation("CrmOfferCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?                @relation("CrmOfferUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([contactId])
+  @@index([opportunityId])
+  @@index([inventoryPropertyId])
+  @@index([assignedMemberId])
+  @@index([status])
+  @@index([submittedAt])
+  @@index([agencyId, submittedAt])
+  @@index([agencyId, inventoryPropertyId, submittedAt])
+  @@index([opportunityId, submittedAt])
 }
 
 model CrmIntegrationConnection {
@@ -692,6 +738,7 @@ model InventoryProperty {
   crmOpportunities CrmOpportunity[]
   crmInteractions  CrmInteraction[]
   crmViewings      CrmViewing[]
+  crmOffers        CrmOffer[]
 
   @@index([agencyId])
   @@index([stage])
@@ -1196,6 +1243,15 @@ enum CrmIntegrationStatus {
   CONNECTED
   ERROR
   DISCONNECTED
+}
+
+enum CrmOfferStatus {
+  SUBMITTED
+  COUNTERED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
 }
 
 enum CrmViewingStatus {
