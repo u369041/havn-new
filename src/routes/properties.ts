@@ -1944,17 +1944,94 @@ async function syncPropertyEnquiryToCrm(args: {
     return { synced: false, reason: "PROPERTY_OWNER_MISSING" };
   }
 
-  const workspace = await getAgencyWorkspace(ownerUserId);
-  if (!workspace || Number(workspace.agency.id) !== agencyId) {
-    return { synced: false, reason: "AGENCY_WORKSPACE_MISMATCH" };
-  }
-
-  const ownerMemberId = Number(workspace.membership.id);
   const inventoryPropertyId = Number(property?.inventoryPropertyId);
   const linkedInventoryPropertyId =
     Number.isSafeInteger(inventoryPropertyId) && inventoryPropertyId > 0
       ? inventoryPropertyId
       : null;
+
+  // CRM enquiry ownership follows the property routing hierarchy:
+  // 1) Inventory assigned agent, 2) published listing owner,
+  // 3) agency owner, 4) agency admin, 5) any active agency member.
+  let ownerMemberId: number | null = null;
+  let routingSource = "UNASSIGNED";
+
+  if (linkedInventoryPropertyId) {
+    const inventoryRouting = await prisma.inventoryProperty.findFirst({
+      where: {
+        id: linkedInventoryPropertyId,
+        agencyId,
+        archivedAt: null,
+      },
+      select: {
+        assignedMember: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (inventoryRouting?.assignedMember?.status === "ACTIVE") {
+      ownerMemberId = inventoryRouting.assignedMember.id;
+      routingSource = "INVENTORY_ASSIGNED_MEMBER";
+    }
+  }
+
+  if (!ownerMemberId) {
+    const listingOwnerMember = await prisma.agencyMember.findFirst({
+      where: {
+        agencyId,
+        userId: ownerUserId,
+        status: "ACTIVE",
+      },
+      select: { id: true },
+    });
+
+    if (listingOwnerMember) {
+      ownerMemberId = listingOwnerMember.id;
+      routingSource = "LISTING_OWNER_MEMBER";
+    }
+  }
+
+  if (!ownerMemberId) {
+    const fallbackMember = await prisma.agencyMember.findFirst({
+      where: {
+        agencyId,
+        status: "ACTIVE",
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      orderBy: [
+        { isPrimary: "desc" },
+        { role: "asc" },
+        { id: "asc" },
+      ],
+      select: { id: true, role: true },
+    });
+
+    if (fallbackMember) {
+      ownerMemberId = fallbackMember.id;
+      routingSource = fallbackMember.role === "OWNER" ? "AGENCY_OWNER_FALLBACK" : "AGENCY_ADMIN_FALLBACK";
+    }
+  }
+
+  if (!ownerMemberId) {
+    const anyActiveMember = await prisma.agencyMember.findFirst({
+      where: { agencyId, status: "ACTIVE" },
+      orderBy: [{ isPrimary: "desc" }, { id: "asc" }],
+      select: { id: true },
+    });
+
+    if (anyActiveMember) {
+      ownerMemberId = anyActiveMember.id;
+      routingSource = "ACTIVE_MEMBER_FALLBACK";
+    }
+  }
+
+  if (!ownerMemberId) {
+    return { synced: false, reason: "NO_ACTIVE_AGENCY_MEMBER" };
+  }
   const { firstName, lastName } = crmEnquiryNameParts(name);
   const propertyLabel = crmEnquiryPropertyLabel(property).slice(0, 240);
   const opportunityTitle = `Buyer enquiry - ${propertyLabel}`.slice(0, 300);
@@ -2319,6 +2396,8 @@ async function syncPropertyEnquiryToCrm(args: {
           opportunityCreated: opportunityWasCreated,
           followUpCreated: followUpWasCreated,
           intent,
+          ownerMemberId,
+          routingSource,
         },
       },
     });
@@ -2326,6 +2405,8 @@ async function syncPropertyEnquiryToCrm(args: {
     return {
       synced: true,
       agencyId,
+      ownerMemberId,
+      routingSource,
       contactId: contact.id,
       opportunityId: opportunity.id,
       interactionId: interaction?.id || null,
