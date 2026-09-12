@@ -1209,6 +1209,144 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
   return { rows: previewRows, summary };
 }
 
+
+const CRM_EDITABLE_EXPORT_HEADERS = [
+  "Company Name", "Company Email", "Company Phone", "Website", "Address Line 1", "Address Line 2",
+  "Town City", "County", "Eircode", "Company Notes",
+  "Contact First Name", "Contact Last Name", "Contact Company", "Email", "Phone", "Role", "Contact Notes",
+  "Opportunity Title", "Opportunity Type", "Stage", "Value", "Probability", "Expected Close", "Owner", "Opportunity Notes",
+] as const;
+
+function editableExportDate(value: Date | null | undefined): string {
+  if (!value) return "";
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${value.getUTCFullYear()}`;
+}
+
+function editableExportMoney(value: bigint | number | string | null | undefined): string {
+  if (value == null || value === "") return "";
+  const cents = typeof value === "bigint" ? value : BigInt(value);
+  const negative = cents < 0n;
+  const absolute = negative ? -cents : cents;
+  const whole = absolute / 100n;
+  const remainder = absolute % 100n;
+  const amount = remainder === 0n ? whole.toString() : `${whole}.${remainder.toString().padStart(2, "0")}`;
+  return negative ? `-${amount}` : amount;
+}
+
+function editableExportRow(
+  company: any | null | undefined,
+  contact: any | null | undefined,
+  opportunity: any | null | undefined,
+): Record<string, string> {
+  const contactCompanyName = contact?.company?.name || contact?.companyName || "";
+  const owner = opportunity?.ownerMember?.user?.email || opportunity?.ownerMember?.user?.name || "";
+  return {
+    "Company Name": company?.name || "",
+    "Company Email": company?.email || "",
+    "Company Phone": company?.phoneNumber || "",
+    "Website": company?.websiteUrl || "",
+    "Address Line 1": company?.addressLine1 || "",
+    "Address Line 2": company?.addressLine2 || "",
+    "Town City": company?.townCity || "",
+    "County": company?.county || "",
+    "Eircode": company?.eircode || "",
+    "Company Notes": company?.notes || "",
+    "Contact First Name": contact?.firstName || "",
+    "Contact Last Name": contact?.lastName || "",
+    "Contact Company": contactCompanyName,
+    "Email": contact?.primaryEmail || "",
+    "Phone": contact?.phoneNumber || "",
+    "Role": Array.isArray(contact?.roles) ? contact.roles.join("; ") : "",
+    "Contact Notes": contact?.notes || "",
+    "Opportunity Title": opportunity?.title || "",
+    "Opportunity Type": opportunity?.type || "",
+    "Stage": opportunity?.stage || "",
+    "Value": editableExportMoney(opportunity?.valueCents),
+    "Probability": opportunity?.probability == null ? "" : String(opportunity.probability),
+    "Expected Close": editableExportDate(opportunity?.expectedCloseAt),
+    "Owner": owner,
+    "Opportunity Notes": opportunity?.notes || "",
+  };
+}
+
+router.get("/imports/export", async (req: AgentRequest, res) => {
+  try {
+    const workspace = await workspaceFor(req);
+    assertCanManageCrm(workspace);
+
+    const [companies, contacts, opportunities] = await Promise.all([
+      prisma.crmCompany.findMany({
+        where: { agencyId: workspace.agency.id, isArchived: false },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+      }),
+      prisma.professionalContact.findMany({
+        where: { agencyId: workspace.agency.id, isArchived: false },
+        include: { company: true },
+        orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { id: "asc" }],
+      }),
+      prisma.crmOpportunity.findMany({
+        where: { agencyId: workspace.agency.id, isArchived: false },
+        include: {
+          company: true,
+          contact: { include: { company: true } },
+          ownerMember: { select: { id: true, user: { select: { id: true, name: true, email: true } } } },
+        },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      }),
+    ]);
+
+    const rows: Record<string, string>[] = [];
+    const representedContactIds = new Set<number>();
+    const representedCompanyIds = new Set<number>();
+
+    for (const opportunity of opportunities) {
+      const contact = opportunity.contact || null;
+      const company = opportunity.company || contact?.company || null;
+      rows.push(editableExportRow(company, contact, opportunity));
+      if (contact?.id) representedContactIds.add(contact.id);
+      if (company?.id) representedCompanyIds.add(company.id);
+      if (contact?.company?.id) representedCompanyIds.add(contact.company.id);
+    }
+
+    for (const contact of contacts) {
+      if (representedContactIds.has(contact.id)) continue;
+      rows.push(editableExportRow(contact.company, contact, null));
+      representedContactIds.add(contact.id);
+      if (contact.company?.id) representedCompanyIds.add(contact.company.id);
+    }
+
+    for (const company of companies) {
+      if (representedCompanyIds.has(company.id)) continue;
+      rows.push(editableExportRow(company, null, null));
+      representedCompanyIds.add(company.id);
+    }
+
+    if (rows.length > CRM_IMPORT_MAX_ROWS) {
+      throw new ApiError(
+        "CRM_EXPORT_TOO_LARGE",
+        `The editable CRM export contains ${rows.length} rows. The current import-safe limit is ${CRM_IMPORT_MAX_ROWS} rows.`,
+        413,
+      );
+    }
+
+    return res.json({
+      ok: true,
+      headers: CRM_EDITABLE_EXPORT_HEADERS,
+      rows,
+      summary: {
+        rows: rows.length,
+        companies: companies.length,
+        contacts: contacts.length,
+        opportunities: opportunities.length,
+      },
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 router.post("/imports/preview", async (req: AgentRequest, res) => {
   try {
     const workspace = await workspaceFor(req);
