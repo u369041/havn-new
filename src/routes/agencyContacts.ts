@@ -2732,8 +2732,31 @@ router.patch("/offers/:offerId", async (req: AgentRequest, res) => {
       const updated = await tx.crmOffer.update({ where: { id: offerId }, data, include: offerInclude });
       const changed = snapshotChangedFields(offerSnapshot(before), offerSnapshot(updated));
       if (updated.status === CrmOfferStatus.ACCEPTED && before.status !== CrmOfferStatus.ACCEPTED) {
-        await tx.crmOpportunity.update({ where: { id: updated.opportunityId }, data: { stage: CrmOpportunityStage.AGREED, probability: 90 } });
-        await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Follow up on offer" }, data: { completedAt: new Date(), updatedByUserId: workspace.membership.userId } });
+        const completedAt = new Date();
+        await tx.crmOpportunity.update({
+          where: { id: updated.opportunityId },
+          data: {
+            stage: CrmOpportunityStage.AGREED,
+            probability: 90,
+            valueCents: updated.amountCents,
+          },
+        });
+        await tx.crmFollowUp.updateMany({
+          where: {
+            agencyId: workspace.agency.id,
+            opportunityId: updated.opportunityId,
+            completedAt: null,
+            OR: [
+              { title: { startsWith: "Respond to enquiry" } },
+              { title: "Record buyer offer" },
+              { title: "Follow up on offer" },
+            ],
+          },
+          data: {
+            completedAt,
+            updatedByUserId: workspace.membership.userId,
+          },
+        });
         const existing = await tx.crmFollowUp.findFirst({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Progress agreed offer" } });
         if (!existing) await tx.crmFollowUp.create({ data: {
           agencyId: workspace.agency.id, contactId: updated.contactId, opportunityId: updated.opportunityId, assignedMemberId: updated.assignedMemberId,
