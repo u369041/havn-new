@@ -2215,14 +2215,6 @@ const opportunityInclude = {
       assignedMember: { select: { id: true, role: true, jobTitle: true, user: { select: { id: true, name: true, email: true } } } },
     },
   },
-  offers: {
-    orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
-    take: 20,
-    select: {
-      id: true, amountCents: true, status: true, submittedAt: true, respondedAt: true,
-      contactId: true, assignedMemberId: true, notes: true,
-    },
-  },
 } satisfies Prisma.CrmOpportunityInclude;
 
 router.get("/opportunities", async (req: AgentRequest, res) => {
@@ -2740,56 +2732,14 @@ router.patch("/offers/:offerId", async (req: AgentRequest, res) => {
       const updated = await tx.crmOffer.update({ where: { id: offerId }, data, include: offerInclude });
       const changed = snapshotChangedFields(offerSnapshot(before), offerSnapshot(updated));
       if (updated.status === CrmOfferStatus.ACCEPTED && before.status !== CrmOfferStatus.ACCEPTED) {
-        const completedAt = new Date();
-        await tx.crmOpportunity.update({
-          where: { id: updated.opportunityId },
-          data: { stage: CrmOpportunityStage.AGREED, probability: 90, valueCents: updated.amountCents },
-        });
-
-        const staleTitles = [
-          "Respond to enquiry",
-          "Record buyer offer",
-          "Follow up on offer",
-        ];
-        const staleFollowUps = await tx.crmFollowUp.findMany({
-          where: {
-            agencyId: workspace.agency.id,
-            opportunityId: updated.opportunityId,
-            completedAt: null,
-            OR: staleTitles.map((title) => ({ title: { startsWith: title } })),
-          },
-          select: { id: true, title: true },
-        });
-        if (staleFollowUps.length) {
-          await tx.crmFollowUp.updateMany({
-            where: { id: { in: staleFollowUps.map((item) => item.id) } },
-            data: { completedAt, updatedByUserId: workspace.membership.userId },
-          });
-        }
-
-        const existing = await tx.crmFollowUp.findFirst({
-          where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Progress agreed offer" },
-        });
-        const nextFollowUp = existing || await tx.crmFollowUp.create({ data: {
+        await tx.crmOpportunity.update({ where: { id: updated.opportunityId }, data: { stage: CrmOpportunityStage.AGREED, probability: 90 } });
+        await tx.crmFollowUp.updateMany({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Follow up on offer" }, data: { completedAt: new Date(), updatedByUserId: workspace.membership.userId } });
+        const existing = await tx.crmFollowUp.findFirst({ where: { agencyId: workspace.agency.id, opportunityId: updated.opportunityId, completedAt: null, title: "Progress agreed offer" } });
+        if (!existing) await tx.crmFollowUp.create({ data: {
           agencyId: workspace.agency.id, contactId: updated.contactId, opportunityId: updated.opportunityId, assignedMemberId: updated.assignedMemberId,
           title: "Progress agreed offer", description: `Created automatically when CRM offer #${updated.id} was accepted.`,
           dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000), priority: CrmTaskPriority.HIGH,
           createdByUserId: workspace.membership.userId, updatedByUserId: workspace.membership.userId,
-        } });
-
-        await tx.agencyAuditLog.create({ data: {
-          agencyId: workspace.agency.id, actorUserId: workspace.membership.userId, actorAgencyMemberId: workspace.membership.id, effectiveUserId: workspace.membership.userId,
-          action: "CRM_OFFER_ACCEPTED_AUTOMATION", entityType: "CrmOpportunity", entityId: String(updated.opportunityId),
-          afterState: {
-            stage: CrmOpportunityStage.AGREED, probability: 90, valueCents: Number(updated.amountCents),
-            acceptedOfferId: updated.id, nextFollowUpId: nextFollowUp.id,
-          },
-          changedFields: ["stage", "probability", "valueCents", "followUps"],
-          metadata: {
-            source: "agencyContacts", offerId: updated.id, contactId: updated.contactId, inventoryPropertyId: updated.inventoryPropertyId,
-            staleFollowUpIds: staleFollowUps.map((item) => item.id), staleFollowUpTitles: staleFollowUps.map((item) => item.title),
-          },
-          ...requestMeta(req),
         } });
       }
       if (changed.length) await tx.agencyAuditLog.create({ data: {
