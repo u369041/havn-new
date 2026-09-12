@@ -1188,8 +1188,8 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
           Boolean(company && !matches.companyId) ||
           Boolean(contact && !matches.contactId) ||
           Boolean(opportunity && !matches.opportunityId);
-        if (createsSomething) status = "ready";
-        else if (contactEnrichment?.fields.length) status = "enrichment_available";
+        if (contactEnrichment?.fields.length) status = "enrichment_available";
+        else if (createsSomething) status = "ready";
         else status = "matched";
       }
     } catch (error) {
