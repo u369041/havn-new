@@ -802,6 +802,12 @@ type CrmImportPreviewRow = {
     fields: string[];
     data: Record<string, unknown>;
   };
+  contactConflicts?: Array<{
+    field: "firstName" | "lastName" | "phoneNumber" | "company" | "notes";
+    label: string;
+    existingValue: string | null;
+    importValue: string | null;
+  }>;
 };
 
 const CRM_IMPORT_MAX_ROWS = 5000;
@@ -979,6 +985,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
     let opportunity: any = null;
     const matches: CrmImportPreviewRow["matches"] = {};
     let contactEnrichment: CrmImportPreviewRow["contactEnrichment"] | undefined;
+    let contactConflicts: CrmImportPreviewRow["contactConflicts"] | undefined;
 
     try {
       const companyName = importCell(row, mapping, "company.name");
@@ -1041,7 +1048,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
 
           const enrichmentData: Record<string, unknown> = {};
           const enrichmentFields: string[] = [];
-          const conflicts: string[] = [];
+          const conflicts: NonNullable<CrmImportPreviewRow["contactConflicts"]> = [];
           const sourceFirstName = importText(contactValues.firstName, 120);
           const sourceLastName = importText(contactValues.lastName, 120);
           const existingFirstName = importText(existing.firstName, 120);
@@ -1052,7 +1059,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
               enrichmentData.firstName = sourceFirstName;
               enrichmentFields.push("first name");
             } else if (normalizeImportText(sourceFirstName) !== normalizeImportText(existingFirstName)) {
-              conflicts.push(`first name differs (CRM: ${existingFirstName}; import: ${sourceFirstName})`);
+              conflicts.push({ field: "firstName", label: "First name", existingValue: existingFirstName, importValue: sourceFirstName });
             }
           }
           if (sourceLastName) {
@@ -1060,7 +1067,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
               enrichmentData.lastName = sourceLastName;
               enrichmentFields.push("last name");
             } else if (normalizeImportText(sourceLastName) !== normalizeImportText(existingLastName)) {
-              conflicts.push(`last name differs (CRM: ${existingLastName}; import: ${sourceLastName})`);
+              conflicts.push({ field: "lastName", label: "Last name", existingValue: existingLastName, importValue: sourceLastName });
             }
           }
 
@@ -1071,7 +1078,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
               enrichmentData.phoneNumber = sourcePhone;
               enrichmentFields.push("phone");
             } else if (normalizeImportPhone(sourcePhone) !== normalizeImportPhone(existingPhone)) {
-              conflicts.push(`phone differs (CRM: ${existingPhone}; import: ${sourcePhone})`);
+              conflicts.push({ field: "phoneNumber", label: "Phone", existingValue: existingPhone, importValue: sourcePhone });
             }
           }
 
@@ -1083,7 +1090,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
               enrichmentData.companyName = sourceCompanyName;
               enrichmentFields.push("company");
             } else if (existingCompanyName && normalizeImportText(sourceCompanyName) !== normalizeImportText(existingCompanyName)) {
-              conflicts.push(`company differs (CRM: ${existingCompanyName}; import: ${sourceCompanyName})`);
+              conflicts.push({ field: "company", label: "Company", existingValue: existingCompanyName, importValue: sourceCompanyName });
             }
           }
 
@@ -1101,13 +1108,14 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
               enrichmentData.notes = sourceNotes;
               enrichmentFields.push("contact notes");
             } else if (normalizeImportText(sourceNotes) !== normalizeImportText(existingNotes)) {
-              conflicts.push("contact notes differ from the existing CRM record");
+              conflicts.push({ field: "notes", label: "Contact notes", existingValue: existingNotes, importValue: sourceNotes });
             }
           }
 
           if (conflicts.length) {
             status = "needs_attention";
-            messages.push(`Matched contact has conflicting data: ${conflicts.join("; ")}`);
+            contactConflicts = conflicts;
+            messages.push(`Matched contact has conflicting data: ${conflicts.map((conflict) => `${conflict.label} differs (CRM: ${conflict.existingValue || "—"}; import: ${conflict.importValue || "—"})`).join("; ")}`);
           } else if (enrichmentFields.length) {
             contactEnrichment = { fields: enrichmentFields, data: enrichmentData };
             if (status === "ready") status = "enrichment_available";
@@ -1197,7 +1205,7 @@ async function crmImportPreview(workspace: AgencyWorkspace, rows: CrmImportRow[]
       messages.push(error instanceof Error ? error.message : "Row could not be validated");
     }
 
-    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches, contactEnrichment });
+    previewRows.push({ rowNumber, status, messages, company, contact, opportunity, matches, contactEnrichment, contactConflicts });
   }
 
   const summary = previewRows.reduce((acc, row) => {
@@ -1372,10 +1380,29 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
         ? req.body.skipRowNumbers.map((value: unknown) => asPositiveInt(value)).filter(Boolean) as number[]
         : [],
     );
+    const rawConflictResolutions = req.body?.conflictResolutions && typeof req.body.conflictResolutions === "object"
+      ? req.body.conflictResolutions as Record<string, unknown>
+      : {};
+    const conflictResolutions = new Map<number, Record<string, "existing" | "import">>();
+    for (const [rawRowNumber, rawFields] of Object.entries(rawConflictResolutions)) {
+      const rowNumber = asPositiveInt(rawRowNumber);
+      if (!rowNumber || !rawFields || typeof rawFields !== "object" || Array.isArray(rawFields)) continue;
+      const clean: Record<string, "existing" | "import"> = {};
+      for (const [field, rawChoice] of Object.entries(rawFields as Record<string, unknown>)) {
+        if (!["firstName", "lastName", "phoneNumber", "company", "notes"].includes(field)) continue;
+        if (rawChoice === "existing" || rawChoice === "import") clean[field] = rawChoice;
+      }
+      if (Object.keys(clean).length) conflictResolutions.set(rowNumber, clean);
+    }
     const preview = await crmImportPreview(workspace, rows, mapping);
-    const unresolved = preview.rows.filter(
-      (row) => (row.status === "needs_attention" || row.status === "possible_duplicate") && !skipRowNumbers.has(row.rowNumber),
-    );
+    const unresolved = preview.rows.filter((row) => {
+      if (skipRowNumbers.has(row.rowNumber)) return false;
+      if (row.status === "possible_duplicate") return true;
+      if (row.status !== "needs_attention") return false;
+      if (!row.contactConflicts?.length) return true;
+      const choices = conflictResolutions.get(row.rowNumber) || {};
+      return row.contactConflicts.some((conflict) => choices[conflict.field] !== "existing" && choices[conflict.field] !== "import");
+    });
     if (unresolved.length > 0) {
       throw new ApiError(
         "CRM_IMPORT_REVIEW_REQUIRED",
@@ -1393,6 +1420,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
     let contactsCreated = 0;
     let contactsMatched = 0;
     let contactsEnriched = 0;
+    let contactsResolved = 0;
     let opportunitiesCreated = 0;
     let opportunitiesMatched = 0;
 
@@ -1470,21 +1498,40 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             });
           } else {
             contactsMatched += 1;
+            const updateData: Record<string, unknown> = {};
+            const changedFields: string[] = [];
+            let appliedEnrichment = false;
+            let appliedConflictResolution = false;
+
             if (row.contactEnrichment?.fields?.length && row.contactEnrichment.data) {
+              Object.assign(updateData, row.contactEnrichment.data);
+              if (companyId && updateData.companyName && updateData.companyId == null) updateData.companyId = companyId;
+              changedFields.push(...row.contactEnrichment.fields);
+              appliedEnrichment = true;
+            }
+
+            const rowChoices = conflictResolutions.get(row.rowNumber) || {};
+            for (const conflict of row.contactConflicts || []) {
+              if (rowChoices[conflict.field] !== "import") continue;
+              appliedConflictResolution = true;
+              if (conflict.field === "company") {
+                updateData.companyName = conflict.importValue;
+                updateData.companyId = companyId || null;
+              } else {
+                updateData[conflict.field] = conflict.importValue;
+              }
+              changedFields.push(conflict.label);
+            }
+
+            if (Object.keys(updateData).length) {
               const before = await tx.professionalContact.findUnique({ where: { id: contactId } });
               if (!before) throw new ApiError("CONTACT_NOT_FOUND", "Matched CRM contact no longer exists", 409);
-              const enrichmentData = { ...row.contactEnrichment.data } as Record<string, unknown>;
-              if (companyId && enrichmentData.companyName && enrichmentData.companyId == null) {
-                enrichmentData.companyId = companyId;
-              }
               const updated = await tx.professionalContact.update({
                 where: { id: contactId },
-                data: {
-                  ...enrichmentData,
-                  updatedByUserId: userId,
-                },
+                data: { ...updateData, updatedByUserId: userId },
               });
-              contactsEnriched += 1;
+              if (appliedEnrichment) contactsEnriched += 1;
+              if (appliedConflictResolution) contactsResolved += 1;
               await tx.agencyAuditLog.create({
                 data: {
                   agencyId: workspace.agency.id,
@@ -1496,13 +1543,15 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
                   entityId: String(updated.id),
                   beforeState: contactSnapshot(before),
                   afterState: contactSnapshot(updated),
-                  changedFields: row.contactEnrichment.fields,
+                  changedFields: [...new Set(changedFields)],
                   metadata: {
                     source: "crmImport",
                     importId,
                     sourceFileName,
                     rowNumber: row.rowNumber,
-                    enrichment: true,
+                    enrichment: appliedEnrichment,
+                    conflictResolution: appliedConflictResolution,
+                    resolutions: appliedConflictResolution ? rowChoices : undefined,
                   },
                 },
               });
@@ -1566,6 +1615,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
             contactsCreated,
             contactsMatched,
             contactsEnriched,
+            contactsResolved,
             opportunitiesCreated,
             opportunitiesMatched,
             rowsSkipped: skipRowNumbers.size,
@@ -1587,6 +1637,7 @@ router.post("/imports/commit", async (req: AgentRequest, res) => {
         contactsCreated,
         contactsMatched,
         contactsEnriched,
+        contactsResolved,
         opportunitiesCreated,
         opportunitiesMatched,
         rowsSkipped: skipRowNumbers.size,
