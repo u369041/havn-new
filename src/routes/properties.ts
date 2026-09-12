@@ -1890,6 +1890,453 @@ router.get("/_admin/enquiries", requireAuth, requireAdminAuth, async (req: any, 
   }
 });
 
+
+function crmEnquiryNameParts(rawName: string) {
+  const parts = safeText(rawName)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return { firstName: null as string | null, lastName: null as string | null };
+  }
+
+  if (parts.length === 1) {
+    return { firstName: parts[0].slice(0, 120), lastName: null as string | null };
+  }
+
+  return {
+    firstName: parts[0].slice(0, 120),
+    lastName: parts.slice(1).join(" ").slice(0, 120),
+  };
+}
+
+function crmEnquiryPropertyLabel(property: any) {
+  return (
+    safeText(property?.title).trim() ||
+    [property?.address1, property?.city, property?.county]
+      .map((value) => safeText(value).trim())
+      .filter(Boolean)
+      .join(", ") ||
+    `Property ${property?.id || ""}`.trim()
+  );
+}
+
+async function syncPropertyEnquiryToCrm(args: {
+  property: any;
+  enquiry: any;
+  name: string;
+  email: string;
+  phone: string;
+  message: string;
+  intent: string;
+  sourceUrl: string;
+}) {
+  const { property, enquiry, name, email, phone, message, intent, sourceUrl } = args;
+  const agencyId = Number(property?.agencyId);
+  const ownerUserId = Number(property?.userId);
+
+  if (!Number.isSafeInteger(agencyId) || agencyId <= 0) {
+    return { synced: false, reason: "PROPERTY_NOT_AGENCY_LINKED" };
+  }
+
+  if (!Number.isSafeInteger(ownerUserId) || ownerUserId <= 0) {
+    return { synced: false, reason: "PROPERTY_OWNER_MISSING" };
+  }
+
+  const workspace = await getAgencyWorkspace(ownerUserId);
+  if (!workspace || Number(workspace.agency.id) !== agencyId) {
+    return { synced: false, reason: "AGENCY_WORKSPACE_MISMATCH" };
+  }
+
+  const ownerMemberId = Number(workspace.membership.id);
+  const inventoryPropertyId = Number(property?.inventoryPropertyId);
+  const linkedInventoryPropertyId =
+    Number.isSafeInteger(inventoryPropertyId) && inventoryPropertyId > 0
+      ? inventoryPropertyId
+      : null;
+  const { firstName, lastName } = crmEnquiryNameParts(name);
+  const propertyLabel = crmEnquiryPropertyLabel(property).slice(0, 240);
+  const opportunityTitle = `Buyer enquiry - ${propertyLabel}`.slice(0, 300);
+  const followUpTitle = `Respond to enquiry - ${propertyLabel}`.slice(0, 300);
+  const interactionExternalId = `havn-property-enquiry:${enquiry.id}`;
+  const now = new Date();
+  const publicPropertyUrl =
+    sourceUrl ||
+    `https://havn.ie/property.html?slug=${encodeURIComponent(safeText(property?.slug).trim())}`;
+
+  return prisma.$transaction(async (tx) => {
+    let contact = await tx.professionalContact.findFirst({
+      where: {
+        agencyId,
+        isArchived: false,
+        primaryEmail: { equals: email, mode: "insensitive" },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    let contactWasCreated = false;
+    const contactChangedFields: string[] = [];
+
+    if (!contact) {
+      contact = await tx.professionalContact.findFirst({
+        where: {
+          agencyId,
+          isArchived: true,
+          primaryEmail: { equals: email, mode: "insensitive" },
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+    }
+
+    if (!contact) {
+      contact = await tx.professionalContact.create({
+        data: {
+          agencyId,
+          firstName,
+          lastName,
+          primaryEmail: email,
+          phoneNumber: phone || null,
+          roles: ["BUYER"],
+          isArchived: false,
+          archivedAt: null,
+        },
+      });
+      contactWasCreated = true;
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId,
+          action: "CRM_CONTACT_CREATED",
+          entityType: "ProfessionalContact",
+          entityId: String(contact.id),
+          afterState: {
+            id: contact.id,
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            primaryEmail: contact.primaryEmail,
+            phoneNumber: contact.phoneNumber,
+            roles: contact.roles,
+            isArchived: contact.isArchived,
+          },
+          changedFields: ["created"],
+          metadata: {
+            source: "propertyEnquiry",
+            enquiryId: enquiry.id,
+            propertyId: property.id,
+          },
+        },
+      });
+    } else {
+      const contactUpdate: Prisma.ProfessionalContactUncheckedUpdateInput = {};
+
+      if (contact.isArchived) {
+        contactUpdate.isArchived = false;
+        contactUpdate.archivedAt = null;
+        contactChangedFields.push("isArchived", "archivedAt");
+      }
+      if (!safeText(contact.firstName).trim() && firstName) {
+        contactUpdate.firstName = firstName;
+        contactChangedFields.push("firstName");
+      }
+      if (!safeText(contact.lastName).trim() && lastName) {
+        contactUpdate.lastName = lastName;
+        contactChangedFields.push("lastName");
+      }
+      if (!safeText(contact.phoneNumber).trim() && phone) {
+        contactUpdate.phoneNumber = phone;
+        contactChangedFields.push("phoneNumber");
+      }
+      if (!Array.isArray(contact.roles) || !contact.roles.includes("BUYER" as any)) {
+        contactUpdate.roles = Array.from(
+          new Set([...(Array.isArray(contact.roles) ? contact.roles : []), "BUYER" as any])
+        ) as any;
+        contactChangedFields.push("roles");
+      }
+
+      if (contactChangedFields.length) {
+        const beforeContact = contact;
+        contact = await tx.professionalContact.update({
+          where: { id: contact.id },
+          data: contactUpdate,
+        });
+
+        await tx.agencyAuditLog.create({
+          data: {
+            agencyId,
+            action: "CRM_CONTACT_UPDATED",
+            entityType: "ProfessionalContact",
+            entityId: String(contact.id),
+            beforeState: {
+              id: beforeContact.id,
+              firstName: beforeContact.firstName,
+              lastName: beforeContact.lastName,
+              primaryEmail: beforeContact.primaryEmail,
+              phoneNumber: beforeContact.phoneNumber,
+              roles: beforeContact.roles,
+              isArchived: beforeContact.isArchived,
+            },
+            afterState: {
+              id: contact.id,
+              firstName: contact.firstName,
+              lastName: contact.lastName,
+              primaryEmail: contact.primaryEmail,
+              phoneNumber: contact.phoneNumber,
+              roles: contact.roles,
+              isArchived: contact.isArchived,
+            },
+            changedFields: contactChangedFields,
+            metadata: {
+              source: "propertyEnquiry",
+              enquiryId: enquiry.id,
+              propertyId: property.id,
+            },
+          },
+        });
+      }
+    }
+
+    let opportunity = await tx.crmOpportunity.findFirst({
+      where: {
+        agencyId,
+        contactId: contact.id,
+        type: "BUYER_SEARCH",
+        isArchived: false,
+        stage: { notIn: ["WON", "LOST"] },
+        ...(linkedInventoryPropertyId
+          ? { inventoryPropertyId: linkedInventoryPropertyId }
+          : { title: opportunityTitle }),
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    let opportunityWasCreated = false;
+    if (!opportunity) {
+      opportunity = await tx.crmOpportunity.create({
+        data: {
+          agencyId,
+          contactId: contact.id,
+          companyId: contact.companyId || null,
+          inventoryPropertyId: linkedInventoryPropertyId,
+          ownerMemberId,
+          title: opportunityTitle,
+          type: "BUYER_SEARCH",
+          stage: "LEAD",
+          probability: 10,
+          notes: `Created automatically from HAVN property enquiry #${enquiry.id}.`,
+        },
+      });
+      opportunityWasCreated = true;
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId,
+          action: "CRM_OPPORTUNITY_CREATED",
+          entityType: "CrmOpportunity",
+          entityId: String(opportunity.id),
+          afterState: {
+            id: opportunity.id,
+            contactId: opportunity.contactId,
+            inventoryPropertyId: opportunity.inventoryPropertyId,
+            ownerMemberId: opportunity.ownerMemberId,
+            title: opportunity.title,
+            type: opportunity.type,
+            stage: opportunity.stage,
+            probability: opportunity.probability,
+          },
+          changedFields: ["created"],
+          metadata: {
+            source: "propertyEnquiry",
+            enquiryId: enquiry.id,
+            propertyId: property.id,
+            contactId: contact.id,
+            inventoryPropertyId: linkedInventoryPropertyId,
+          },
+        },
+      });
+    } else if (!opportunity.ownerMemberId && ownerMemberId) {
+      opportunity = await tx.crmOpportunity.update({
+        where: { id: opportunity.id },
+        data: { ownerMemberId },
+      });
+    }
+
+    let interaction = await tx.crmInteraction.findFirst({
+      where: {
+        agencyId,
+        sourceProvider: "MANUAL",
+        externalId: interactionExternalId,
+      },
+    });
+
+    if (!interaction) {
+      interaction = await tx.crmInteraction.create({
+        data: {
+          agencyId,
+          contactId: contact.id,
+          companyId: contact.companyId || null,
+          opportunityId: opportunity.id,
+          inventoryPropertyId: linkedInventoryPropertyId,
+          ownerMemberId,
+          type: "OTHER",
+          direction: "INBOUND",
+          subject: `Property enquiry - ${propertyLabel}`.slice(0, 500),
+          summary: message.slice(0, 20000),
+          occurredAt: enquiry.createdAt || now,
+          sourceProvider: "MANUAL",
+          externalId: interactionExternalId,
+          externalUrl: publicPropertyUrl.slice(0, 2000),
+        },
+      });
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId,
+          action: "CRM_INTERACTION_CREATED",
+          entityType: "CrmInteraction",
+          entityId: String(interaction.id),
+          afterState: {
+            id: interaction.id,
+            contactId: interaction.contactId,
+            opportunityId: interaction.opportunityId,
+            inventoryPropertyId: interaction.inventoryPropertyId,
+            ownerMemberId: interaction.ownerMemberId,
+            type: interaction.type,
+            direction: interaction.direction,
+            subject: interaction.subject,
+            occurredAt: interaction.occurredAt,
+            sourceProvider: interaction.sourceProvider,
+            externalId: interaction.externalId,
+          },
+          changedFields: ["crmInteractions"],
+          metadata: {
+            source: "propertyEnquiry",
+            enquiryId: enquiry.id,
+            propertyId: property.id,
+            contactId: contact.id,
+            opportunityId: opportunity.id,
+            inventoryPropertyId: linkedInventoryPropertyId,
+          },
+        },
+      });
+    }
+
+    let followUp = await tx.crmFollowUp.findFirst({
+      where: {
+        agencyId,
+        opportunityId: opportunity.id,
+        completedAt: null,
+        title: followUpTitle,
+      },
+      orderBy: { dueAt: "asc" },
+    });
+
+    let followUpWasCreated = false;
+    if (!followUp) {
+      const descriptionParts = [
+        `New HAVN enquiry from ${name} (${email}) about ${propertyLabel}.`,
+        phone ? `Phone: ${phone}.` : "",
+        intent ? `Intent: ${intent}.` : "",
+      ].filter(Boolean);
+
+      followUp = await tx.crmFollowUp.create({
+        data: {
+          agencyId,
+          contactId: contact.id,
+          opportunityId: opportunity.id,
+          assignedMemberId: ownerMemberId,
+          title: followUpTitle,
+          description: descriptionParts.join(" ").slice(0, 5000),
+          dueAt: now,
+          priority: "HIGH",
+        },
+      });
+      followUpWasCreated = true;
+
+      await tx.agencyAuditLog.create({
+        data: {
+          agencyId,
+          action: "CRM_FOLLOW_UP_CREATED",
+          entityType: "CrmOpportunity",
+          entityId: String(opportunity.id),
+          afterState: {
+            id: followUp.id,
+            contactId: followUp.contactId,
+            opportunityId: followUp.opportunityId,
+            assignedMemberId: followUp.assignedMemberId,
+            title: followUp.title,
+            dueAt: followUp.dueAt,
+            priority: followUp.priority,
+          },
+          changedFields: ["crmFollowUps"],
+          metadata: {
+            source: "propertyEnquiry",
+            enquiryId: enquiry.id,
+            propertyId: property.id,
+            contactId: contact.id,
+            opportunityId: opportunity.id,
+            followUpId: followUp.id,
+          },
+        },
+      });
+    } else {
+      const followUpUpdate: Prisma.CrmFollowUpUncheckedUpdateInput = {};
+      const existingDueAt = new Date(followUp.dueAt);
+      if (Number.isFinite(existingDueAt.getTime()) && existingDueAt.getTime() > now.getTime()) {
+        followUpUpdate.dueAt = now;
+      }
+      if (followUp.priority === "LOW" || followUp.priority === "NORMAL") {
+        followUpUpdate.priority = "HIGH";
+      }
+      if (!followUp.assignedMemberId && ownerMemberId) {
+        followUpUpdate.assignedMemberId = ownerMemberId;
+      }
+      if (Object.keys(followUpUpdate).length) {
+        followUp = await tx.crmFollowUp.update({
+          where: { id: followUp.id },
+          data: followUpUpdate,
+        });
+      }
+    }
+
+    await tx.agencyAuditLog.create({
+      data: {
+        agencyId,
+        action: "CRM_PROPERTY_ENQUIRY_CAPTURED",
+        entityType: "ProfessionalContact",
+        entityId: String(contact.id),
+        changedFields: ["crmEnquiry"],
+        metadata: {
+          source: "propertyEnquiry",
+          enquiryId: enquiry.id,
+          propertyId: property.id,
+          inventoryPropertyId: linkedInventoryPropertyId,
+          contactId: contact.id,
+          opportunityId: opportunity.id,
+          interactionId: interaction?.id || null,
+          followUpId: followUp?.id || null,
+          contactCreated: contactWasCreated,
+          opportunityCreated: opportunityWasCreated,
+          followUpCreated: followUpWasCreated,
+          intent,
+        },
+      },
+    });
+
+    return {
+      synced: true,
+      agencyId,
+      contactId: contact.id,
+      opportunityId: opportunity.id,
+      interactionId: interaction?.id || null,
+      followUpId: followUp?.id || null,
+      contactCreated: contactWasCreated,
+      opportunityCreated: opportunityWasCreated,
+      followUpCreated: followUpWasCreated,
+    };
+  });
+}
+
 /**
  * CONTACT SELLER
  * Public lead capture for published listings.
@@ -1983,7 +2430,7 @@ router.post("/:id/contact", async (req: any, res) => {
     });
 
     try {
-      await prisma.enquiry.create({
+      const savedEnquiry = await prisma.enquiry.create({
         data: {
           propertyId: property.id,
           buyerName: name,
@@ -1995,6 +2442,35 @@ router.post("/:id/contact", async (req: any, res) => {
           status: "NEW",
         },
       });
+
+      if (property.agencyId) {
+        try {
+          const crmSync = await syncPropertyEnquiryToCrm({
+            property,
+            enquiry: savedEnquiry,
+            name,
+            email,
+            phone,
+            message,
+            intent,
+            sourceUrl,
+          });
+
+          console.log("HAVN_CRM_ENQUIRY_SYNC", {
+            propertyId: property.id,
+            enquiryId: savedEnquiry.id,
+            ...crmSync,
+          });
+        } catch (crmErr: any) {
+          console.warn("CRM enquiry sync failed, continuing with lead delivery:", {
+            propertyId: property.id,
+            enquiryId: savedEnquiry.id,
+            message: crmErr?.message,
+            code: crmErr?.code,
+            meta: crmErr?.meta,
+          });
+        }
+      }
     } catch (dbErr: any) {
       console.warn("Enquiry DB save failed, continuing with email delivery:", {
         message: dbErr?.message,
