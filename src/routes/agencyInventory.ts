@@ -72,6 +72,17 @@ const PROFESSIONAL_CONTACT_ROLES = new Set<string>(
 );
 const MAX_ACTIVE_PROPERTY_CONTACTS = 10;
 
+type PublicListingMode = "BUY" | "RENT" | "SHARE";
+
+function publicListingModeForTransactionType(
+  transactionType: InventoryTransactionType | string | null | undefined,
+): PublicListingMode {
+  const normalized = String(transactionType || "").trim().toUpperCase();
+  if (normalized === "SHARE") return "SHARE";
+  if (normalized === "RENTAL") return "RENT";
+  return "BUY";
+}
+
 const inventoryInclude = {
   assignedMember: {
     select: {
@@ -381,12 +392,7 @@ function inventoryPublicProposal(item: any) {
       item?.listingTitle ||
       [item?.address1, item?.city, item?.county].filter(Boolean).join(", "),
     price: item?.askingPrice ?? 0,
-    mode:
-      item?.transactionType === "SHARE"
-        ? "SHARE"
-        : item?.transactionType === "RENTAL"
-          ? "RENT"
-          : "BUY",
+    mode: publicListingModeForTransactionType(item?.transactionType),
     address1: item?.address1 ?? null,
     address2: item?.address2 ?? null,
     city: item?.city ?? null,
@@ -2166,7 +2172,38 @@ router.post("/:id/listing", async (req: AgentRequest, res) => {
       (listing) => listing.listingStatus === "DRAFT",
     );
     if (existingDraft) {
-      return res.json({ ok: true, created: false, item: existingDraft });
+      const expectedMode = publicListingModeForTransactionType(inventory.transactionType);
+
+      if (existingDraft.mode !== expectedMode) {
+        const repaired = await prisma.property.update({
+          where: { id: existingDraft.id },
+          data: {
+            ...inventoryToDraftListingData(inventory),
+            mode: expectedMode,
+            updatedByUserId: workspace.membership.userId,
+          },
+          select: {
+            id: true,
+            slug: true,
+            title: true,
+            listingStatus: true,
+            mode: true,
+            price: true,
+            isFeatured: true,
+            publishedAt: true,
+            updatedAt: true,
+          },
+        });
+
+        return res.json({
+          ok: true,
+          created: false,
+          repairedMode: true,
+          item: repaired,
+        });
+      }
+
+      return res.json({ ok: true, created: false, repairedMode: false, item: existingDraft });
     }
     const activeListing = inventory.listings.find((listing) =>
       ["SUBMITTED", "PUBLISHED", "REJECTED"].includes(listing.listingStatus),
@@ -2183,12 +2220,7 @@ router.post("/:id/listing", async (req: AgentRequest, res) => {
     const title = [inventory.address1, inventory.city, inventory.county]
       .filter(Boolean)
       .join(", ");
-    const mode: "BUY" | "RENT" | "SHARE" =
-      inventory.transactionType === "SHARE"
-        ? "SHARE"
-        : inventory.transactionType === "RENTAL"
-          ? "RENT"
-          : "BUY";
+    const mode = publicListingModeForTransactionType(inventory.transactionType);
     const userId = workspace.membership.userId;
 
     const listing = await prisma.$transaction(async (tx) => {
@@ -3101,6 +3133,8 @@ router.patch("/:id", async (req: AgentRequest, res) => {
         });
       }
 
+      const expectedDraftMode = publicListingModeForTransactionType(updated.transactionType);
+
       await tx.property.updateMany({
         where: {
           inventoryPropertyId: id,
@@ -3109,9 +3143,27 @@ router.patch("/:id", async (req: AgentRequest, res) => {
         },
         data: {
           ...inventoryToDraftListingData(updated),
+          mode: expectedDraftMode,
           updatedByUserId: workspace.membership.userId,
         },
       });
+
+      const mismatchedDraftCount = await tx.property.count({
+        where: {
+          inventoryPropertyId: id,
+          agencyId: workspace.agency.id,
+          listingStatus: "DRAFT",
+          NOT: { mode: expectedDraftMode },
+        },
+      });
+
+      if (mismatchedDraftCount > 0) {
+        throw new ApiError(
+          "LISTING_MODE_INVARIANT_FAILED",
+          "HAVN could not safely align the linked draft to the Inventory transaction type",
+          500,
+        );
+      }
 
       const publishedListings = await tx.property.findMany({
         where: {
