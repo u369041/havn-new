@@ -401,6 +401,59 @@ function asStringArray(raw: any): string[] {
   return [];
 }
 
+type ListingReadinessIssue = {
+  field: string;
+  message: string;
+};
+
+function listingReadinessIssues(listing: any): ListingReadinessIssue[] {
+  const issues: ListingReadinessIssue[] = [];
+  const title = safeText(listing?.title).trim();
+  const description = safeText(listing?.description).trim();
+  const features = asStringArray(listing?.features);
+  const photos = asStringArray(listing?.photos);
+  const berRating = safeText(listing?.berRating ?? listing?.ber).trim();
+  const berNo = safeText(listing?.berNo).trim();
+  const price = Number(listing?.price);
+  const mode = safeText(listing?.mode).trim().toUpperCase();
+
+  if (!title) {
+    issues.push({ field: "title", message: "Add a public listing title." });
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    issues.push({ field: "price", message: "Add an asking price greater than zero." });
+  }
+  if (description.length < 100) {
+    issues.push({ field: "description", message: "Add a description of at least 100 characters." });
+  }
+  if (features.length < 3) {
+    issues.push({ field: "features", message: "Add at least three key features." });
+  }
+  if (!berRating && !berNo) {
+    issues.push({ field: "ber", message: "Add a BER rating or BER certificate number." });
+  }
+  if (photos.length < 3) {
+    issues.push({ field: "photos", message: "Add at least three listing photos." });
+  }
+  if (!safeText(listing?.address1).trim()) {
+    issues.push({ field: "address1", message: "Add the property address." });
+  }
+  if (!safeText(listing?.city).trim()) {
+    issues.push({ field: "city", message: "Add the city or town." });
+  }
+  if (!safeText(listing?.county).trim()) {
+    issues.push({ field: "county", message: "Add the county." });
+  }
+  if (!safeText(listing?.eircode).trim()) {
+    issues.push({ field: "eircode", message: "Add the property Eircode." });
+  }
+  if (!['BUY','RENT','SHARE'].includes(mode)) {
+    issues.push({ field: "mode", message: "Choose a valid Buy, Rent or Share market." });
+  }
+
+  return issues;
+}
+
 function getIncomingMode(payload: any): "BUY" | "RENT" | "SHARE" {
   const raw = String(payload.mode ?? payload.marketStatus ?? payload.status ?? "")
     .trim()
@@ -4242,6 +4295,17 @@ router.post("/:id/submit", requireAuth, requireVerifiedEmail, express.json(), as
       return res.status(409).json({
         ok: false,
         message: "Only drafts can be submitted.",
+      });
+    }
+
+    const readinessIssues = listingReadinessIssues(existing);
+    if (readinessIssues.length > 0) {
+      return res.status(422).json({
+        ok: false,
+        error: "LISTING_NOT_READY",
+        message: "Complete the listing readiness requirements before submitting for HAVN review.",
+        missingFields: readinessIssues.map((issue) => issue.field),
+        issues: readinessIssues,
       });
     }
 
