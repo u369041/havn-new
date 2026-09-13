@@ -83,6 +83,30 @@ function slugifyLocation(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function isSeoSafePropertySlug(value?: string | null): boolean {
+  const slug = value?.trim().toLowerCase();
+
+  if (!slug) {
+    return false;
+  }
+
+  if (slug.startsWith("havn-preview")) {
+    return false;
+  }
+
+  const blockedPatterns = [
+    /^test-/,
+    /-test-/,
+    /^demo-/,
+    /-demo-/,
+    /^sample-/,
+    /-sample-/,
+    /^1-havn-test-avenue/,
+  ];
+
+  return !blockedPatterns.some((pattern) => pattern.test(slug));
+}
+
 function buildUrlNode(entry: SitemapUrl): string {
   const lastmod = formatLastModified(entry.lastmod);
 
@@ -155,7 +179,9 @@ async function getPublishedProperties(): Promise<
 }
 
 export async function buildSitemapIndex(): Promise<string> {
-  const properties = await getPublishedProperties();
+  const properties = (await getPublishedProperties()).filter((property) =>
+    isSeoSafePropertySlug(property.slug)
+  );
 
   const latestPropertyUpdate =
     properties[0]?.updatedAt ??
@@ -186,6 +212,30 @@ export function buildPagesSitemap(): string {
     {
       loc: publicUrl("/properties.html"),
     },
+    {
+      loc: publicUrl("/properties.html?mode=buy"),
+    },
+    {
+      loc: publicUrl("/properties.html?mode=rent"),
+    },
+    {
+      loc: publicUrl("/properties.html?mode=share"),
+    },
+    {
+      loc: publicUrl("/agents.html"),
+    },
+    {
+      loc: publicUrl("/about.html"),
+    },
+    {
+      loc: publicUrl("/contact.html"),
+    },
+    {
+      loc: publicUrl("/privacy.html"),
+    },
+    {
+      loc: publicUrl("/terms.html"),
+    },
   ];
 
   return buildUrlSet(pages);
@@ -195,7 +245,7 @@ export async function buildPropertySitemap(): Promise<string> {
   const properties = await getPublishedProperties();
 
   const entries: SitemapUrl[] = properties
-    .filter((property) => Boolean(property.slug?.trim()))
+    .filter((property) => isSeoSafePropertySlug(property.slug))
     .map((property) => ({
       loc: publicUrl(
         `/property.html?slug=${encodeURIComponent(property.slug.trim())}`
@@ -215,6 +265,10 @@ export async function buildLocationSitemap(): Promise<string> {
   const latestByLocation = new Map<string, Date>();
 
   for (const property of properties) {
+    if (!isSeoSafePropertySlug(property.slug)) {
+      continue;
+    }
+
     const modifiedAt =
       property.updatedAt ??
       property.publishedAt ??
@@ -254,6 +308,8 @@ export function buildRobotsTxt(): string {
     "User-agent: *",
     "Allow: /",
     "",
+    "Disallow: /app/",
+    "Disallow: /admin/",
     "Disallow: /admin.html",
     "Disallow: /my-listings.html",
     "Disallow: /property-upload.html",
@@ -262,6 +318,7 @@ export function buildRobotsTxt(): string {
     "Disallow: /forgot-password.html",
     "Disallow: /reset-password.html",
     "Disallow: /verify-email.html",
+    "Disallow: /property.html?slug=havn-preview",
     "",
     `Sitemap: ${publicUrl("/sitemap.xml")}`,
     "",
