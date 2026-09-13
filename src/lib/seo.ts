@@ -295,10 +295,24 @@ export async function buildLocationSitemap(): Promise<string> {
 
   const entries: SitemapUrl[] = Array.from(latestByLocation.entries())
     .sort(([slugA], [slugB]) => slugA.localeCompare(slugB))
-    .map(([slug, lastmod]) => ({
-      loc: publicUrl(`/${slug}`),
-      lastmod,
-    }));
+    .flatMap(([slug, lastmod]) => [
+      {
+        loc: publicUrl(`/${slug}`),
+        lastmod,
+      },
+      {
+        loc: publicUrl(`/property-for-sale/${slug}`),
+        lastmod,
+      },
+      {
+        loc: publicUrl(`/property-to-rent/${slug}`),
+        lastmod,
+      },
+      {
+        loc: publicUrl(`/house-share/${slug}`),
+        lastmod,
+      },
+    ]);
 
   return buildUrlSet(entries);
 }
