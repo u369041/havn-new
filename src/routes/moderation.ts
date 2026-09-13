@@ -35,6 +35,101 @@ function normalizePayload(body: any): any {
   return {};
 }
 
+type ListingReadinessIssue = {
+  field: string;
+  message: string;
+};
+
+function asStringArray(raw: any): string[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((value) => {
+        if (typeof value === "string") return value.trim();
+        if (value && typeof value === "object") {
+          return safeText(value.url ?? value.secure_url ?? value.src ?? value.value).trim();
+        }
+        return safeText(value).trim();
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (!value) return [];
+
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return asStringArray(parsed);
+    } catch {
+      // Fall through to newline/comma parsing.
+    }
+
+    return value
+      .split(/\r?\n|,/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function listingReadinessIssues(listing: any): ListingReadinessIssue[] {
+  const issues: ListingReadinessIssue[] = [];
+  const title = safeText(listing?.title).trim();
+  const description = safeText(listing?.description).trim();
+  const features = asStringArray(listing?.features);
+  const photos = asStringArray(listing?.photos);
+  const berRating = safeText(listing?.berRating ?? listing?.ber).trim();
+  const berNo = safeText(listing?.berNo).trim();
+  const price = Number(listing?.price);
+  const mode = safeText(listing?.mode).trim().toUpperCase();
+
+  if (!title) {
+    issues.push({ field: "title", message: "Add a public listing title." });
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    issues.push({ field: "price", message: "Add an asking price greater than zero." });
+  }
+  if (description.length < 100) {
+    issues.push({
+      field: "description",
+      message: "Add a description of at least 100 characters.",
+    });
+  }
+  if (features.length < 3) {
+    issues.push({ field: "features", message: "Add at least three key features." });
+  }
+  if (!berRating && !berNo) {
+    issues.push({
+      field: "ber",
+      message: "Add a BER rating or BER certificate number.",
+    });
+  }
+  if (photos.length < 3) {
+    issues.push({ field: "photos", message: "Add at least three listing photos." });
+  }
+  if (!safeText(listing?.address1).trim()) {
+    issues.push({ field: "address1", message: "Add the property address." });
+  }
+  if (!safeText(listing?.city).trim()) {
+    issues.push({ field: "city", message: "Add the city or town." });
+  }
+  if (!safeText(listing?.county).trim()) {
+    issues.push({ field: "county", message: "Add the county." });
+  }
+  if (!safeText(listing?.eircode).trim()) {
+    issues.push({ field: "eircode", message: "Add the property Eircode." });
+  }
+  if (!["BUY", "RENT", "SHARE"].includes(mode)) {
+    issues.push({
+      field: "mode",
+      message: "Choose a valid Buy, Rent or Share market.",
+    });
+  }
+
+  return issues;
+}
+
 function asListingStatus(raw: any): ListingStatus | null {
   const s = safeText(raw).trim().toUpperCase();
 
@@ -212,6 +307,14 @@ router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, 
       });
     }
 
+    if (nextStatus === "PUBLISHED") {
+      return res.status(409).json({
+        ok: false,
+        error: "USE_APPROVAL_ENDPOINT",
+        message: "Listings must be published through the dedicated approval workflow.",
+      });
+    }
+
     const existing = await prisma.property.findUnique({
       where: { id },
       include: { user: true },
@@ -227,12 +330,8 @@ router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, 
       include: { user: true },
     });
 
-    if (existing.listingStatus !== nextStatus) {
-      if (nextStatus === "PUBLISHED") {
-        await sendModerationEmail(updated, "APPROVED_LIVE");
-      } else if (nextStatus === "REJECTED") {
-        await sendModerationEmail(updated, "REJECTED", reason);
-      }
+    if (existing.listingStatus !== nextStatus && nextStatus === "REJECTED") {
+      await sendModerationEmail(updated, "REJECTED", reason);
     }
 
     return res.json({ ok: true, item: updated });
@@ -268,6 +367,17 @@ router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req
       return res.status(409).json({
         ok: false,
         message: `Cannot approve from status ${existing.listingStatus}`,
+      });
+    }
+
+    const readinessIssues = listingReadinessIssues(existing);
+    if (readinessIssues.length > 0) {
+      return res.status(422).json({
+        ok: false,
+        error: "LISTING_NOT_READY_FOR_PUBLICATION",
+        message: "This listing no longer meets HAVN publication requirements.",
+        missingFields: readinessIssues.map((issue) => issue.field),
+        issues: readinessIssues,
       });
     }
 
