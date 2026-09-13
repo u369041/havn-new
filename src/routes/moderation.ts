@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import requireAuth from "../middleware/requireAuth";
 import requireAdminAuth from "../middleware/adminAuth";
 import { sendUserListingEmail } from "../lib/mail";
+import { createPropertyPreviewToken } from "../services/propertyPreviewToken";
 
 const router = Router();
 router.use(express.json());
@@ -128,6 +129,13 @@ function listingReadinessIssues(listing: any): ListingReadinessIssue[] {
   }
 
   return issues;
+}
+
+function expectedPublicModeForInventoryTransaction(raw: any): "BUY" | "RENT" | "SHARE" {
+  const transactionType = safeText(raw).trim().toUpperCase();
+  if (transactionType === "SHARE") return "SHARE";
+  if (transactionType === "RENTAL") return "RENT";
+  return "BUY";
 }
 
 function asListingStatus(raw: any): ListingStatus | null {
@@ -341,6 +349,120 @@ router.patch("/properties/:id", requireAuth, requireAdminAuth, async (req: any, 
   }
 });
 /**
+ * GET /api/admin/moderation/properties/:id/review
+ * Fresh admin-only moderation detail used by the Listing Approvals workspace.
+ */
+router.get("/properties/:id/review", requireAuth, requireAdminAuth, async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const item = await prisma.property.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+        agency: {
+          select: { id: true, name: true },
+        },
+        inventoryProperty: {
+          select: { id: true, agencyId: true, transactionType: true },
+        },
+      },
+    });
+
+    if (!item) {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+
+    const issues = listingReadinessIssues(item);
+    const actualMode = safeText(item.mode).trim().toUpperCase();
+    const expectedMode = item.inventoryProperty
+      ? expectedPublicModeForInventoryTransaction(item.inventoryProperty.transactionType)
+      : null;
+
+    return res.json({
+      ok: true,
+      item,
+      readiness: {
+        ready: issues.length === 0,
+        missingFields: issues.map((issue) => issue.field),
+        issues,
+      },
+      marketIntegrity: {
+        actualMode,
+        expectedMode,
+        aligned: expectedMode ? actualMode === expectedMode : true,
+      },
+    });
+  } catch (err: any) {
+    console.error("admin listing review error", err);
+    return res.status(500).json({ ok: false, message: err?.message || "Server error" });
+  }
+});
+
+/**
+ * POST /api/admin/moderation/properties/:id/preview-token
+ * Admin-only access to the same signed Inventory -> property.html preview renderer.
+ */
+router.post("/properties/:id/preview-token", requireAuth, requireAdminAuth, async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, message: "Invalid id" });
+    }
+
+    const property = await prisma.property.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        listingStatus: true,
+        inventoryPropertyId: true,
+        agencyId: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, message: "Not found" });
+    }
+    if (!property.inventoryPropertyId || !property.agencyId) {
+      return res.status(409).json({
+        ok: false,
+        error: "PREVIEW_SOURCE_UNAVAILABLE",
+        message: "This listing is not linked to an Inventory property, so a private Inventory preview cannot be created.",
+      });
+    }
+
+    let signed;
+    try {
+      signed = createPropertyPreviewToken(property.inventoryPropertyId, property.agencyId);
+    } catch (error: any) {
+      if (String(error?.message || "").includes("PROPERTY_PREVIEW_SECRET")) {
+        return res.status(500).json({
+          ok: false,
+          error: "PREVIEW_CONFIGURATION_ERROR",
+          message: "Listing preview is not configured",
+        });
+      }
+      throw error;
+    }
+
+    return res.json({
+      ok: true,
+      token: signed.token,
+      expiresAt: signed.expiresAt.toISOString(),
+      url: `/property.html?slug=${encodeURIComponent(signed.token)}`,
+    });
+  } catch (err: any) {
+    console.error("admin listing preview error", err);
+    return res.status(500).json({ ok: false, message: err?.message || "Server error" });
+  }
+});
+
+/**
  * POST /api/admin/properties/:id/approve
  */
 router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req: any, res) => {
@@ -356,7 +478,15 @@ router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req
 
     const existing = await prisma.property.findUnique({
       where: { id },
-      include: { user: true },
+      include: {
+        user: true,
+        inventoryProperty: {
+          select: {
+            id: true,
+            transactionType: true,
+          },
+        },
+      },
     });
 
     if (!existing) {
@@ -379,6 +509,24 @@ router.post("/properties/:id/approve", requireAuth, requireAdminAuth, async (req
         missingFields: readinessIssues.map((issue) => issue.field),
         issues: readinessIssues,
       });
+    }
+
+    if (existing.inventoryProperty) {
+      const expectedMode = expectedPublicModeForInventoryTransaction(
+        existing.inventoryProperty.transactionType
+      );
+      const actualMode = safeText(existing.mode).trim().toUpperCase();
+
+      if (actualMode !== expectedMode) {
+        return res.status(409).json({
+          ok: false,
+          error: "LISTING_MODE_MISMATCH",
+          message: "The listing market does not match its linked Inventory transaction type.",
+          expectedMode,
+          actualMode,
+          inventoryPropertyId: existing.inventoryProperty.id,
+        });
+      }
     }
 
     const now = new Date();
