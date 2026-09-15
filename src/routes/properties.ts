@@ -2878,6 +2878,7 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10), 1), 50);
 
     const q = String(req.query.q || "").trim();
+    const seoLocationRaw = String(req.query.seoLocation || "").trim();
     const county = String(req.query.county || "").trim();
     const city = String(req.query.city || "").trim();
     const type = String(req.query.type || "").trim();
@@ -2887,12 +2888,29 @@ router.get("/", requireAuth.optional, async (req: any, res) => {
       where.mode = clampMode(modeRaw);
     }
 
-    if (q) {
+    const normalizePublicLocationSearch = (raw: string) => {
+      const cleaned = safeText(raw)
+        .replace(/-/g, " ")
+        .replace(/,/g, " ")
+        .replace(/\b(co|county)\.?\s+dublin\b/gi, " ")
+        .replace(/\b(co|county)\.?\s+[a-z]+\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return cleaned || safeText(raw).replace(/-/g, " ").replace(/\s+/g, " ").trim();
+    };
+
+    const locationSearch = normalizePublicLocationSearch(seoLocationRaw || q);
+
+    if (locationSearch) {
       where.OR = [
-        { title: { contains: q, mode: "insensitive" } },
-        { city: { contains: q, mode: "insensitive" } },
-        { county: { contains: q, mode: "insensitive" } },
-        { eircode: { contains: q, mode: "insensitive" } },
+        { title: { contains: locationSearch, mode: "insensitive" } },
+        { address1: { contains: locationSearch, mode: "insensitive" } },
+        { address2: { contains: locationSearch, mode: "insensitive" } },
+        { city: { contains: locationSearch, mode: "insensitive" } },
+        { county: { contains: locationSearch, mode: "insensitive" } },
+        { eircode: { contains: locationSearch, mode: "insensitive" } },
+        { slug: { contains: locationSearch, mode: "insensitive" } },
       ];
     }
 
